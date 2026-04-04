@@ -3,208 +3,297 @@ const config = require('../config');
 const logger = require('../utils/logger');
 
 /**
- * ICT (Inner Circle Trading) 전략
+ * ICT (Inner Circle Trading) 멀티 타임프레임 전략
+ *
+ * 3단계 분석:
+ *  HTF (4h) - 전체 방향 판단 (트렌드 바이어스)
+ *  MTF (1h) - 구조 확인 (MSS, OB, FVG)
+ *  LTF (15m) - 정밀 진입 타이밍 (OTE, Liquidity Sweep)
  *
  * 진입 조건 (Long):
- *  1. Kill Zone 시간대 내
- *  2. Bullish MSS (시장 구조 전환) 또는 Bullish Liquidity Sweep 감지
- *  3. 현재가가 Bullish Order Block 또는 Bullish FVG 영역 내
- *  4. 현재가가 OTE (0.62~0.79 피보나치 되돌림) 구간 내
+ *  1. HTF: Bullish 트렌드 (Higher High, Higher Low)
+ *  2. MTF: Bullish MSS + Bullish OB 또는 FVG 존재
+ *  3. LTF: Kill Zone 내 + OTE 구간 진입 또는 Liquidity Sweep
  *
  * 진입 조건 (Short):
- *  1. Kill Zone 시간대 내
- *  2. Bearish MSS 또는 Bearish Liquidity Sweep 감지
- *  3. 현재가가 Bearish Order Block 또는 Bearish FVG 영역 내
- *  4. 현재가가 OTE 구간 내
- *
- * 손절/익절:
- *  - SL: 오더블록/FVG 반대편 또는 설정 비율
- *  - TP: 반대편 유동성 레벨 또는 설정 비율 (R:R 최소 1:2)
+ *  1. HTF: Bearish 트렌드 (Lower High, Lower Low)
+ *  2. MTF: Bearish MSS + Bearish OB 또는 FVG 존재
+ *  3. LTF: Kill Zone 내 + OTE 구간 진입 또는 Liquidity Sweep
  */
 class IctStrategy {
   constructor() {
-    this.name = 'ICT Strategy';
+    this.name = 'ICT Multi-Timeframe Strategy';
   }
 
   /**
-   * 캔들 데이터를 분석하여 매매 신호 생성
-   * @param {Array} candles - OHLCV 캔들 데이터
-   * @returns {{ signal: 'long'|'short'|null, reason: string, entry: number, sl: number, tp: number, confluence: string[] }}
+   * 멀티 타임프레임 분석
+   * @param {Object} candleData - { htf: [], mtf: [], ltf: [] }
    */
-  analyze(candles) {
-    if (candles.length < config.ict.orderBlockLookback) {
-      logger.warn('캔들 데이터 부족');
-      return { signal: null, reason: '데이터 부족' };
+  analyze(candleData) {
+    const { htf, mtf, ltf } = candleData;
+
+    if (!htf || !mtf || !ltf) {
+      return { signal: null, reason: '멀티 타임프레임 데이터 부족' };
     }
 
-    const currentPrice = candles[candles.length - 1].close;
+    if (htf.length < config.ict.orderBlockLookback ||
+        mtf.length < config.ict.orderBlockLookback ||
+        ltf.length < config.ict.orderBlockLookback) {
+      return { signal: null, reason: '캔들 데이터 부족' };
+    }
+
+    const currentPrice = ltf[ltf.length - 1].close;
     const confluence = [];
 
-    // 1. Kill Zone 확인
-    const killZone = indicators.isInKillZone();
-    if (!killZone.active) {
-      return { signal: null, reason: `Kill Zone 외 시간대 (현재 비활성)` };
+    // ========== STEP 1: HTF (4h) 방향 판단 ==========
+    const htfBias = this._analyzeHTF(htf);
+    if (!htfBias.direction) {
+      return { signal: null, reason: `HTF 방향 불명확: ${htfBias.reason}` };
     }
-    confluence.push(`Kill Zone: ${killZone.zone}`);
+    confluence.push(`HTF(${config.timeframes.htf}) ${htfBias.direction.toUpperCase()} 바이어스`);
+    logger.debug(`[HTF] ${htfBias.direction} - ${htfBias.reason}`);
 
-    // 2. 스윙 포인트 탐색
+    // ========== STEP 2: MTF (1h) 구조 확인 ==========
+    const mtfStructure = this._analyzeMTF(mtf, htfBias.direction);
+    if (!mtfStructure.confirmed) {
+      return { signal: null, reason: `MTF 구조 미확인: ${mtfStructure.reason}`, confluence };
+    }
+    confluence.push(...mtfStructure.confluence);
+    logger.debug(`[MTF] 구조 확인됨 - ${mtfStructure.confluence.join(', ')}`);
+
+    // ========== STEP 3: LTF (15m) 진입 타이밍 ==========
+    const ltfEntry = this._analyzeLTF(ltf, htfBias.direction, currentPrice);
+    if (!ltfEntry.ready) {
+      return { signal: null, reason: `LTF 진입 조건 미충족: ${ltfEntry.reason}`, confluence };
+    }
+    confluence.push(...ltfEntry.confluence);
+    logger.debug(`[LTF] 진입 준비 - ${ltfEntry.confluence.join(', ')}`);
+
+    // ========== 최종 신호 생성 ==========
+    const direction = htfBias.direction; // 'bullish' or 'bearish'
+    const signal = direction === 'bullish' ? 'long' : 'short';
+
+    // SL/TP 계산
+    const { sl, tp } = this._calculateSLTP(
+      currentPrice, direction, mtfStructure, ltfEntry
+    );
+
+    logger.info(`[MTF 신호] ${signal.toUpperCase()} | ${confluence.length}개 컨플루언스`);
+
+    return {
+      signal,
+      reason: `ICT MTF ${signal.toUpperCase()} - HTF→MTF→LTF ${confluence.length}개 컨플루언스`,
+      entry: currentPrice,
+      sl: parseFloat(sl.toFixed(2)),
+      tp: parseFloat(tp.toFixed(2)),
+      confluence,
+    };
+  }
+
+  /**
+   * HTF (4h): 전체 트렌드 방향 판단
+   * - Higher High + Higher Low = Bullish
+   * - Lower High + Lower Low = Bearish
+   */
+  _analyzeHTF(candles) {
     const swingHighs = indicators.findSwingHighs(candles, config.ict.structureShiftBars);
     const swingLows = indicators.findSwingLows(candles, config.ict.structureShiftBars);
 
     if (swingHighs.length < 2 || swingLows.length < 2) {
-      return { signal: null, reason: '스윙 포인트 부족' };
+      return { direction: null, reason: 'HTF 스윙 포인트 부족' };
     }
 
-    // 3. Market Structure Shift 감지
+    const lastHigh = swingHighs[swingHighs.length - 1].price;
+    const prevHigh = swingHighs[swingHighs.length - 2].price;
+    const lastLow = swingLows[swingLows.length - 1].price;
+    const prevLow = swingLows[swingLows.length - 2].price;
+
+    const higherHigh = lastHigh > prevHigh;
+    const higherLow = lastLow > prevLow;
+    const lowerHigh = lastHigh < prevHigh;
+    const lowerLow = lastLow < prevLow;
+
+    if (higherHigh && higherLow) {
+      return { direction: 'bullish', reason: 'HH + HL (상승 구조)', swingHighs, swingLows };
+    }
+    if (lowerHigh && lowerLow) {
+      return { direction: 'bearish', reason: 'LH + LL (하락 구조)', swingHighs, swingLows };
+    }
+
+    // 단일 조건이라도 MSS로 판단
     const mss = indicators.detectMarketStructureShift(candles, swingHighs, swingLows);
+    if (mss === 'bullish') {
+      return { direction: 'bullish', reason: 'HTF Bullish MSS', swingHighs, swingLows };
+    }
+    if (mss === 'bearish') {
+      return { direction: 'bearish', reason: 'HTF Bearish MSS', swingHighs, swingLows };
+    }
 
-    // 4. Liquidity Sweep 감지
-    const sweeps = indicators.detectLiquiditySweep(candles, swingHighs, swingLows);
+    return { direction: null, reason: '트렌드 불명확 (횡보 구간)' };
+  }
 
-    // 5. Order Block 탐색
+  /**
+   * MTF (1h): 구조 확인
+   * HTF 방향과 일치하는 MSS + OB 또는 FVG 존재 여부
+   */
+  _analyzeMTF(candles, htfDirection) {
+    const confluence = [];
+    const swingHighs = indicators.findSwingHighs(candles, config.ict.structureShiftBars);
+    const swingLows = indicators.findSwingLows(candles, config.ict.structureShiftBars);
+
+    if (swingHighs.length < 2 || swingLows.length < 2) {
+      return { confirmed: false, reason: 'MTF 스윙 포인트 부족' };
+    }
+
+    // MSS 확인
+    const mss = indicators.detectMarketStructureShift(candles, swingHighs, swingLows);
+    const mssAligned = mss === htfDirection;
+
+    if (mssAligned) {
+      confluence.push(`MTF(${config.timeframes.mtf}) ${htfDirection} MSS 확인`);
+    }
+
+    // Order Block 탐색
     const orderBlocks = indicators.findOrderBlocks(candles);
+    const relevantOBs = htfDirection === 'bullish' ? orderBlocks.bullish : orderBlocks.bearish;
+    if (relevantOBs.length > 0) {
+      const latestOB = relevantOBs[relevantOBs.length - 1];
+      confluence.push(`MTF OB [${latestOB.low.toFixed(2)} - ${latestOB.high.toFixed(2)}]`);
+    }
 
-    // 6. Fair Value Gap 탐색
+    // FVG 탐색
     const fvgs = indicators.findFairValueGaps(candles);
+    const relevantFVGs = htfDirection === 'bullish' ? fvgs.bullish : fvgs.bearish;
+    if (relevantFVGs.length > 0) {
+      const latestFVG = relevantFVGs[relevantFVGs.length - 1];
+      confluence.push(`MTF FVG [${latestFVG.bottom.toFixed(2)} - ${latestFVG.top.toFixed(2)}]`);
+    }
 
-    // 7. OTE 계산
+    // MSS + (OB 또는 FVG) 필요
+    const hasStructure = mssAligned || relevantOBs.length > 0;
+    const hasPOI = relevantOBs.length > 0 || relevantFVGs.length > 0; // Point of Interest
+
+    return {
+      confirmed: hasStructure && hasPOI,
+      reason: hasStructure && hasPOI ? '구조 확인됨' : 'MSS 또는 POI 부족',
+      confluence,
+      orderBlocks: relevantOBs,
+      fvgs: relevantFVGs,
+      swingHighs,
+      swingLows,
+    };
+  }
+
+  /**
+   * LTF (15m): 정밀 진입 타이밍
+   * Kill Zone + OTE 구간 또는 Liquidity Sweep
+   */
+  _analyzeLTF(candles, htfDirection, currentPrice) {
+    const confluence = [];
+
+    // Kill Zone 확인
+    const killZone = indicators.isInKillZone();
+    if (!killZone.active) {
+      return { ready: false, reason: 'Kill Zone 외 시간대' };
+    }
+    confluence.push(`Kill Zone: ${killZone.zone}`);
+
+    const swingHighs = indicators.findSwingHighs(candles, config.ict.structureShiftBars);
+    const swingLows = indicators.findSwingLows(candles, config.ict.structureShiftBars);
+
+    if (swingHighs.length < 2 || swingLows.length < 2) {
+      return { ready: false, reason: 'LTF 스윙 포인트 부족' };
+    }
+
+    let entryConfirmed = false;
+
+    // Liquidity Sweep 확인
+    const sweeps = indicators.detectLiquiditySweep(candles, swingHighs, swingLows);
+    const relevantSweep = sweeps.find((s) => s.type === htfDirection);
+    if (relevantSweep) {
+      confluence.push(`LTF(${config.timeframes.ltf}) ${htfDirection} Liquidity Sweep @ ${relevantSweep.level.toFixed(2)}`);
+      entryConfirmed = true;
+    }
+
+    // OTE 구간 확인
     const recentHigh = swingHighs[swingHighs.length - 1].price;
     const recentLow = swingLows[swingLows.length - 1].price;
     const ote = indicators.calculateOTE(recentHigh, recentLow);
 
-    // === Long 신호 판단 ===
-    const longSignal = this._checkLong(currentPrice, mss, sweeps, orderBlocks, fvgs, ote, confluence);
-    if (longSignal) return longSignal;
+    if (htfDirection === 'bullish') {
+      if (currentPrice >= ote.bullish.lower && currentPrice <= ote.bullish.upper) {
+        confluence.push(`LTF OTE [${ote.bullish.lower.toFixed(2)} - ${ote.bullish.upper.toFixed(2)}]`);
+        entryConfirmed = true;
+      }
+    } else {
+      if (currentPrice >= ote.bearish.lower && currentPrice <= ote.bearish.upper) {
+        confluence.push(`LTF OTE [${ote.bearish.lower.toFixed(2)} - ${ote.bearish.upper.toFixed(2)}]`);
+        entryConfirmed = true;
+      }
+    }
 
-    // === Short 신호 판단 ===
-    const shortSignal = this._checkShort(currentPrice, mss, sweeps, orderBlocks, fvgs, ote, confluence);
-    if (shortSignal) return shortSignal;
+    // LTF MSS 확인 (추가 컨플루언스)
+    const ltfMss = indicators.detectMarketStructureShift(candles, swingHighs, swingLows);
+    if (ltfMss === htfDirection) {
+      confluence.push(`LTF ${htfDirection} MSS`);
+      entryConfirmed = true;
+    }
 
-    return { signal: null, reason: 'ICT 조건 불충족', confluence };
+    // LTF FVG 확인
+    const ltfFvgs = indicators.findFairValueGaps(candles);
+    const relevantFVGs = htfDirection === 'bullish' ? ltfFvgs.bullish : ltfFvgs.bearish;
+    const inFVG = relevantFVGs.find((fvg) =>
+      currentPrice >= fvg.bottom && currentPrice <= fvg.top
+    );
+    if (inFVG) {
+      confluence.push(`LTF FVG [${inFVG.bottom.toFixed(2)} - ${inFVG.top.toFixed(2)}]`);
+      entryConfirmed = true;
+    }
+
+    return {
+      ready: entryConfirmed,
+      reason: entryConfirmed ? '진입 조건 충족' : 'OTE/Sweep/MSS 미충족',
+      confluence,
+      ote,
+      swingHighs,
+      swingLows,
+    };
   }
 
-  _checkLong(price, mss, sweeps, orderBlocks, fvgs, ote, baseConfluence) {
-    const confluence = [...baseConfluence];
-    let structureSignal = false;
+  /**
+   * SL/TP 계산
+   * SL: MTF OB/FVG 기반, TP: R:R = 1:3
+   */
+  _calculateSLTP(price, direction, mtfStructure, ltfEntry) {
+    let sl, tp;
 
-    // MSS 확인
-    if (mss === 'bullish') {
-      confluence.push('Bullish MSS (시장 구조 전환)');
-      structureSignal = true;
+    if (direction === 'bullish') {
+      // SL: MTF OB 하단 또는 LTF 스윙 로우 아래
+      if (mtfStructure.orderBlocks.length > 0) {
+        const ob = mtfStructure.orderBlocks[mtfStructure.orderBlocks.length - 1];
+        sl = ob.low * (1 - config.stopLossPercent / 100 * 0.3);
+      } else if (ltfEntry.swingLows && ltfEntry.swingLows.length > 0) {
+        sl = ltfEntry.swingLows[ltfEntry.swingLows.length - 1].price * (1 - 0.001);
+      } else {
+        sl = price * (1 - config.stopLossPercent / 100);
+      }
+      const risk = price - sl;
+      tp = price + risk * 3; // R:R = 1:3
+    } else {
+      // SL: MTF OB 상단 또는 LTF 스윙 하이 위
+      if (mtfStructure.orderBlocks.length > 0) {
+        const ob = mtfStructure.orderBlocks[mtfStructure.orderBlocks.length - 1];
+        sl = ob.high * (1 + config.stopLossPercent / 100 * 0.3);
+      } else if (ltfEntry.swingHighs && ltfEntry.swingHighs.length > 0) {
+        sl = ltfEntry.swingHighs[ltfEntry.swingHighs.length - 1].price * (1 + 0.001);
+      } else {
+        sl = price * (1 + config.stopLossPercent / 100);
+      }
+      const risk = sl - price;
+      tp = price - risk * 3; // R:R = 1:3
     }
 
-    // Liquidity Sweep 확인
-    const bullishSweep = sweeps.find((s) => s.type === 'bullish');
-    if (bullishSweep) {
-      confluence.push(`Bullish Liquidity Sweep @ ${bullishSweep.level.toFixed(2)}`);
-      structureSignal = true;
-    }
-
-    if (!structureSignal) return null;
-
-    // Order Block 영역 확인
-    const inBullishOB = orderBlocks.bullish.find(
-      (ob) => price >= ob.low && price <= ob.high
-    );
-    if (inBullishOB) {
-      confluence.push(`Bullish OB [${inBullishOB.low.toFixed(2)} - ${inBullishOB.high.toFixed(2)}]`);
-    }
-
-    // FVG 영역 확인
-    const inBullishFVG = fvgs.bullish.find(
-      (fvg) => price >= fvg.bottom && price <= fvg.top
-    );
-    if (inBullishFVG) {
-      confluence.push(`Bullish FVG [${inBullishFVG.bottom.toFixed(2)} - ${inBullishFVG.top.toFixed(2)}]`);
-    }
-
-    // OTE 구간 확인
-    const inOTE = price >= ote.bullish.lower && price <= ote.bullish.upper;
-    if (inOTE) {
-      confluence.push(`OTE 구간 [${ote.bullish.lower.toFixed(2)} - ${ote.bullish.upper.toFixed(2)}]`);
-    }
-
-    // 최소 3개 컨플루언스 충족 시 진입 (Kill Zone + 구조 + OB/FVG/OTE 중 하나)
-    if (confluence.length >= 3 && (inBullishOB || inBullishFVG || inOTE)) {
-      const sl = inBullishOB
-        ? inBullishOB.low * (1 - config.stopLossPercent / 100 * 0.5)
-        : price * (1 - config.stopLossPercent / 100);
-      const riskAmount = price - sl;
-      const tp = price + riskAmount * 2; // R:R = 1:2
-
-      return {
-        signal: 'long',
-        reason: `ICT Long - ${confluence.length}개 컨플루언스 충족`,
-        entry: price,
-        sl: parseFloat(sl.toFixed(2)),
-        tp: parseFloat(tp.toFixed(2)),
-        confluence,
-      };
-    }
-
-    return null;
-  }
-
-  _checkShort(price, mss, sweeps, orderBlocks, fvgs, ote, baseConfluence) {
-    const confluence = [...baseConfluence];
-    let structureSignal = false;
-
-    // MSS 확인
-    if (mss === 'bearish') {
-      confluence.push('Bearish MSS (시장 구조 전환)');
-      structureSignal = true;
-    }
-
-    // Liquidity Sweep 확인
-    const bearishSweep = sweeps.find((s) => s.type === 'bearish');
-    if (bearishSweep) {
-      confluence.push(`Bearish Liquidity Sweep @ ${bearishSweep.level.toFixed(2)}`);
-      structureSignal = true;
-    }
-
-    if (!structureSignal) return null;
-
-    // Order Block 영역 확인
-    const inBearishOB = orderBlocks.bearish.find(
-      (ob) => price >= ob.low && price <= ob.high
-    );
-    if (inBearishOB) {
-      confluence.push(`Bearish OB [${inBearishOB.low.toFixed(2)} - ${inBearishOB.high.toFixed(2)}]`);
-    }
-
-    // FVG 영역 확인
-    const inBearishFVG = fvgs.bearish.find(
-      (fvg) => price >= fvg.bottom && price <= fvg.top
-    );
-    if (inBearishFVG) {
-      confluence.push(`Bearish FVG [${inBearishFVG.bottom.toFixed(2)} - ${inBearishFVG.top.toFixed(2)}]`);
-    }
-
-    // OTE 구간 확인
-    const inOTE = price >= ote.bearish.lower && price <= ote.bearish.upper;
-    if (inOTE) {
-      confluence.push(`OTE 구간 [${ote.bearish.lower.toFixed(2)} - ${ote.bearish.upper.toFixed(2)}]`);
-    }
-
-    // 최소 3개 컨플루언스 충족 시 진입
-    if (confluence.length >= 3 && (inBearishOB || inBearishFVG || inOTE)) {
-      const sl = inBearishOB
-        ? inBearishOB.high * (1 + config.stopLossPercent / 100 * 0.5)
-        : price * (1 + config.stopLossPercent / 100);
-      const riskAmount = sl - price;
-      const tp = price - riskAmount * 2; // R:R = 1:2
-
-      return {
-        signal: 'short',
-        reason: `ICT Short - ${confluence.length}개 컨플루언스 충족`,
-        entry: price,
-        sl: parseFloat(sl.toFixed(2)),
-        tp: parseFloat(tp.toFixed(2)),
-        confluence,
-      };
-    }
-
-    return null;
+    return { sl, tp };
   }
 }
 

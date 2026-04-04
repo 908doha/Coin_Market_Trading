@@ -24,7 +24,7 @@ class TradingBot {
     logger.info(`거래쌍: ${config.tradePair}`);
     logger.info(`레버리지: x${config.leverage}`);
     logger.info(`포지션 크기: ${config.positionSizeUsdt} USDT`);
-    logger.info(`캔들 주기: ${config.candleInterval}`);
+    logger.info(`타임프레임: HTF=${config.timeframes.htf} MTF=${config.timeframes.mtf} LTF=${config.timeframes.ltf}`);
     logger.info(`스케줄: ${config.cronSchedule}`);
     logger.info('='.repeat(60));
 
@@ -90,20 +90,26 @@ class TradingBot {
         }
       }
 
-      // 2. 캔들 데이터 조회
-      const candles = await gateClient.getCandles(
-        config.tradePair,
-        config.candleInterval,
-        200
-      );
+      // 2. 멀티 타임프레임 캔들 데이터 조회 (HTF, MTF, LTF 동시)
+      const [htfCandles, mtfCandles, ltfCandles] = await Promise.all([
+        gateClient.getCandles(config.tradePair, config.timeframes.htf, 200),
+        gateClient.getCandles(config.tradePair, config.timeframes.mtf, 200),
+        gateClient.getCandles(config.tradePair, config.timeframes.ltf, 200),
+      ]);
 
-      if (!candles || candles.length < 50) {
+      if (!htfCandles || htfCandles.length < 50 ||
+          !mtfCandles || mtfCandles.length < 50 ||
+          !ltfCandles || ltfCandles.length < 50) {
         logger.warn('캔들 데이터 부족');
         return;
       }
 
-      // 3. ICT 전략 분석
-      const signal = this.strategy.analyze(candles);
+      // 3. ICT 멀티 타임프레임 전략 분석
+      const signal = this.strategy.analyze({
+        htf: htfCandles,
+        mtf: mtfCandles,
+        ltf: ltfCandles,
+      });
 
       if (!signal.signal) {
         logger.debug(`신호 없음: ${signal.reason}`);

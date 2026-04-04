@@ -16,6 +16,13 @@ const config = {
   takeProfitPercent: parseFloat(process.env.TAKE_PROFIT_PERCENT) || 4,
   maxDailyLossUsdt: parseFloat(process.env.MAX_DAILY_LOSS_USDT) || 300,
 
+  // Multi-Timeframe (HTF → MTF → LTF)
+  timeframes: {
+    htf: process.env.HTF_INTERVAL || '4h',   // 상위: 방향 판단
+    mtf: process.env.MTF_INTERVAL || '1h',   // 중위: 구조 확인
+    ltf: process.env.LTF_INTERVAL || '15m',  // 하위: 진입 타이밍
+  },
+
   // Bot
   candleInterval: process.env.CANDLE_INTERVAL || '15m',
   cronSchedule: process.env.BOT_CRON_SCHEDULE || '*/1 * * * *',

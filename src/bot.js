@@ -5,12 +5,14 @@ const config = require('./config');
 const gateClient = require('./api/gateClient');
 const IctStrategy = require('./strategies/ictStrategy');
 const OrderManager = require('./services/orderManager');
+const TelegramService = require('./services/telegram');
 const logger = require('./utils/logger');
 
 class TradingBot {
   constructor() {
     this.strategy = new IctStrategy();
     this.orderManager = new OrderManager();
+    this.telegram = new TelegramService(this);
     this.activePosition = null; // { direction, sl, tp }
     this.isRunning = false;
   }
@@ -53,6 +55,9 @@ class TradingBot {
       // 포지션 없음
     }
 
+    // 텔레그램 봇 초기화
+    this.telegram.init();
+
     // 크론 스케줄 실행
     this.isRunning = true;
     cron.schedule(config.cronSchedule, () => this._tick());
@@ -80,6 +85,7 @@ class TradingBot {
 
         if (result.action === 'sl_hit' || result.action === 'tp_hit') {
           logger.info(`포지션 종료: ${result.action} | PnL: ${result.pnl.toFixed(2)} USDT`);
+          await this.telegram.notifyClose(result.action, result.pnl, result.price);
           this.activePosition = null;
         } else if (result.action === 'holding') {
           // 포지션 유지 중 - 새 진입 불가
@@ -126,11 +132,16 @@ class TradingBot {
           tp: result.tp,
         };
         logger.info(`포지션 진입 완료: ${result.direction} | SL: ${result.sl} | TP: ${result.tp}`);
+        await this.telegram.notifyEntry(signal, result);
       } else {
         logger.debug(`주문 미실행: ${result.reason}`);
+        if (result.reason === '일일 최대 손실 한도 도달') {
+          await this.telegram.notifyDailyLossLimit(this.orderManager.dailyPnl);
+        }
       }
     } catch (err) {
       logger.error(`틱 오류: ${err.message}`);
+      await this.telegram.notifyError(err.message);
     }
   }
 
@@ -162,12 +173,14 @@ bot.start().catch((err) => {
 // 프로세스 종료 시 정리
 process.on('SIGINT', async () => {
   logger.info('SIGINT 수신 - 봇 종료');
+  await bot.telegram.shutdown();
   await bot.stop();
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
   logger.info('SIGTERM 수신 - 봇 종료');
+  await bot.telegram.shutdown();
   await bot.stop();
   process.exit(0);
 });

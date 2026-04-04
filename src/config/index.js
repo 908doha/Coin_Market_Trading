@@ -23,6 +23,10 @@ const config = {
     ltf: process.env.LTF_INTERVAL || '15m',  // 하위: 진입 타이밍
   },
 
+  // Telegram
+  telegramToken: process.env.TELEGRAM_BOT_TOKEN || '',
+  telegramChatId: process.env.TELEGRAM_CHAT_ID || '',
+
   // Bot
   candleInterval: process.env.CANDLE_INTERVAL || '15m',
   cronSchedule: process.env.BOT_CRON_SCHEDULE || '*/1 * * * *',

@@ -1,11 +1,25 @@
 const { Pool } = require('pg');
 
-if (!process.env.DATABASE_URL) {
-  throw new Error('DATABASE_URL environment variable is required');
-}
+// 개별 환경변수 우선, 없으면 DATABASE_URL 파싱
+function buildConfig() {
+  // 방법 1: 개별 파라미터 (특수문자 비밀번호에 안전)
+  if (process.env.DB_HOST) {
+    return {
+      host:              process.env.DB_HOST,
+      port:              parseInt(process.env.DB_PORT) || 5432,
+      database:          process.env.DB_NAME || 'postgres',
+      user:              process.env.DB_USER || 'postgres',
+      password:          process.env.DB_PASSWORD,
+      ssl:               { rejectUnauthorized: false },
+      max:               10,
+      idleTimeoutMillis: 30000,
+    };
+  }
 
-// URL 파싱 → 특수문자 포함 비밀번호도 안전하게 처리
-function buildConfig(url) {
+  // 방법 2: DATABASE_URL
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error('DB_HOST 또는 DATABASE_URL 환경변수가 필요합니다.');
+
   try {
     const u = new URL(url);
     return {
@@ -23,7 +37,7 @@ function buildConfig(url) {
   }
 }
 
-const pool = new Pool(buildConfig(process.env.DATABASE_URL));
+const pool = new Pool(buildConfig());
 
 pool.on('error', (err) => {
   console.error('PostgreSQL pool error:', err.message);
@@ -35,7 +49,6 @@ function toPostgresParams(sql) {
   return sql.replace(/\?/g, () => `$${++i}`);
 }
 
-// SQLite-호환 DB 인터페이스
 const db = {
   async get(sql, ...params) {
     const { rows } = await pool.query(toPostgresParams(sql), params.flat());

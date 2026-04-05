@@ -9,7 +9,8 @@ export { Card }    from './components/Card';
 export { Chip }    from './components/Chip';
 export { Badge }   from './components/Badge';
 export { Divider } from './components/Divider';
-export { Avatar }  from './components/Avatar';
+export { Avatar }    from './components/Avatar';
+export { GlassView, GlassCard } from './components/Glass';
 
 // Types
 export type { TextProps }    from './components/Text';

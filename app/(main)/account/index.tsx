@@ -2,43 +2,17 @@ import React from 'react';
 import { View, StyleSheet, ScrollView, Pressable, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Text, Card, Divider, Badge } from '@/design-system';
-import { colors, spacing, borderRadius } from '@/design-system/tokens';
+import { Text, GlassCard } from '@/design-system';
 import { accountService, agentService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAuth } from '@/store/auth';
 import { formatKRW } from '@/utils/format';
 import { RISK_LABELS } from '@/constants';
 
-function MenuRow({ label, sub, onPress, rightElement, danger }: {
-  label: string; sub?: string; onPress?: () => void;
-  rightElement?: React.ReactNode; danger?: boolean;
-}) {
-  return (
-    <Pressable onPress={onPress}
-      style={({ pressed }) => [styles.menuRow, pressed && { backgroundColor: colors.interactive.pressed }]}>
-      <View style={{ flex: 1 }}>
-        <Text variant="body1" color={danger ? colors.negative.default : colors.text.primary}>{label}</Text>
-        {sub && <Text variant="caption1" color={colors.text.tertiary} style={{ marginTop: 2 }}>{sub}</Text>}
-      </View>
-      {rightElement ?? <Text variant="body2" color={colors.text.disabled}>›</Text>}
-    </Pressable>
-  );
-}
-
-function SectionTitle({ label }: { label: string }) {
-  return (
-    <Text variant="caption1Medium" color={colors.text.tertiary}
-      style={{ paddingHorizontal: spacing[5], paddingTop: spacing[6], paddingBottom: spacing[2] }}>
-      {label}
-    </Text>
-  );
-}
-
 const agentStatusMap = {
-  running: { label: '운용중',   variant: 'positive' as const },
-  paused:  { label: '일시정지', variant: 'cautious' as const },
-  waiting: { label: '대기중',   variant: 'default'  as const },
+  running: { label: '운용중',   color: '#34C759' },
+  paused:  { label: '일시정지', color: '#FF9F0A' },
+  waiting: { label: '대기중',   color: '#636366' },
 };
 
 export default function Account() {
@@ -49,109 +23,163 @@ export default function Account() {
   const agentStatus = agentStatusMap[agentStats?.status ?? 'waiting'];
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+    <View style={styles.root}>
+      <View style={styles.bgGradient} />
+      <SafeAreaView style={{ flex: 1 }} edges={['top']}>
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
-        {/* 프로필 */}
-        <View style={styles.profile}>
-          <View style={styles.avatar}>
-            <Text variant="heading1" color={colors.text.inverse}>
-              {user?.name?.[0] ?? '?'}
-            </Text>
+          {/* 헤더 */}
+          <View style={styles.header}>
+            <Text style={styles.title}>계정</Text>
           </View>
-          <View style={{ flex: 1 }}>
-            <Text variant="heading2">{user?.name ?? '-'}</Text>
-            <Text variant="body2" color={colors.text.tertiary} style={{ marginTop: 2 }}>{user?.email ?? '-'}</Text>
-          </View>
-          <Badge label={agentStatus.label} variant={agentStatus.variant} />
-        </View>
 
-        {/* 잔액 카드 */}
-        <View style={{ paddingHorizontal: spacing[5] }}>
-          <Card variant="outlined" padding={spacing[5]}>
-            <Text variant="caption1" color={colors.text.tertiary}>총 자산</Text>
-            {balanceLoading ? (
-              <ActivityIndicator color={colors.primary.default} style={{ marginTop: spacing[2] }} />
-            ) : (
-              <Text variant="numericLarge" style={{ marginTop: spacing[1] }}>
-                {formatKRW(balance?.total ?? 0)}
-              </Text>
-            )}
-            <Divider style={{ marginVertical: spacing[4] }} />
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-              <View>
-                <Text variant="caption1" color={colors.text.tertiary}>운용 중</Text>
-                <Text variant="body1Medium" style={{ marginTop: spacing[0.5] }}>{formatKRW(balance?.invested ?? 0)}</Text>
+          {/* 프로필 카드 */}
+          <GlassCard intensity="medium" radius={24} padding={20} style={styles.profileCard}>
+            <View style={styles.profileRow}>
+              <View style={styles.avatar}>
+                <Text style={styles.avatarText}>{user?.name?.[0]?.toUpperCase() ?? '?'}</Text>
               </View>
-              <View style={{ alignItems: 'flex-end' }}>
-                <Text variant="caption1" color={colors.text.tertiary}>출금 가능</Text>
-                <Text variant="body1Medium" style={{ marginTop: spacing[0.5] }}>{formatKRW(balance?.available ?? 0)}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.userName}>{user?.name ?? '-'}</Text>
+                <Text style={styles.userEmail}>{user?.email ?? '-'}</Text>
+              </View>
+              <View style={[styles.statusBadge, { backgroundColor: agentStatus.color + '22' }]}>
+                <View style={[styles.statusDot, { backgroundColor: agentStatus.color }]} />
+                <Text style={[styles.statusText, { color: agentStatus.color }]}>{agentStatus.label}</Text>
               </View>
             </View>
-          </Card>
+          </GlassCard>
 
-          <View style={styles.fundBtns}>
-            <Pressable style={[styles.fundBtn, { backgroundColor: colors.primary.default }]}
-              onPress={() => router.push('/(main)/account/deposit')}>
-              <Text variant="label1Bold" color={colors.text.inverse}>충전하기</Text>
+          {/* 자산 카드 */}
+          <GlassCard intensity="low" radius={24} padding={20} style={styles.section}>
+            <Text style={styles.cardLabel}>총 자산</Text>
+            {balanceLoading ? (
+              <ActivityIndicator color="#fff" style={{ marginVertical: 8 }} />
+            ) : (
+              <>
+                <Text style={styles.balanceAmount}>{formatKRW(balance?.total ?? 0)}</Text>
+                {balance?.totalUsdt != null && (
+                  <Text style={styles.balanceUsdt}>≈ {balance.totalUsdt.toFixed(2)} USDT</Text>
+                )}
+              </>
+            )}
+            <View style={styles.balanceRow}>
+              <View>
+                <Text style={styles.balSubLabel}>가용 자산</Text>
+                <Text style={styles.balSubValue}>{formatKRW(balance?.available ?? 0)}</Text>
+              </View>
+              <View style={styles.balDivider} />
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={styles.balSubLabel}>투자 중</Text>
+                <Text style={styles.balSubValue}>{formatKRW(balance?.invested ?? 0)}</Text>
+              </View>
+            </View>
+            <View style={styles.fundBtns}>
+              <Pressable style={[styles.fundBtn, { backgroundColor: '#635BFF' }]}
+                onPress={() => router.push('/(main)/account/deposit')}>
+                <Text style={styles.fundBtnText}>충전하기</Text>
+              </Pressable>
+              <Pressable style={[styles.fundBtn, { backgroundColor: 'rgba(255,255,255,0.08)' }]}
+                onPress={() => router.push('/(main)/account/withdraw')}>
+                <Text style={styles.fundBtnText}>출금하기</Text>
+              </Pressable>
+            </View>
+          </GlassCard>
+
+          {/* 에이전트 + 내역 */}
+          <GlassCard intensity="low" radius={24} padding={0} style={styles.section}>
+            <Pressable style={styles.menuRow} onPress={() => router.push('/(main)/account/agent-settings')}>
+              <View style={styles.menuIcon}>
+                <Text style={{ fontSize: 18 }}>🤖</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.menuLabel}>AI 에이전트 설정</Text>
+                <Text style={styles.menuSub}>
+                  {agentStats?.status === 'running' ? '운용 중' : agentStatus.label}
+                  {agentStats?.riskLevel ? ` · ${RISK_LABELS[agentStats.riskLevel]}` : ''}
+                </Text>
+              </View>
+              <Text style={styles.menuArrow}>›</Text>
             </Pressable>
-            <Pressable style={[styles.fundBtn, { backgroundColor: colors.bg.elevated }]}
-              onPress={() => router.push('/(main)/account/withdraw')}>
-              <Text variant="label1Bold">출금하기</Text>
+            <View style={styles.menuDivider} />
+            <Pressable style={styles.menuRow} onPress={() => router.push('/(main)/account/transactions')}>
+              <View style={styles.menuIcon}>
+                <Text style={{ fontSize: 18 }}>📋</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.menuLabel}>거래 내역</Text>
+                <Text style={styles.menuSub}>충전·출금·거래 기록</Text>
+              </View>
+              <Text style={styles.menuArrow}>›</Text>
             </Pressable>
-          </View>
-        </View>
+            <View style={styles.menuDivider} />
+            <Pressable style={styles.menuRow} onPress={() => router.push('/(main)/account/notifications')}>
+              <View style={styles.menuIcon}>
+                <Text style={{ fontSize: 18 }}>🔔</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.menuLabel}>알림 설정</Text>
+                <Text style={styles.menuSub}>거래 알림, 리포트</Text>
+              </View>
+              <Text style={styles.menuArrow}>›</Text>
+            </Pressable>
+          </GlassCard>
 
-        <SectionTitle label="자산 관리" />
-        <Card variant="outlined" padding={0} style={{ marginHorizontal: spacing[5] }}>
-          <MenuRow label="충전·출금 내역" onPress={() => router.push('/(main)/account/transactions')} />
-        </Card>
+          {/* 로그아웃 */}
+          <GlassCard intensity="low" radius={24} padding={0} style={styles.section}>
+            <Pressable style={styles.menuRow} onPress={async () => {
+              await logout();
+              router.replace('/(auth)/login');
+            }}>
+              <View style={styles.menuIcon}>
+                <Text style={{ fontSize: 18 }}>🚪</Text>
+              </View>
+              <Text style={[styles.menuLabel, { color: '#FF3B30' }]}>로그아웃</Text>
+            </Pressable>
+          </GlassCard>
 
-        <SectionTitle label="에이전트 설정" />
-        <Card variant="outlined" padding={0} style={{ marginHorizontal: spacing[5] }}>
-          <MenuRow label="운용 상태"
-            sub={agentStats?.status === 'running' ? '현재 운용 중입니다' : '일시 정지됨'}
-            onPress={() => router.push('/(main)/account/agent-settings')}
-            rightElement={<Badge label={agentStatus.label} variant={agentStatus.variant} size="sm" />}
-          />
-          <Divider indent={spacing[5]} />
-          <MenuRow label="리스크 수준" sub={RISK_LABELS[agentStats?.riskLevel ?? 'medium']}
-            onPress={() => router.push('/(main)/account/agent-settings')} />
-        </Card>
-
-        <SectionTitle label="알림 설정" />
-        <Card variant="outlined" padding={0} style={{ marginHorizontal: spacing[5] }}>
-          <MenuRow label="알림 설정" onPress={() => router.push('/(main)/account/notifications')} />
-        </Card>
-
-        <SectionTitle label="계정" />
-        <Card variant="outlined" padding={0} style={{ marginHorizontal: spacing[5] }}>
-          <MenuRow label="비밀번호 변경" />
-          <Divider indent={spacing[5]} />
-          <MenuRow label="고객센터" />
-          <Divider indent={spacing[5]} />
-          <MenuRow label="로그아웃" danger onPress={async () => {
-            await logout();
-            router.replace('/(auth)/login');
-          }} />
-        </Card>
-
-        <View style={{ height: spacing[10] }} />
-      </ScrollView>
-    </SafeAreaView>
+          <View style={{ height: 120 }} />
+        </ScrollView>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safe:    { flex: 1, backgroundColor: colors.bg.default },
-  scroll:  { flex: 1 },
-  profile: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing[4],
-    paddingHorizontal: spacing[5], paddingVertical: spacing[6],
-    borderBottomWidth: 1, borderBottomColor: colors.border.default,
-  },
-  avatar:   { width: 52, height: 52, borderRadius: 26, backgroundColor: colors.primary.default, alignItems: 'center', justifyContent: 'center' },
-  fundBtns: { flexDirection: 'row', gap: spacing[3], marginTop: spacing[4] },
-  fundBtn:  { flex: 1, height: 48, borderRadius: borderRadius.lg, alignItems: 'center', justifyContent: 'center' },
-  menuRow:  { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing[4], paddingHorizontal: spacing[5], gap: spacing[3] },
+  root:       { flex: 1, backgroundColor: '#09090F' },
+  bgGradient: { position: 'absolute', top: 0, left: 0, right: 0, height: 300, backgroundColor: '#0D0D18' },
+  content:    { paddingHorizontal: 20 },
+
+  header: { paddingTop: 8, paddingBottom: 16 },
+  title:  { fontSize: 28, fontWeight: '800', color: '#fff' },
+
+  profileCard: { marginBottom: 12 },
+  profileRow:  { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  avatar:      { width: 52, height: 52, borderRadius: 26, backgroundColor: '#635BFF33', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#635BFF55' },
+  avatarText:  { fontSize: 22, fontWeight: '700', color: '#635BFF' },
+  userName:    { fontSize: 17, fontWeight: '700', color: '#fff' },
+  userEmail:   { fontSize: 13, color: 'rgba(255,255,255,0.4)', marginTop: 2 },
+  statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5 },
+  statusDot:   { width: 6, height: 6, borderRadius: 3 },
+  statusText:  { fontSize: 12, fontWeight: '600' },
+
+  section:      { marginBottom: 12 },
+  cardLabel:    { fontSize: 13, color: 'rgba(255,255,255,0.4)', marginBottom: 6 },
+  balanceAmount: { fontSize: 30, fontWeight: '800', color: '#fff', letterSpacing: -0.5 },
+  balanceUsdt:  { fontSize: 13, color: 'rgba(255,255,255,0.35)', marginTop: 2, marginBottom: 4 },
+  balanceRow:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' },
+  balSubLabel:  { fontSize: 12, color: 'rgba(255,255,255,0.4)' },
+  balSubValue:  { fontSize: 15, fontWeight: '700', color: '#fff', marginTop: 4 },
+  balDivider:   { width: 1, height: 36, backgroundColor: 'rgba(255,255,255,0.08)' },
+
+  fundBtns:    { flexDirection: 'row', gap: 10, marginTop: 16 },
+  fundBtn:     { flex: 1, height: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  fundBtnText: { fontSize: 14, fontWeight: '700', color: '#fff' },
+
+  menuRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 18, gap: 14 },
+  menuIcon:    { width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' },
+  menuLabel:   { fontSize: 15, fontWeight: '600', color: '#fff' },
+  menuSub:     { fontSize: 12, color: 'rgba(255,255,255,0.35)', marginTop: 2 },
+  menuArrow:   { fontSize: 20, color: 'rgba(255,255,255,0.2)', lineHeight: 24 },
+  menuDivider: { height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginHorizontal: 18 },
 });

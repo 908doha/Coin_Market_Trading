@@ -6,10 +6,11 @@ const client = new GateApi.ApiClient();
 client.setApiKeySecret(config.apiKey, config.apiSecret);
 
 const futuresApi = new GateApi.FuturesApi(client);
+const spotApi    = new GateApi.SpotApi(client);
 const SETTLE = 'usdt'; // USDT 마진 선물
 
 /**
- * Gate.io 선물 API 클라이언트
+ * Gate.io API 클라이언트 (Spot + Futures)
  */
 const gateClient = {
   /**
@@ -21,11 +22,11 @@ const gateClient = {
       const { body } = await futuresApi.listFuturesCandlesticks(SETTLE, contract, opts);
       return body.map((c) => ({
         timestamp: c.t * 1000,
-        open: parseFloat(c.o),
-        high: parseFloat(c.h),
-        low: parseFloat(c.l),
-        close: parseFloat(c.c),
-        volume: parseFloat(c.v),
+        open:      parseFloat(c.o),
+        high:      parseFloat(c.h),
+        low:       parseFloat(c.l),
+        close:     parseFloat(c.c),
+        volume:    parseFloat(c.v),
       }));
     } catch (err) {
       logger.error(`캔들 조회 실패: ${err.message}`);
@@ -41,10 +42,10 @@ const gateClient = {
       const { body } = await futuresApi.listFuturesTickers(SETTLE, { contract });
       const ticker = body[0];
       return {
-        last: parseFloat(ticker.last),
-        markPrice: parseFloat(ticker.markPrice),
+        last:       parseFloat(ticker.last),
+        markPrice:  parseFloat(ticker.markPrice),
         indexPrice: parseFloat(ticker.indexPrice),
-        volume24h: parseFloat(ticker.volume24h),
+        volume24h:  parseFloat(ticker.volume24h),
       };
     } catch (err) {
       logger.error(`티커 조회 실패: ${err.message}`);
@@ -59,12 +60,12 @@ const gateClient = {
     try {
       const { body } = await futuresApi.getFuturesContract(SETTLE, contract);
       return {
-        name: body.name,
+        name:             body.name,
         quantoMultiplier: parseFloat(body.quantoMultiplier),
-        leverageMin: body.leverageMin,
-        leverageMax: body.leverageMax,
-        markPrice: parseFloat(body.markPrice),
-        orderSizeMin: body.orderSizeMin,
+        leverageMin:      body.leverageMin,
+        leverageMax:      body.leverageMax,
+        markPrice:        parseFloat(body.markPrice),
+        orderSizeMin:     body.orderSizeMin,
       };
     } catch (err) {
       logger.error(`계약 정보 조회 실패: ${err.message}`);
@@ -94,9 +95,9 @@ const gateClient = {
     try {
       const order = new GateApi.FuturesOrder();
       order.contract = contract;
-      order.size = side === 'buy' ? Math.abs(size) : -Math.abs(size);
-      order.price = '0'; // 시장가
-      order.tif = 'ioc'; // Immediate or Cancel
+      order.size  = side === 'buy' ? Math.abs(size) : -Math.abs(size);
+      order.price = '0';   // 시장가
+      order.tif   = 'ioc'; // Immediate or Cancel
 
       const { body } = await futuresApi.createFuturesOrder(SETTLE, order);
       logger.info(`주문 체결: ${side} ${contract} size=${size} id=${body.id}`);
@@ -114,9 +115,9 @@ const gateClient = {
     try {
       const order = new GateApi.FuturesOrder();
       order.contract = contract;
-      order.size = side === 'buy' ? Math.abs(size) : -Math.abs(size);
+      order.size  = side === 'buy' ? Math.abs(size) : -Math.abs(size);
       order.price = price.toString();
-      order.tif = 'gtc'; // Good Till Cancel
+      order.tif   = 'gtc'; // Good Till Cancel
 
       const { body } = await futuresApi.createFuturesOrder(SETTLE, order);
       logger.info(`지정가 주문: ${side} ${contract} @ ${price} size=${size} id=${body.id}`);
@@ -134,17 +135,15 @@ const gateClient = {
     try {
       const { body } = await futuresApi.getPosition(SETTLE, contract);
       return {
-        size: body.size,
-        entryPrice: parseFloat(body.entryPrice),
-        markPrice: parseFloat(body.markPrice),
+        size:          body.size,
+        entryPrice:    parseFloat(body.entryPrice),
+        markPrice:     parseFloat(body.markPrice),
         unrealisedPnl: parseFloat(body.unrealisedPnl),
-        leverage: body.leverage,
-        mode: body.mode,
+        leverage:      body.leverage,
+        mode:          body.mode,
       };
     } catch (err) {
-      if (err.body && err.body.label === 'POSITION_NOT_FOUND') {
-        return null;
-      }
+      if (err.body && err.body.label === 'POSITION_NOT_FOUND') return null;
       logger.error(`포지션 조회 실패: ${err.message}`);
       throw err;
     }
@@ -160,7 +159,6 @@ const gateClient = {
         logger.info(`청산할 포지션 없음: ${contract}`);
         return null;
       }
-      // 반대 방향으로 같은 수량 시장가 주문
       const closeSide = position.size > 0 ? 'sell' : 'buy';
       return await this.createOrder(contract, Math.abs(position.size), closeSide);
     } catch (err) {
@@ -170,16 +168,61 @@ const gateClient = {
   },
 
   /**
-   * 잔고 조회
+   * 잔고 조회 — Spot USDT + Futures USDT 합산
+   *
+   * Gate.io는 지갑이 분리돼 있음:
+   *   - Spot 지갑:    현물 보유 자산 (USDT 등)
+   *   - Futures 지갑: 선물 증거금 계좌
+   * 두 계좌를 병렬로 조회해 합산한 총 잔액을 반환
    */
   async getBalance() {
     try {
-      const { body } = await futuresApi.listFuturesAccounts(SETTLE);
-      return {
-        total: parseFloat(body.total),
-        available: parseFloat(body.available),
-        unrealisedPnl: parseFloat(body.unrealisedPnl),
-      };
+      const [futuresRes, spotRes] = await Promise.allSettled([
+        futuresApi.listFuturesAccounts(SETTLE),
+        spotApi.listSpotAccounts({ currency: 'USDT' }),
+      ]);
+
+      // ── Futures ──────────────────────────────────────────
+      let futuresTotal     = 0;
+      let futuresAvailable = 0;
+      let unrealisedPnl    = 0;
+
+      if (futuresRes.status === 'fulfilled') {
+        const b = futuresRes.value.body;
+        futuresTotal     = parseFloat(b.total)        || 0;
+        futuresAvailable = parseFloat(b.available)    || 0;
+        unrealisedPnl    = parseFloat(b.unrealisedPnl) || 0;
+        logger.info(`Futures 잔고: total=${futuresTotal} available=${futuresAvailable}`);
+      } else {
+        logger.warn(`Futures 잔고 조회 실패: ${futuresRes.reason?.message}`);
+      }
+
+      // ── Spot ─────────────────────────────────────────────
+      let spotTotal     = 0;
+      let spotAvailable = 0;
+
+      if (spotRes.status === 'fulfilled') {
+        const accounts = spotRes.value.body;
+        const usdt = Array.isArray(accounts)
+          ? accounts.find((a) => a.currency === 'USDT')
+          : null;
+        if (usdt) {
+          spotAvailable = parseFloat(usdt.available) || 0;
+          const spotLocked = parseFloat(usdt.locked) || 0;
+          spotTotal = spotAvailable + spotLocked;
+          logger.info(`Spot 잔고: available=${spotAvailable} locked=${spotLocked}`);
+        }
+      } else {
+        logger.warn(`Spot 잔고 조회 실패: ${spotRes.reason?.message}`);
+      }
+
+      // ── 합산 ─────────────────────────────────────────────
+      const total     = futuresTotal + spotTotal;
+      const available = futuresAvailable + spotAvailable;
+
+      logger.info(`총 잔고: ${total} USDT (Spot ${spotTotal} + Futures ${futuresTotal})`);
+
+      return { total, available, unrealisedPnl, futuresTotal, spotTotal };
     } catch (err) {
       logger.error(`잔고 조회 실패: ${err.message}`);
       throw err;
@@ -202,13 +245,6 @@ const gateClient = {
 
   /**
    * 조건부 주문 생성 (Price Trigger Order)
-   * SL/TP를 거래소에 지정가로 등록
-   *
-   * @param {string} contract - 거래쌍
-   * @param {number} size - 수량 (양수: buy, 음수: sell)
-   * @param {number} triggerPrice - 트리거 가격 (이 가격 도달 시 주문 발동)
-   * @param {number} orderPrice - 실제 체결될 지정가 (0이면 시장가)
-   * @param {string} triggerRule - 트리거 조건: '1' = >=, '2' = <=
    */
   async createPriceTriggerOrder(contract, size, triggerPrice, orderPrice, triggerRule) {
     try {
@@ -217,26 +253,19 @@ const gateClient = {
           contract,
           size,
           price: orderPrice.toString(),
-          tif: 'gtc',
+          tif:   'gtc',
         },
         trigger: {
-          strategy_type: 0, // 0: price trigger
-          price_type: 1,    // 1: mark price
-          price: triggerPrice.toString(),
-          rule: triggerRule, // 1: >=, 2: <=
+          strategy_type: 0,
+          price_type:    1,
+          price:         triggerPrice.toString(),
+          rule:          triggerRule,
         },
-        orderType: 'close-long-order',
+        orderType: size > 0 ? 'close-short-order' : 'close-long-order',
       };
 
-      // 방향에 따라 orderType 설정
-      if (size > 0) {
-        triggerOrder.orderType = 'close-short-order'; // 숏 청산 (매수)
-      } else {
-        triggerOrder.orderType = 'close-long-order';  // 롱 청산 (매도)
-      }
-
       const { body } = await futuresApi.createPriceTriggeredOrder(SETTLE, triggerOrder);
-      logger.info(`조건부 주문 등록: ${contract} trigger=${triggerPrice} order=${orderPrice} id=${body.id}`);
+      logger.info(`조건부 주문 등록: ${contract} trigger=${triggerPrice} id=${body.id}`);
       return body;
     } catch (err) {
       logger.error(`조건부 주문 실패: ${err.message}`);
@@ -246,55 +275,17 @@ const gateClient = {
 
   /**
    * SL/TP 지정가 주문 세트 등록
-   *
-   * @param {string} contract - 거래쌍
-   * @param {number} size - 포지션 수량 (양수)
-   * @param {string} direction - 'long' 또는 'short'
-   * @param {number} sl - 손절 가격
-   * @param {number} tp - 익절 가격
    */
   async placeSLTP(contract, size, direction, sl, tp) {
     const results = { slOrder: null, tpOrder: null };
-
     if (direction === 'long') {
-      // Long SL: 가격이 SL 이하로 떨어지면 → 매도 지정가
-      results.slOrder = await this.createPriceTriggerOrder(
-        contract,
-        -Math.abs(size),  // 매도
-        sl,               // 트리거 가격
-        sl,               // 지정가 (SL 가격으로 청산)
-        '2'               // rule 2: 가격 <= triggerPrice
-      );
-
-      // Long TP: 가격이 TP 이상으로 오르면 → 매도 지정가
-      results.tpOrder = await this.createPriceTriggerOrder(
-        contract,
-        -Math.abs(size),  // 매도
-        tp,               // 트리거 가격
-        tp,               // 지정가 (TP 가격으로 청산)
-        '1'               // rule 1: 가격 >= triggerPrice
-      );
+      results.slOrder = await this.createPriceTriggerOrder(contract, -Math.abs(size), sl, sl, '2');
+      results.tpOrder = await this.createPriceTriggerOrder(contract, -Math.abs(size), tp, tp, '1');
     } else {
-      // Short SL: 가격이 SL 이상으로 오르면 → 매수 지정가
-      results.slOrder = await this.createPriceTriggerOrder(
-        contract,
-        Math.abs(size),   // 매수
-        sl,               // 트리거 가격
-        sl,               // 지정가
-        '1'               // rule 1: 가격 >= triggerPrice
-      );
-
-      // Short TP: 가격이 TP 이하로 떨어지면 → 매수 지정가
-      results.tpOrder = await this.createPriceTriggerOrder(
-        contract,
-        Math.abs(size),   // 매수
-        tp,               // 트리거 가격
-        tp,               // 지정가
-        '2'               // rule 2: 가격 <= triggerPrice
-      );
+      results.slOrder = await this.createPriceTriggerOrder(contract,  Math.abs(size), sl, sl, '1');
+      results.tpOrder = await this.createPriceTriggerOrder(contract,  Math.abs(size), tp, tp, '2');
     }
-
-    logger.info(`SL/TP 지정가 등록 완료: SL=${sl} TP=${tp}`);
+    logger.info(`SL/TP 등록 완료: SL=${sl} TP=${tp}`);
     return results;
   },
 
@@ -316,9 +307,7 @@ const gateClient = {
    */
   async listTriggerOrders(contract, status = 'open') {
     try {
-      const { body } = await futuresApi.listPriceTriggeredOrders(SETTLE, status, {
-        contract,
-      });
+      const { body } = await futuresApi.listPriceTriggeredOrders(SETTLE, status, { contract });
       return body;
     } catch (err) {
       logger.error(`조건부 주문 조회 실패: ${err.message}`);

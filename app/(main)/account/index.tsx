@@ -26,9 +26,8 @@ export default function Account() {
   return (
     <FadeTabView style={styles.root}>
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-
           <PageHeader title="계정" />
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
           {isLoading ? (
             <AccountSkeleton />

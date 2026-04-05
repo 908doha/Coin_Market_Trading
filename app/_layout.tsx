@@ -26,7 +26,7 @@ export default function RootLayout() {
 
   return (
     <AuthProvider>
-      <StatusBar style="light" backgroundColor={colors.bg.default} />
+      <StatusBar style="dark" backgroundColor="#F5F5F5" />
       <Stack screenOptions={{ headerShown: false }} />
     </AuthProvider>
   );

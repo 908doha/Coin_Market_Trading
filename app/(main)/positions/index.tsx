@@ -19,7 +19,6 @@ export default function Trading() {
 
   return (
     <View style={styles.root}>
-      <View style={styles.bgGradient} />
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
         <View style={styles.header}>
           <Text style={styles.title}>트레이딩</Text>
@@ -28,8 +27,12 @@ export default function Trading() {
         <View style={styles.segmentWrap}>
           <View style={styles.segment}>
             {(['positions', 'history'] as Tab[]).map((t) => (
-              <Pressable key={t} style={[styles.segBtn, tab === t && styles.segBtnActive]} onPress={() => setTab(t)}>
-                <Text style={[styles.segText, { color: tab === t ? '#000' : 'rgba(255,255,255,0.45)' }]}>
+              <Pressable
+                key={t}
+                style={[styles.segBtn, tab === t && styles.segBtnActive]}
+                onPress={() => setTab(t)}
+              >
+                <Text style={[styles.segText, { color: tab === t ? '#3182F6' : '#AEAEB2' }]}>
                   {t === 'positions' ? '보유 포지션' : '거래 기록'}
                 </Text>
               </Pressable>
@@ -39,7 +42,7 @@ export default function Trading() {
 
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           {isLoading ? (
-            <ActivityIndicator color="#fff" style={{ marginTop: 60 }} />
+            <ActivityIndicator color="#3182F6" style={{ marginTop: 60 }} />
           ) : tab === 'positions' ? (
             !positions?.length ? (
               <GlassCard intensity="low" radius={20} padding={32} style={{ alignItems: 'center' }}>
@@ -51,26 +54,40 @@ export default function Trading() {
                 <Pressable key={pos.id} onPress={() => router.push(`/(main)/positions/${pos.id}`)}>
                   <GlassCard intensity="low" radius={20} padding={16} style={styles.card}>
                     <View style={styles.cardRow}>
-                      <View style={[styles.icon, { backgroundColor: up ? '#34C75920' : '#FF3B3020' }]}>
-                        <Text style={{ fontSize: 16, color: up ? '#34C759' : '#FF3B30' }}>{pos.coin.slice(0, 2)}</Text>
+                      <View style={[styles.icon, { backgroundColor: up ? '#EDFBF3' : '#FFF0F0' }]}>
+                        <Text style={{ fontSize: 15, fontWeight: '700', color: up ? '#0D9E45' : '#D93025' }}>
+                          {pos.coin.slice(0, 2)}
+                        </Text>
                       </View>
                       <View style={{ flex: 1 }}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                           <Text style={styles.symbol}>{pos.symbol}</Text>
-                          <View style={[styles.badge, { backgroundColor: pos.direction === 'Long' ? '#34C75920' : '#FF3B3020' }]}>
-                            <Text style={[styles.badgeText, { color: pos.direction === 'Long' ? '#34C759' : '#FF3B30' }]}>{pos.direction}</Text>
+                          <View style={[styles.badge, {
+                            backgroundColor: pos.direction === 'Long' ? '#EEF5FF' : '#FFF0F0',
+                          }]}>
+                            <Text style={[styles.badgeText, {
+                              color: pos.direction === 'Long' ? '#246CF9' : '#D93025',
+                            }]}>{pos.direction}</Text>
                           </View>
                         </View>
                         <Text style={styles.sub}>{formatKRW(pos.amount)} 투자</Text>
                       </View>
                       <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={[styles.profit, { color: up ? '#34C759' : '#FF3B30' }]}>{formatKRWSigned(pos.profit)}</Text>
-                        <Text style={[styles.rate,   { color: up ? '#34C759' : '#FF3B30' }]}>{formatRate(pos.profitRate)}</Text>
+                        <Text style={[styles.profit, { color: up ? '#0D9E45' : '#D93025' }]}>
+                          {formatKRWSigned(pos.profit)}
+                        </Text>
+                        <Text style={[styles.rate, { color: up ? '#0D9E45' : '#D93025' }]}>
+                          {formatRate(pos.profitRate)}
+                        </Text>
                       </View>
                     </View>
-                    <View style={styles.agentHint}>
-                      <Text style={styles.agentHintText} numberOfLines={1}>🤖 {pos.agentReason}</Text>
-                    </View>
+                    {pos.agentReason ? (
+                      <View style={styles.agentHint}>
+                        <Text style={styles.agentHintText} numberOfLines={1}>
+                          🤖 {pos.agentReason}
+                        </Text>
+                      </View>
+                    ) : null}
                   </GlassCard>
                 </Pressable>
               );
@@ -86,23 +103,29 @@ export default function Trading() {
                 <Pressable key={trade.id} onPress={() => router.push(`/(main)/history/${trade.id}`)}>
                   <GlassCard intensity="low" radius={20} padding={16} style={styles.card}>
                     <View style={styles.cardRow}>
-                      <View style={[styles.icon, { backgroundColor: up ? '#34C75920' : '#FF3B3020' }]}>
-                        <Text style={{ fontSize: 16, color: up ? '#34C759' : '#FF3B30' }}>{trade.coin.slice(0, 2)}</Text>
+                      <View style={[styles.icon, { backgroundColor: up ? '#EDFBF3' : '#FFF0F0' }]}>
+                        <Text style={{ fontSize: 15, fontWeight: '700', color: up ? '#0D9E45' : '#D93025' }}>
+                          {trade.coin.slice(0, 2)}
+                        </Text>
                       </View>
                       <View style={{ flex: 1 }}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                           <Text style={styles.symbol}>{trade.symbol}</Text>
                           {trade.type === 'stop_loss' && (
-                            <View style={[styles.badge, { backgroundColor: '#FF3B3020' }]}>
-                              <Text style={[styles.badgeText, { color: '#FF3B30' }]}>손절</Text>
+                            <View style={[styles.badge, { backgroundColor: '#FFF0F0' }]}>
+                              <Text style={[styles.badgeText, { color: '#D93025' }]}>손절</Text>
                             </View>
                           )}
                         </View>
                         <Text style={styles.sub}>{trade.exitAt} · {trade.holdingDays}일</Text>
                       </View>
                       <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={[styles.profit, { color: up ? '#34C759' : '#FF3B30' }]}>{formatKRWSigned(trade.profit)}</Text>
-                        <Text style={[styles.rate,   { color: up ? '#34C759' : '#FF3B30' }]}>{formatRate(trade.profitRate)}</Text>
+                        <Text style={[styles.profit, { color: up ? '#0D9E45' : '#D93025' }]}>
+                          {formatKRWSigned(trade.profit)}
+                        </Text>
+                        <Text style={[styles.rate, { color: up ? '#0D9E45' : '#D93025' }]}>
+                          {formatRate(trade.profitRate)}
+                        </Text>
                       </View>
                     </View>
                   </GlassCard>
@@ -118,29 +141,29 @@ export default function Trading() {
 }
 
 const styles = StyleSheet.create({
-  root:        { flex: 1, backgroundColor: '#09090F' },
-  bgGradient:  { position: 'absolute', top: 0, left: 0, right: 0, height: 300, backgroundColor: '#0D0D18' },
+  root:        { flex: 1, backgroundColor: '#F5F5F5' },
   header:      { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 4 },
-  title:       { fontSize: 28, fontWeight: '800', color: '#fff' },
+  title:       { fontSize: 28, fontWeight: '800', color: '#191919' },
   segmentWrap: { paddingHorizontal: 20, paddingBottom: 16 },
   segment: {
-    flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 16, padding: 4, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+    flexDirection: 'row', backgroundColor: '#FFFFFF',
+    borderRadius: 16, padding: 4,
+    borderWidth: 1, borderColor: '#F0F0F0',
   },
   segBtn:       { flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: 'center' },
-  segBtnActive: { backgroundColor: '#fff' },
+  segBtnActive: { backgroundColor: '#EEF5FF' },
   segText:      { fontSize: 14, fontWeight: '600' },
   content:      { paddingHorizontal: 20 },
   card:         { marginBottom: 10 },
   cardRow:      { flexDirection: 'row', alignItems: 'center', gap: 12 },
   icon:         { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  symbol:       { fontSize: 15, fontWeight: '700', color: '#fff' },
-  sub:          { fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 2 },
+  symbol:       { fontSize: 15, fontWeight: '700', color: '#191919' },
+  sub:          { fontSize: 12, color: '#AEAEB2', marginTop: 2 },
   profit:       { fontSize: 15, fontWeight: '700' },
   rate:         { fontSize: 12, fontWeight: '600', marginTop: 2 },
   badge:        { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   badgeText:    { fontSize: 11, fontWeight: '600' },
-  agentHint:    { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' },
-  agentHintText: { fontSize: 12, color: 'rgba(255,255,255,0.35)' },
-  emptyText:    { fontSize: 14, color: 'rgba(255,255,255,0.35)' },
+  agentHint:    { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F5F5F5' },
+  agentHintText: { fontSize: 12, color: '#AEAEB2' },
+  emptyText:    { fontSize: 14, color: '#AEAEB2' },
 });

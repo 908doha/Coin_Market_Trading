@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
 import {
   View, StyleSheet, ScrollView, Pressable,
-  ActivityIndicator, Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Text, Badge, GlassCard } from '@/design-system';
-import { colors, spacing } from '@/design-system/tokens';
+import { Text, GlassCard } from '@/design-system';
 import { accountService, agentService, positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAuth } from '@/store/auth';
@@ -17,22 +16,22 @@ const PERIODS: ChartPeriod[] = ['1W', '1M', '3M', '6M', '1Y'];
 
 // ── 미니 차트 ────────────────────────────────────────────────────────────────
 function MiniChart({ data, positive }: { data: { value: number }[]; positive: boolean }) {
-  if (!data?.length) return <View style={{ height: 56 }} />;
+  if (!data?.length) return <View style={{ height: 52 }} />;
   const values = data.map((d) => d.value);
   const min = Math.min(...values);
   const max = Math.max(...values);
   const range = max - min || 1;
-  const lineColor = positive ? '#34C759' : '#FF3B30';
+  const lineColor = positive ? '#1AC24E' : '#FF4747';
 
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'flex-end', height: 56, gap: 2 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'flex-end', height: 52, gap: 2 }}>
       {values.map((v, i) => {
-        const h = Math.max(3, ((v - min) / range) * 56);
+        const h = Math.max(3, ((v - min) / range) * 52);
         const isLast = i === values.length - 1;
         return (
           <View key={i} style={{
             flex: 1, height: h, borderRadius: 2,
-            backgroundColor: isLast ? lineColor : lineColor + '55',
+            backgroundColor: isLast ? lineColor : lineColor + '40',
           }} />
         );
       })}
@@ -44,7 +43,7 @@ function MiniChart({ data, positive }: { data: { value: number }[]; positive: bo
 function PeriodTab({ period, active, onPress }: { period: string; active: boolean; onPress: () => void }) {
   return (
     <Pressable onPress={onPress} style={[styles.periodBtn, active && styles.periodBtnActive]}>
-      <Text style={[styles.periodText, { color: active ? '#000' : 'rgba(255,255,255,0.45)' }]}>
+      <Text style={[styles.periodText, { color: active ? '#3182F6' : '#AEAEB2' }]}>
         {period}
       </Text>
     </Pressable>
@@ -52,9 +51,9 @@ function PeriodTab({ period, active, onPress }: { period: string; active: boolea
 }
 
 const agentStatusMap = {
-  running: { label: '운용중',   color: '#34C759' },
-  paused:  { label: '일시정지', color: '#FF9F0A' },
-  waiting: { label: '대기중',   color: '#636366' },
+  running: { label: '운용중',   color: '#1AC24E', bg: '#EDFBF3' },
+  paused:  { label: '일시정지', color: '#FF8A00', bg: '#FFF8E8' },
+  waiting: { label: '대기중',   color: '#AEAEB2', bg: '#F5F5F5' },
 };
 
 export default function Home() {
@@ -71,11 +70,6 @@ export default function Home() {
 
   return (
     <View style={styles.root}>
-      {/* 그라디언트 배경 */}
-      <View style={styles.bgGradient} />
-      <View style={styles.bgGlow1} />
-      <View style={styles.bgGlow2} />
-
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
         <ScrollView
           style={{ flex: 1 }}
@@ -85,30 +79,33 @@ export default function Home() {
           {/* ── 헤더 ── */}
           <View style={styles.header}>
             <View>
-              <Text style={styles.greeting}>안녕하세요 👋</Text>
+              <Text style={styles.greeting}>안녕하세요</Text>
               <Text style={styles.userName}>{user?.name ?? 'Osprey'}</Text>
             </View>
-            <View style={[styles.agentDot, { borderColor: agentStatus.color + '44' }]}>
-              <View style={[styles.agentDotInner, { backgroundColor: agentStatus.color }]} />
+            <View style={[styles.agentBadge, { backgroundColor: agentStatus.bg }]}>
+              <View style={[styles.agentDot, { backgroundColor: agentStatus.color }]} />
+              <Text style={[styles.agentBadgeText, { color: agentStatus.color }]}>
+                {agentStatus.label}
+              </Text>
             </View>
           </View>
 
           {/* ── 총 자산 카드 ── */}
-          <GlassCard style={styles.heroCard} intensity="medium" radius={28}>
+          <GlassCard style={styles.heroCard} intensity="medium" radius={24}>
             <Text style={styles.heroLabel}>총 자산</Text>
             {balLoading ? (
-              <ActivityIndicator color="#fff" style={{ marginVertical: 12 }} />
+              <ActivityIndicator color="#3182F6" style={{ marginVertical: 12 }} />
             ) : (
               <>
                 <Text style={styles.heroAmount}>
                   {formatKRW(balance?.total ?? 0)}
                 </Text>
                 <View style={styles.heroSubRow}>
-                  <Text style={[styles.heroPnl, { color: isProfit ? '#34C759' : '#FF3B30' }]}>
+                  <Text style={[styles.heroPnl, { color: isProfit ? '#1AC24E' : '#FF4747' }]}>
                     {formatKRWSigned(balance?.profitTotal ?? 0)}
                   </Text>
-                  <View style={[styles.pnlBadge, { backgroundColor: isProfit ? '#34C75922' : '#FF3B3022' }]}>
-                    <Text style={[styles.pnlBadgeText, { color: isProfit ? '#34C759' : '#FF3B30' }]}>
+                  <View style={[styles.pnlBadge, { backgroundColor: isProfit ? '#EDFBF3' : '#FFF0F0' }]}>
+                    <Text style={[styles.pnlBadgeText, { color: isProfit ? '#0D9E45' : '#D93025' }]}>
                       {formatRate(balance?.profitRate ?? 0)}
                     </Text>
                   </View>
@@ -142,7 +139,7 @@ export default function Home() {
           </View>
 
           {/* ── 에이전트 상태 ── */}
-          <GlassCard style={styles.section} intensity="low" radius={24} padding={20}>
+          <GlassCard style={styles.section} intensity="low" radius={20} padding={18}>
             <View style={styles.agentRow}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.sectionTitle}>AI 에이전트</Text>
@@ -174,9 +171,7 @@ export default function Home() {
 
           {!positions?.length ? (
             <GlassCard intensity="low" radius={20} padding={24} style={{ alignItems: 'center' }}>
-              <Text style={{ color: 'rgba(255,255,255,0.35)', fontSize: 14 }}>
-                현재 활성 포지션이 없어요
-              </Text>
+              <Text style={styles.emptyText}>현재 활성 포지션이 없어요</Text>
             </GlassCard>
           ) : (
             positions.slice(0, 2).map((pos) => {
@@ -185,8 +180,8 @@ export default function Home() {
                 <Pressable key={pos.id} onPress={() => router.push(`/(main)/positions/${pos.id}`)}>
                   <GlassCard intensity="low" radius={20} padding={16} style={styles.posCard}>
                     <View style={styles.posRow}>
-                      <View style={[styles.posIcon, { backgroundColor: up ? '#34C75922' : '#FF3B3022' }]}>
-                        <Text style={{ fontSize: 16, color: up ? '#34C759' : '#FF3B30' }}>
+                      <View style={[styles.posIcon, { backgroundColor: up ? '#EDFBF3' : '#FFF0F0' }]}>
+                        <Text style={{ fontSize: 15, fontWeight: '700', color: up ? '#0D9E45' : '#D93025' }}>
                           {pos.coin.slice(0, 2)}
                         </Text>
                       </View>
@@ -194,20 +189,20 @@ export default function Home() {
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                           <Text style={styles.posSymbol}>{pos.symbol}</Text>
                           <View style={[styles.dirBadge, {
-                            backgroundColor: pos.direction === 'Long' ? '#34C75922' : '#FF3B3022',
+                            backgroundColor: pos.direction === 'Long' ? '#EEF5FF' : '#FFF0F0',
                           }]}>
                             <Text style={[styles.dirText, {
-                              color: pos.direction === 'Long' ? '#34C759' : '#FF3B30',
+                              color: pos.direction === 'Long' ? '#246CF9' : '#D93025',
                             }]}>{pos.direction}</Text>
                           </View>
                         </View>
                         <Text style={styles.posAmount}>{formatKRW(pos.amount)}</Text>
                       </View>
                       <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={[styles.posProfit, { color: up ? '#34C759' : '#FF3B30' }]}>
+                        <Text style={[styles.posProfit, { color: up ? '#0D9E45' : '#D93025' }]}>
                           {formatKRWSigned(pos.profit)}
                         </Text>
-                        <Text style={[styles.posProfitRate, { color: up ? '#34C759' : '#FF3B30' }]}>
+                        <Text style={[styles.posProfitRate, { color: up ? '#0D9E45' : '#D93025' }]}>
                           {formatRate(pos.profitRate)}
                         </Text>
                       </View>
@@ -226,72 +221,57 @@ export default function Home() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#09090F' },
-
-  bgGradient: {
-    position: 'absolute', top: 0, left: 0, right: 0, height: 420,
-    backgroundColor: '#0D0D18',
-  },
-  bgGlow1: {
-    position: 'absolute', top: -120, left: -80,
-    width: 320, height: 320, borderRadius: 160,
-    backgroundColor: 'rgba(99,91,255,0.12)',
-  },
-  bgGlow2: {
-    position: 'absolute', top: 80, right: -100,
-    width: 280, height: 280, borderRadius: 140,
-    backgroundColor: 'rgba(0,180,255,0.07)',
-  },
-
+  root:    { flex: 1, backgroundColor: '#F5F5F5' },
   content: { paddingHorizontal: 20, paddingTop: 8 },
 
   header: {
     flexDirection: 'row', justifyContent: 'space-between',
     alignItems: 'center', marginBottom: 20,
   },
-  greeting: { fontSize: 13, color: 'rgba(255,255,255,0.45)', marginBottom: 2 },
-  userName:  { fontSize: 22, fontWeight: '700', color: '#fff' },
-  agentDot: {
-    width: 36, height: 36, borderRadius: 18,
-    borderWidth: 1.5, alignItems: 'center', justifyContent: 'center',
+  greeting:  { fontSize: 13, color: '#AEAEB2', marginBottom: 2 },
+  userName:  { fontSize: 22, fontWeight: '700', color: '#191919' },
+  agentBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6,
   },
-  agentDotInner: { width: 10, height: 10, borderRadius: 5 },
+  agentDot:      { width: 6, height: 6, borderRadius: 3 },
+  agentBadgeText: { fontSize: 12, fontWeight: '600' },
 
   heroCard:    { marginBottom: 12 },
-  heroLabel:   { fontSize: 13, color: 'rgba(255,255,255,0.5)', marginBottom: 6 },
-  heroAmount:  { fontSize: 36, fontWeight: '800', color: '#fff', letterSpacing: -1 },
+  heroLabel:   { fontSize: 13, color: '#AEAEB2', marginBottom: 6 },
+  heroAmount:  { fontSize: 34, fontWeight: '800', color: '#191919', letterSpacing: -1 },
   heroSubRow:  { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
   heroPnl:     { fontSize: 15, fontWeight: '600' },
   pnlBadge:    { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
   pnlBadgeText: { fontSize: 13, fontWeight: '600' },
   chartArea:   { marginTop: 20, marginBottom: 12 },
-  periodRow:   { flexDirection: 'row', gap: 4 },
+  periodRow:   { flexDirection: 'row', gap: 2 },
   periodBtn: {
-    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
+    paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20,
   },
-  periodBtnActive: { backgroundColor: '#fff' },
+  periodBtnActive: { backgroundColor: '#EEF5FF' },
   periodText:  { fontSize: 13, fontWeight: '600' },
 
-  statsRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  statsRow:  { flexDirection: 'row', gap: 10, marginBottom: 12 },
   statCard:  { flex: 1 },
-  statLabel: { fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 6 },
-  statValue: { fontSize: 16, fontWeight: '700', color: '#fff' },
+  statLabel: { fontSize: 12, color: '#AEAEB2', marginBottom: 6 },
+  statValue: { fontSize: 16, fontWeight: '700', color: '#191919' },
 
   section: { marginBottom: 12 },
   sectionHeader: {
     flexDirection: 'row', justifyContent: 'space-between',
     alignItems: 'center', marginBottom: 10, marginTop: 4,
   },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#fff' },
-  seeAll:       { fontSize: 13, color: 'rgba(255,255,255,0.4)' },
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#191919' },
+  seeAll:       { fontSize: 13, color: '#3182F6', fontWeight: '500' },
 
-  agentRow:      { flexDirection: 'row', alignItems: 'center' },
+  agentRow:       { flexDirection: 'row', alignItems: 'center' },
   agentStatusText: { fontSize: 14, fontWeight: '600', marginTop: 4 },
-  agentStats:    { flexDirection: 'row', alignItems: 'center', gap: 16 },
-  agentStatItem: { alignItems: 'center' },
-  agentStatVal:  { fontSize: 18, fontWeight: '700', color: '#fff' },
-  agentStatLabel: { fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 2 },
-  agentStatDivider: { width: 1, height: 32, backgroundColor: 'rgba(255,255,255,0.08)' },
+  agentStats:     { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  agentStatItem:  { alignItems: 'center' },
+  agentStatVal:   { fontSize: 18, fontWeight: '700', color: '#191919' },
+  agentStatLabel: { fontSize: 11, color: '#AEAEB2', marginTop: 2 },
+  agentStatDivider: { width: 1, height: 32, backgroundColor: '#F0F0F0' },
 
   posCard:   { marginBottom: 8 },
   posRow:    { flexDirection: 'row', alignItems: 'center', gap: 12 },
@@ -299,10 +279,11 @@ const styles = StyleSheet.create({
     width: 44, height: 44, borderRadius: 22,
     alignItems: 'center', justifyContent: 'center',
   },
-  posSymbol:    { fontSize: 15, fontWeight: '700', color: '#fff' },
-  posAmount:    { fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 2 },
+  posSymbol:    { fontSize: 15, fontWeight: '700', color: '#191919' },
+  posAmount:    { fontSize: 12, color: '#AEAEB2', marginTop: 2 },
   posProfit:    { fontSize: 15, fontWeight: '700' },
   posProfitRate: { fontSize: 12, fontWeight: '600', marginTop: 2 },
   dirBadge:  { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   dirText:   { fontSize: 11, fontWeight: '600' },
+  emptyText: { fontSize: 14, color: '#AEAEB2' },
 });

@@ -8,21 +8,30 @@ interface GlassViewProps {
   intensity?: 'low' | 'medium' | 'high';
 }
 
+// Toss-style light cards — intensity maps to elevation level
 const intensityMap = {
-  low:    { bg: 'rgba(255,255,255,0.04)', border: 'rgba(255,255,255,0.08)' },
-  medium: { bg: 'rgba(255,255,255,0.07)', border: 'rgba(255,255,255,0.12)' },
-  high:   { bg: 'rgba(255,255,255,0.11)', border: 'rgba(255,255,255,0.18)' },
+  low:    { bg: '#FFFFFF', border: '#F0F0F0' },
+  medium: { bg: '#FFFFFF', border: '#EBEBEB' },
+  high:   { bg: '#FFFFFF', border: '#E2E2E2' },
 };
 
-export function GlassView({ children, style, blur = 20, intensity = 'medium' }: GlassViewProps) {
+export function GlassView({ children, style, intensity = 'medium' }: GlassViewProps) {
   const { bg, border } = intensityMap[intensity];
 
-  const webStyle = Platform.OS === 'web'
-    ? { backdropFilter: `blur(${blur}px)`, WebkitBackdropFilter: `blur(${blur}px)` } as any
-    : {};
-
   return (
-    <View style={[{ backgroundColor: bg, borderWidth: 1, borderColor: border }, webStyle, style]}>
+    <View style={[
+      {
+        backgroundColor: bg,
+        borderWidth: 1,
+        borderColor: border,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.06,
+        shadowRadius: 8,
+        elevation: 2,
+      },
+      style,
+    ]}>
       {children}
     </View>
   );
@@ -33,10 +42,9 @@ interface GlassCardProps extends GlassViewProps {
   padding?: number;
 }
 
-export function GlassCard({ children, style, blur, intensity = 'medium', radius = 20, padding = 20 }: GlassCardProps) {
+export function GlassCard({ children, style, intensity = 'medium', radius = 20, padding = 20 }: GlassCardProps) {
   return (
     <GlassView
-      blur={blur}
       intensity={intensity}
       style={[{ borderRadius: radius, padding }, style as ViewStyle]}
     >

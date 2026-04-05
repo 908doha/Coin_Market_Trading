@@ -10,7 +10,7 @@
     "splash": {
       "image": "./assets/images/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#000000"
+      "backgroundColor": "#FFFFFF"
     },
     "ios": {
       "supportsTablet": true,
@@ -30,8 +30,8 @@
       "name": "Osprey",
       "shortName": "Osprey",
       "description": "AI 에이전트 기반 암호화폐 자동 트레이딩",
-      "themeColor": "#000000",
-      "backgroundColor": "#000000",
+      "themeColor": "#3182F6",
+      "backgroundColor": "#F5F5F5",
       "display": "standalone",
       "orientation": "portrait",
       "scope": "/",

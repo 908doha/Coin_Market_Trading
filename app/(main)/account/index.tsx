@@ -10,9 +10,9 @@ import { formatKRW } from '@/utils/format';
 import { RISK_LABELS } from '@/constants';
 
 const agentStatusMap = {
-  running: { label: '운용중',   color: '#34C759' },
-  paused:  { label: '일시정지', color: '#FF9F0A' },
-  waiting: { label: '대기중',   color: '#636366' },
+  running: { label: '운용중',   color: '#1AC24E', bg: '#EDFBF3' },
+  paused:  { label: '일시정지', color: '#FF8A00', bg: '#FFF8E8' },
+  waiting: { label: '대기중',   color: '#AEAEB2', bg: '#F5F5F5' },
 };
 
 export default function Account() {
@@ -24,7 +24,6 @@ export default function Account() {
 
   return (
     <View style={styles.root}>
-      <View style={styles.bgGradient} />
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
@@ -43,9 +42,11 @@ export default function Account() {
                 <Text style={styles.userName}>{user?.name ?? '-'}</Text>
                 <Text style={styles.userEmail}>{user?.email ?? '-'}</Text>
               </View>
-              <View style={[styles.statusBadge, { backgroundColor: agentStatus.color + '22' }]}>
+              <View style={[styles.statusBadge, { backgroundColor: agentStatus.bg }]}>
                 <View style={[styles.statusDot, { backgroundColor: agentStatus.color }]} />
-                <Text style={[styles.statusText, { color: agentStatus.color }]}>{agentStatus.label}</Text>
+                <Text style={[styles.statusText, { color: agentStatus.color }]}>
+                  {agentStatus.label}
+                </Text>
               </View>
             </View>
           </GlassCard>
@@ -54,7 +55,7 @@ export default function Account() {
           <GlassCard intensity="low" radius={24} padding={20} style={styles.section}>
             <Text style={styles.cardLabel}>총 자산</Text>
             {balanceLoading ? (
-              <ActivityIndicator color="#fff" style={{ marginVertical: 8 }} />
+              <ActivityIndicator color="#3182F6" style={{ marginVertical: 8 }} />
             ) : (
               <>
                 <Text style={styles.balanceAmount}>{formatKRW(balance?.total ?? 0)}</Text>
@@ -75,18 +76,22 @@ export default function Account() {
               </View>
             </View>
             <View style={styles.fundBtns}>
-              <Pressable style={[styles.fundBtn, { backgroundColor: '#635BFF' }]}
-                onPress={() => router.push('/(main)/account/deposit')}>
+              <Pressable
+                style={[styles.fundBtn, { backgroundColor: '#3182F6' }]}
+                onPress={() => router.push('/(main)/account/deposit')}
+              >
                 <Text style={styles.fundBtnText}>충전하기</Text>
               </Pressable>
-              <Pressable style={[styles.fundBtn, { backgroundColor: 'rgba(255,255,255,0.08)' }]}
-                onPress={() => router.push('/(main)/account/withdraw')}>
-                <Text style={styles.fundBtnText}>출금하기</Text>
+              <Pressable
+                style={[styles.fundBtn, { backgroundColor: '#F5F5F5' }]}
+                onPress={() => router.push('/(main)/account/withdraw')}
+              >
+                <Text style={[styles.fundBtnText, { color: '#191919' }]}>출금하기</Text>
               </Pressable>
             </View>
           </GlassCard>
 
-          {/* 에이전트 + 내역 */}
+          {/* 메뉴 */}
           <GlassCard intensity="low" radius={24} padding={0} style={styles.section}>
             <Pressable style={styles.menuRow} onPress={() => router.push('/(main)/account/agent-settings')}>
               <View style={styles.menuIcon}>
@@ -134,7 +139,7 @@ export default function Account() {
               <View style={styles.menuIcon}>
                 <Text style={{ fontSize: 18 }}>🚪</Text>
               </View>
-              <Text style={[styles.menuLabel, { color: '#FF3B30' }]}>로그아웃</Text>
+              <Text style={[styles.menuLabel, { color: '#FF4747' }]}>로그아웃</Text>
             </Pressable>
           </GlassCard>
 
@@ -146,40 +151,53 @@ export default function Account() {
 }
 
 const styles = StyleSheet.create({
-  root:       { flex: 1, backgroundColor: '#09090F' },
-  bgGradient: { position: 'absolute', top: 0, left: 0, right: 0, height: 300, backgroundColor: '#0D0D18' },
-  content:    { paddingHorizontal: 20 },
+  root:    { flex: 1, backgroundColor: '#F5F5F5' },
+  content: { paddingHorizontal: 20 },
 
   header: { paddingTop: 8, paddingBottom: 16 },
-  title:  { fontSize: 28, fontWeight: '800', color: '#fff' },
+  title:  { fontSize: 28, fontWeight: '800', color: '#191919' },
 
   profileCard: { marginBottom: 12 },
   profileRow:  { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  avatar:      { width: 52, height: 52, borderRadius: 26, backgroundColor: '#635BFF33', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#635BFF55' },
-  avatarText:  { fontSize: 22, fontWeight: '700', color: '#635BFF' },
-  userName:    { fontSize: 17, fontWeight: '700', color: '#fff' },
-  userEmail:   { fontSize: 13, color: 'rgba(255,255,255,0.4)', marginTop: 2 },
-  statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5 },
-  statusDot:   { width: 6, height: 6, borderRadius: 3 },
-  statusText:  { fontSize: 12, fontWeight: '600' },
+  avatar: {
+    width: 52, height: 52, borderRadius: 26,
+    backgroundColor: '#EEF5FF',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  avatarText:  { fontSize: 22, fontWeight: '700', color: '#3182F6' },
+  userName:    { fontSize: 17, fontWeight: '700', color: '#191919' },
+  userEmail:   { fontSize: 13, color: '#AEAEB2', marginTop: 2 },
+  statusBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5,
+  },
+  statusDot:  { width: 6, height: 6, borderRadius: 3 },
+  statusText: { fontSize: 12, fontWeight: '600' },
 
-  section:      { marginBottom: 12 },
-  cardLabel:    { fontSize: 13, color: 'rgba(255,255,255,0.4)', marginBottom: 6 },
-  balanceAmount: { fontSize: 30, fontWeight: '800', color: '#fff', letterSpacing: -0.5 },
-  balanceUsdt:  { fontSize: 13, color: 'rgba(255,255,255,0.35)', marginTop: 2, marginBottom: 4 },
-  balanceRow:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' },
-  balSubLabel:  { fontSize: 12, color: 'rgba(255,255,255,0.4)' },
-  balSubValue:  { fontSize: 15, fontWeight: '700', color: '#fff', marginTop: 4 },
-  balDivider:   { width: 1, height: 36, backgroundColor: 'rgba(255,255,255,0.08)' },
+  section:       { marginBottom: 12 },
+  cardLabel:     { fontSize: 13, color: '#AEAEB2', marginBottom: 6 },
+  balanceAmount: { fontSize: 30, fontWeight: '800', color: '#191919', letterSpacing: -0.5 },
+  balanceUsdt:   { fontSize: 13, color: '#AEAEB2', marginTop: 2, marginBottom: 4 },
+  balanceRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#F0F0F0',
+  },
+  balSubLabel: { fontSize: 12, color: '#AEAEB2' },
+  balSubValue: { fontSize: 15, fontWeight: '700', color: '#191919', marginTop: 4 },
+  balDivider:  { width: 1, height: 36, backgroundColor: '#F0F0F0' },
 
   fundBtns:    { flexDirection: 'row', gap: 10, marginTop: 16 },
   fundBtn:     { flex: 1, height: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  fundBtnText: { fontSize: 14, fontWeight: '700', color: '#fff' },
+  fundBtnText: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
 
   menuRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 18, gap: 14 },
-  menuIcon:    { width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' },
-  menuLabel:   { fontSize: 15, fontWeight: '600', color: '#fff' },
-  menuSub:     { fontSize: 12, color: 'rgba(255,255,255,0.35)', marginTop: 2 },
-  menuArrow:   { fontSize: 20, color: 'rgba(255,255,255,0.2)', lineHeight: 24 },
-  menuDivider: { height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginHorizontal: 18 },
+  menuIcon: {
+    width: 36, height: 36, borderRadius: 10,
+    backgroundColor: '#F5F5F5',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  menuLabel:   { fontSize: 15, fontWeight: '600', color: '#191919' },
+  menuSub:     { fontSize: 12, color: '#AEAEB2', marginTop: 2 },
+  menuArrow:   { fontSize: 20, color: '#C4C4C4', lineHeight: 24 },
+  menuDivider: { height: 1, backgroundColor: '#F5F5F5', marginHorizontal: 18 },
 });

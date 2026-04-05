@@ -98,45 +98,53 @@ export default function Account() {
 
           {/* 메뉴 */}
           <GlassCard intensity="low" radius={24} padding={0} style={styles.section}>
-            <PressableScale style={styles.menuRow} onPress={() => router.push('/(main)/account/agent-settings')} scaleTo={0.98}>
-              <View style={styles.menuIcon}><Text style={{ fontSize: 18 }}>🤖</Text></View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.menuLabel}>AI 에이전트 설정</Text>
-                <Text variant="meta" color="#AEAEB2">
-                  {agentStats?.status === 'running' ? '운용 중' : agentStatus.label}
-                  {agentStats?.riskLevel ? ` · ${RISK_LABELS[agentStats.riskLevel]}` : ''}
-                </Text>
+            <PressableScale onPress={() => router.push('/(main)/account/agent-settings')} scaleTo={0.98}>
+              <View style={styles.menuRow}>
+                <View style={styles.menuIcon}><Text style={{ fontSize: 18 }}>🤖</Text></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.menuLabel}>AI 에이전트 설정</Text>
+                  <Text variant="meta" color="#AEAEB2">
+                    {agentStats?.status === 'running' ? '운용 중' : agentStatus.label}
+                    {agentStats?.riskLevel ? ` · ${RISK_LABELS[agentStats.riskLevel]}` : ''}
+                  </Text>
+                </View>
+                <Text style={styles.menuArrow}>›</Text>
               </View>
-              <Text style={styles.menuArrow}>›</Text>
             </PressableScale>
             <View style={styles.menuDivider} />
-            <PressableScale style={styles.menuRow} onPress={() => router.push('/(main)/account/transactions')} scaleTo={0.98}>
-              <View style={styles.menuIcon}><Text style={{ fontSize: 18 }}>📋</Text></View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.menuLabel}>거래 내역</Text>
-                <Text variant="meta" color="#AEAEB2">충전·출금·거래 기록</Text>
+            <PressableScale onPress={() => router.push('/(main)/account/transactions')} scaleTo={0.98}>
+              <View style={styles.menuRow}>
+                <View style={styles.menuIcon}><Text style={{ fontSize: 18 }}>📋</Text></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.menuLabel}>거래 내역</Text>
+                  <Text variant="meta" color="#AEAEB2">충전·출금·거래 기록</Text>
+                </View>
+                <Text style={styles.menuArrow}>›</Text>
               </View>
-              <Text style={styles.menuArrow}>›</Text>
             </PressableScale>
             <View style={styles.menuDivider} />
-            <PressableScale style={styles.menuRow} onPress={() => router.push('/(main)/account/notifications')} scaleTo={0.98}>
-              <View style={styles.menuIcon}><Text style={{ fontSize: 18 }}>🔔</Text></View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.menuLabel}>알림 설정</Text>
-                <Text variant="meta" color="#AEAEB2">거래 알림, 리포트</Text>
+            <PressableScale onPress={() => router.push('/(main)/account/notifications')} scaleTo={0.98}>
+              <View style={styles.menuRow}>
+                <View style={styles.menuIcon}><Text style={{ fontSize: 18 }}>🔔</Text></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.menuLabel}>알림 설정</Text>
+                  <Text variant="meta" color="#AEAEB2">거래 알림, 리포트</Text>
+                </View>
+                <Text style={styles.menuArrow}>›</Text>
               </View>
-              <Text style={styles.menuArrow}>›</Text>
             </PressableScale>
           </GlassCard>
 
           {/* 로그아웃 */}
           <GlassCard intensity="low" radius={24} padding={0} style={styles.section}>
-            <PressableScale style={styles.menuRow} scaleTo={0.98} onPress={async () => {
+            <PressableScale scaleTo={0.98} onPress={async () => {
               await logout();
               router.replace('/(auth)/login');
             }}>
-              <View style={styles.menuIcon}><Text style={{ fontSize: 18 }}>🚪</Text></View>
-              <Text style={[styles.menuLabel, { color: '#FF4747' }]}>로그아웃</Text>
+              <View style={styles.menuRow}>
+                <View style={styles.menuIcon}><Text style={{ fontSize: 18 }}>🚪</Text></View>
+                <Text style={[styles.menuLabel, { color: '#FF4747', flex: 1 }]}>로그아웃</Text>
+              </View>
             </PressableScale>
           </GlassCard>
 
@@ -181,10 +189,13 @@ const styles = StyleSheet.create({
   fundBtnInner: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   fundBtnText: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
 
-  menuRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 18, gap: 14 },
+  menuRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 16, paddingHorizontal: 18, gap: 14,
+  },
   menuIcon: {
-    width: 36, height: 36, borderRadius: 10,
-    backgroundColor: '#F5F5F5',
+    width: 40, height: 40, borderRadius: 12,
+    backgroundColor: '#F0F0F0',
     alignItems: 'center', justifyContent: 'center',
   },
   menuLabel:   { fontSize: 15, fontWeight: '600', color: '#191919' },

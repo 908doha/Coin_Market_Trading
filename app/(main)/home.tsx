@@ -86,7 +86,7 @@ export default function Home() {
                   <Text style={[styles.heroPnl, { color: isProfit ? '#FF4747' : '#246CF9' }]}>
                     {formatKRWSigned(balance?.profitTotal ?? 0)}
                   </Text>
-                  <View style={[styles.pnlBadge, { backgroundColor: isProfit ? '#FFF0F0' : '#EEF5FF' }]}>
+                  <View style={[styles.pnlBadge, { backgroundColor: isProfit ? '#FFF0F0' : '#F0F0F0' }]}>
                     <Text style={[styles.pnlBadgeText, { color: isProfit ? '#D93025' : '#246CF9' }]}>
                       {formatRate(balance?.profitRate ?? 0)}
                     </Text>
@@ -163,7 +163,7 @@ export default function Home() {
                     style={[styles.posItem, idx === 0 && { marginTop: 16 }]}
                   >
                     <View style={styles.posRow}>
-                      <View style={[styles.posIcon, { backgroundColor: up ? '#FFF0F0' : '#EEF5FF' }]}>
+                      <View style={[styles.posIcon, { backgroundColor: up ? '#FFF0F0' : '#F0F0F0' }]}>
                         <Text style={{ fontSize: 15, fontWeight: '700', color: up ? '#D93025' : '#246CF9' }}>
                           {pos.coin.slice(0, 2)}
                         </Text>
@@ -172,10 +172,10 @@ export default function Home() {
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                           <Text style={styles.posSymbol}>{pos.symbol}</Text>
                           <View style={[styles.dirBadge, {
-                            backgroundColor: pos.direction === 'Long' ? '#EEF5FF' : '#FFF0F0',
+                            backgroundColor: pos.direction === 'Long' ? '#F0F0F0' : '#FFF0F0',
                           }]}>
                             <Text style={[styles.dirText, {
-                              color: pos.direction === 'Long' ? '#246CF9' : '#D93025',
+                              color: pos.direction === 'Long' ? '#555555' : '#D93025',
                             }]}>{pos.direction}</Text>
                           </View>
                         </View>

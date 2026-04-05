@@ -13,6 +13,37 @@ type HistoryFilter = '전체' | '수익' | '손실';
 const HISTORY_FILTERS: HistoryFilter[] = ['전체', '수익', '손실'];
 
 // ──────────────────────────────────────────────
+//  Portfolio Summary (top of positions tab)
+// ──────────────────────────────────────────────
+function PortfolioSummary({ positions }: { positions: Position[] }) {
+  const totalInvested   = positions.reduce((s, p) => s + p.amount, 0);
+  const totalProfit     = positions.reduce((s, p) => s + p.profit, 0);
+  const totalProfitRate = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
+  const up = totalProfit >= 0;
+
+  return (
+    <View style={summary.card}>
+      <View style={summary.row}>
+        <View style={{ flex: 1 }}>
+          <Text style={summary.label}>총 투자금</Text>
+          <Text style={summary.value}>{formatKRW(totalInvested)}</Text>
+        </View>
+        <View style={summary.divider} />
+        <View style={{ flex: 1, alignItems: 'flex-end' }}>
+          <Text style={summary.label}>평가 손익</Text>
+          <Text style={[summary.pnl, { color: up ? '#FF4747' : '#246CF9' }]}>
+            {formatKRWSigned(totalProfit)}
+          </Text>
+          <Text style={[summary.rate, { color: up ? '#FF4747' : '#246CF9' }]}>
+            {totalProfitRate >= 0 ? '+' : ''}{totalProfitRate.toFixed(2)}%
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// ──────────────────────────────────────────────
 //  Holding Position Card
 // ──────────────────────────────────────────────
 function PositionCard({ pos }: { pos: Position }) {
@@ -20,28 +51,34 @@ function PositionCard({ pos }: { pos: Position }) {
   return (
     <PressableScale
       onPress={() => router.push(`/(main)/positions/${pos.id}`)}
-      style={{ marginBottom: 10, borderRadius: 20 }}
+      style={{ marginBottom: 1 }}
     >
       <View style={card.wrap}>
-        <View style={[card.icon, { backgroundColor: up ? '#FFF0F0' : '#EEF5FF' }]}>
-          <Text style={{ fontSize: 15, fontWeight: '700', color: up ? '#D93025' : '#246CF9' }}>
-            {pos.coin.slice(0, 2)}
-          </Text>
+        <View style={card.iconWrap}>
+          <Text style={card.iconText}>{pos.coin.slice(0, 2)}</Text>
         </View>
         <View style={{ flex: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <Text style={card.symbol}>{pos.symbol}</Text>
-            <View style={[card.badge, { backgroundColor: pos.direction === 'Long' ? '#EEF5FF' : '#FFF0F0' }]}>
-              <Text style={[card.badgeText, { color: pos.direction === 'Long' ? '#246CF9' : '#D93025' }]}>
-                {pos.direction}
+            <View style={[card.badge, {
+              backgroundColor: pos.direction === 'Long' ? '#F0F0F0' : '#FFF0F0',
+            }]}>
+              <Text style={[card.badgeText, {
+                color: pos.direction === 'Long' ? '#555555' : '#D93025',
+              }]}>
+                {pos.direction === 'Long' ? '롱' : '숏'}
               </Text>
             </View>
           </View>
-          <Text style={card.sub}>{formatKRW(pos.amount)} 투자</Text>
+          <Text style={card.sub}>{formatKRW(pos.amount)}</Text>
         </View>
         <View style={{ alignItems: 'flex-end' }}>
-          <Text style={[card.amount, { color: up ? '#FF4747' : '#246CF9' }]}>{formatKRWSigned(pos.profit)}</Text>
-          <Text style={[card.rate, { color: up ? '#FF4747' : '#246CF9' }]}>{formatRate(pos.profitRate)}</Text>
+          <Text style={[card.amount, { color: up ? '#FF4747' : '#246CF9' }]}>
+            {formatKRWSigned(pos.profit)}
+          </Text>
+          <Text style={[card.rate, { color: up ? '#FF4747' : '#246CF9' }]}>
+            {formatRate(pos.profitRate)}
+          </Text>
         </View>
       </View>
       {pos.agentReason ? (
@@ -54,18 +91,17 @@ function PositionCard({ pos }: { pos: Position }) {
 }
 
 // ──────────────────────────────────────────────
-//  Trade History Row (screenshot style)
+//  Trade History Row
 // ──────────────────────────────────────────────
 function TradeRow({ trade, isLast }: { trade: Trade; isLast: boolean }) {
   const up = trade.profit >= 0;
-  // Format date as M.DD (e.g. "6.10")
   const dateStr = (() => {
     const d = new Date(trade.exitAt);
     if (isNaN(d.getTime())) return trade.exitAt?.slice(5, 10)?.replace('-', '.') ?? '';
     return `${d.getMonth() + 1}.${String(d.getDate()).padStart(2, '0')}`;
   })();
 
-  const typeLabel = trade.type === 'stop_loss' ? '손절 청산' : (trade.direction === 'Long' ? '롱 청산' : '숏 청산');
+  const typeLabel = trade.type === 'stop_loss' ? '손절' : (trade.direction === 'Long' ? '롱 청산' : '숏 청산');
 
   return (
     <Pressable
@@ -74,8 +110,8 @@ function TradeRow({ trade, isLast }: { trade: Trade; isLast: boolean }) {
     >
       <Text style={row.date}>{dateStr}</Text>
       <View style={{ flex: 1 }}>
-        <Text style={row.type}>{trade.symbol} · {typeLabel}</Text>
-        <Text style={row.days}>{trade.holdingDays}일 보유</Text>
+        <Text style={row.symbol}>{trade.symbol}</Text>
+        <Text style={row.meta}>{typeLabel} · {trade.holdingDays}일</Text>
       </View>
       <View style={{ alignItems: 'flex-end' }}>
         <Text style={[row.amount, { color: up ? '#FF4747' : '#246CF9' }]}>
@@ -137,7 +173,7 @@ function HistoryContent({ trades }: { trades: Trade[] | null }) {
             onPress={() => setFilter(f)}
             style={[hist.filterBtn, filter === f && hist.filterBtnActive]}
           >
-            <Text style={[hist.filterText, { color: filter === f ? '#3182F6' : '#AEAEB2' }]}>{f}</Text>
+            <Text style={[hist.filterText, { color: filter === f ? '#191919' : '#AEAEB2' }]}>{f}</Text>
           </Pressable>
         ))}
       </View>
@@ -188,7 +224,7 @@ export default function Trading() {
                 onPress={() => setTab(t)}
                 scaleTo={0.96}
               >
-                <Text style={[styles.segText, { color: tab === t ? '#3182F6' : '#AEAEB2' }]}>
+                <Text style={[styles.segText, { color: tab === t ? '#191919' : '#AEAEB2' }]}>
                   {t === 'positions' ? '보유 포지션' : '거래 내역'}
                 </Text>
               </PressableScale>
@@ -205,9 +241,12 @@ export default function Trading() {
                 <Text style={styles.emptyText}>활성 포지션이 없어요</Text>
               </View>
             ) : (
-              <View style={styles.positionList}>
-                {positions.map((pos) => <PositionCard key={pos.id} pos={pos} />)}
-              </View>
+              <>
+                <PortfolioSummary positions={positions} />
+                <View style={styles.positionList}>
+                  {positions.map((pos) => <PositionCard key={pos.id} pos={pos} />)}
+                </View>
+              </>
             )
           ) : (
             <HistoryContent trades={trades ?? null} />
@@ -235,10 +274,14 @@ const styles = StyleSheet.create({
     borderColor:    '#F0F0F0',
   },
   segBtn:       { flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: 'center' },
-  segBtnActive: { backgroundColor: '#EEF5FF' },
+  segBtnActive: { backgroundColor: '#F0F0F0' },
   segText:      { fontSize: 14, fontWeight: '600' },
   content:      { paddingHorizontal: 20 },
-  positionList: {},
+  positionList: {
+    backgroundColor: '#FFFFFF',
+    borderRadius:    20,
+    overflow:        'hidden',
+  },
   emptyCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
@@ -248,33 +291,50 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 14, color: '#AEAEB2' },
 });
 
+// Portfolio summary styles
+const summary = StyleSheet.create({
+  card: {
+    backgroundColor: '#FFFFFF',
+    borderRadius:    20,
+    padding:         20,
+    marginBottom:    10,
+  },
+  row:     { flexDirection: 'row', alignItems: 'center' },
+  divider: { width: 1, height: 40, backgroundColor: '#F0F0F0', marginHorizontal: 16 },
+  label:   { fontSize: 12, color: '#AEAEB2', marginBottom: 4 },
+  value:   { fontSize: 18, fontWeight: '700', color: '#191919' },
+  pnl:     { fontSize: 18, fontWeight: '700' },
+  rate:    { fontSize: 12, fontWeight: '600', marginTop: 2 },
+});
+
 // Position card styles
 const card = StyleSheet.create({
-  wrap:      { backgroundColor: '#FFFFFF', borderRadius: 20, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  icon:      { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  symbol:    { fontSize: 15, fontWeight: '700', color: '#191919' },
-  sub:       { fontSize: 12, fontWeight: '500', color: '#AEAEB2', marginTop: 2 },
-  amount:    { fontSize: 15, fontWeight: '700' },
-  rate:      { fontSize: 12, fontWeight: '600', marginTop: 2 },
-  badge:     { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  wrap:     { backgroundColor: '#FFFFFF', padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12, borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
+  iconWrap: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center' },
+  iconText: { fontSize: 14, fontWeight: '700', color: '#555555' },
+  symbol:   { fontSize: 15, fontWeight: '700', color: '#191919' },
+  sub:      { fontSize: 12, fontWeight: '500', color: '#AEAEB2', marginTop: 2 },
+  amount:   { fontSize: 15, fontWeight: '700' },
+  rate:     { fontSize: 12, fontWeight: '600', marginTop: 2 },
+  badge:    { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   badgeText: { fontSize: 11, fontWeight: '600' },
-  hint:      { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F5F5F5' },
-  hintText:  { fontSize: 12, color: '#AEAEB2' },
+  hint:     { backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingBottom: 12, paddingTop: 0 },
+  hintText: { fontSize: 12, color: '#AEAEB2' },
 });
 
 // History row styles
 const row = StyleSheet.create({
   wrap: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    gap:            14,
-    paddingVertical: 14,
+    flexDirection:     'row',
+    alignItems:        'center',
+    gap:               14,
+    paddingVertical:   14,
     paddingHorizontal: 16,
-    position:       'relative',
+    position:          'relative',
   },
   date:    { fontSize: 12, fontWeight: '600', color: '#AEAEB2', width: 32, flexShrink: 0 },
-  type:    { fontSize: 14, fontWeight: '600', color: '#191919' },
-  days:    { fontSize: 12, color: '#AEAEB2', marginTop: 2 },
+  symbol:  { fontSize: 14, fontWeight: '600', color: '#191919' },
+  meta:    { fontSize: 12, color: '#AEAEB2', marginTop: 2 },
   amount:  { fontSize: 14, fontWeight: '700' },
   rate:    { fontSize: 11, fontWeight: '600', marginTop: 2 },
   divider: {
@@ -295,15 +355,15 @@ const hist = StyleSheet.create({
     padding:         20,
     marginBottom:    12,
   },
-  summaryRow:      { flexDirection: 'row', alignItems: 'center' },
-  summaryDivider:  { width: 1, height: 36, backgroundColor: '#F0F0F0' },
-  summaryLabel:    { fontSize: 12, color: '#AEAEB2', marginBottom: 4 },
-  summaryValue:    { fontSize: 16, fontWeight: '700', color: '#191919' },
+  summaryRow:     { flexDirection: 'row', alignItems: 'center' },
+  summaryDivider: { width: 1, height: 36, backgroundColor: '#F0F0F0' },
+  summaryLabel:   { fontSize: 12, color: '#AEAEB2', marginBottom: 4 },
+  summaryValue:   { fontSize: 16, fontWeight: '700', color: '#191919' },
 
   filterRow: {
-    flexDirection:  'row',
-    gap:            6,
-    marginBottom:   12,
+    flexDirection: 'row',
+    gap:           6,
+    marginBottom:  12,
   },
   filterBtn: {
     paddingHorizontal: 14,
@@ -314,8 +374,8 @@ const hist = StyleSheet.create({
     borderColor:        '#F0F0F0',
   },
   filterBtnActive: {
-    backgroundColor: '#EEF5FF',
-    borderColor:     '#C8DCFF',
+    backgroundColor: '#F0F0F0',
+    borderColor:     '#E0E0E0',
   },
   filterText: { fontSize: 13, fontWeight: '600' },
 

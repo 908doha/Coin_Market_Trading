@@ -69,7 +69,7 @@ export function PeriodSelector<T extends string>({
             <Text
               style={[
                 styles.label,
-                { color: isActive ? '#3182F6' : '#AEAEB2' },
+                { color: isActive ? '#191919' : '#AEAEB2' },
               ]}
             >
               {period}
@@ -91,7 +91,7 @@ const styles = StyleSheet.create({
     position:        'absolute',
     bottom:          0,
     top:             0,
-    backgroundColor: '#EEF5FF',
+    backgroundColor: '#F0F0F0',
     borderRadius:    20,
   },
   btn: {

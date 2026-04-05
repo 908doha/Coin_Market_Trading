@@ -81,13 +81,13 @@ export default function Account() {
             </View>
             <View style={styles.fundBtns}>
               <PressableScale
-                style={[styles.fundBtn, { backgroundColor: '#3182F6' }]}
+                style={[styles.fundBtn, { backgroundColor: '#191919' }]}
                 onPress={() => router.push('/(main)/account/deposit')}
               >
                 <Text style={styles.fundBtnText}>충전하기</Text>
               </PressableScale>
               <PressableScale
-                style={[styles.fundBtn, { backgroundColor: '#F5F5F5' }]}
+                style={[styles.fundBtn, { backgroundColor: '#F0F0F0' }]}
                 onPress={() => router.push('/(main)/account/withdraw')}
               >
                 <Text style={[styles.fundBtnText, { color: '#191919' }]}>출금하기</Text>
@@ -159,10 +159,10 @@ const styles = StyleSheet.create({
   profileRow:  { flexDirection: 'row', alignItems: 'center', gap: 14 },
   avatar: {
     width: 52, height: 52, borderRadius: 26,
-    backgroundColor: '#EEF5FF',
+    backgroundColor: '#F0F0F0',
     alignItems: 'center', justifyContent: 'center',
   },
-  avatarText:  { fontSize: 22, fontWeight: '700', color: '#3182F6' },
+  avatarText:  { fontSize: 22, fontWeight: '700', color: '#191919' },
   userName:    { fontSize: 17, fontWeight: '700', color: '#191919' },
   statusBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 5,

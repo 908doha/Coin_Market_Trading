@@ -4,6 +4,7 @@ const { v4: uuid } = require('uuid');
 const jwt     = require('jsonwebtoken');
 const { getDb } = require('../db');
 const { signAccess, signRefresh } = require('../middleware/auth');
+const { sendVerificationCode } = require('../services/email');
 
 const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'osprey-refresh-secret-change-me';
 
@@ -17,7 +18,7 @@ router.post('/send-code', async (req, res) => {
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   await db.run(`INSERT INTO verification_codes (id, email, code, expires_at) VALUES (?, ?, ?, ?)`,
     uuid(), email, code, expiresAt);
-  console.log(`[인증코드] ${email} → ${code}`);
+  await sendVerificationCode(email, code);
   res.json({ message: '인증코드가 발송됐습니다.' });
 });
 

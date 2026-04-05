@@ -16,6 +16,7 @@ export { SubPageHeader }         from './components/SubPageHeader';
 export { ScreenTransition }      from './components/ScreenTransition';
 export { PeriodSelector }         from './components/PeriodSelector';
 export { PressableScale }         from './components/PressableScale';
+export { Toggle }                 from './components/Toggle';
 export { FadeTabView }            from './components/FadeTabView';
 export {
   Skeleton, AssetCardSkeleton, TradingListSkeleton, AccountSkeleton,

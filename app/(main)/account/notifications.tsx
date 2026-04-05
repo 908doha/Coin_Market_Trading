@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  View, StyleSheet, ScrollView, Switch, Alert,
+  View, StyleSheet, ScrollView, Alert,
   Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Text, PressableScale, Skeleton, SubPageHeader, ScreenTransition } from '@/design-system';
+import { Text, PressableScale, Skeleton, SubPageHeader, ScreenTransition, Toggle } from '@/design-system';
 import { notificationsService, ApiError } from '@/services';
 import { useApi, useMutation } from '@/hooks/useApi';
 import type { NotificationSettings } from '@/services';
@@ -53,13 +53,7 @@ function NotifRow({
           <Text style={styles.notifLabel}>{item.label}</Text>
           <Text style={styles.notifDesc}>{item.desc}</Text>
         </View>
-        <Switch
-          value={value}
-          onValueChange={handleToggle}
-          trackColor={{ false: '#E2E2E2', true: '#191919' }}
-          thumbColor="#FFFFFF"
-          ios_backgroundColor="#E2E2E2"
-        />
+        <Toggle value={value} onValueChange={handleToggle} />
       </Animated.View>
       {!isLast && <View style={styles.divider} />}
     </>

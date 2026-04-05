@@ -139,11 +139,12 @@ export default function Home() {
             {/* 카드 헤더 */}
             <PressableScale
               onPress={() => router.push('/(main)/positions')}
-              style={styles.posHeader}
               scaleTo={0.98}
             >
-              <Text style={styles.sectionTitle}>활성 포지션</Text>
-              <Text style={styles.posArrow}>›</Text>
+              <View style={styles.posHeader}>
+                <Text style={styles.sectionTitle}>활성 포지션</Text>
+                <Text style={styles.posArrow}>›</Text>
+              </View>
             </PressableScale>
 
             {!positions?.length ? (
@@ -161,7 +162,7 @@ export default function Home() {
                   >
                     <View style={styles.posRow}>
                       <View style={[styles.posIcon, { backgroundColor: up ? '#FFF0F0' : '#F0F0F0' }]}>
-                        <Text style={{ fontSize: 15, fontWeight: '700', color: up ? '#D93025' : '#246CF9' }}>
+                        <Text style={{ fontSize: 18, fontWeight: '700', color: up ? '#D93025' : '#246CF9' }}>
                           {pos.coin.slice(0, 2)}
                         </Text>
                       </View>
@@ -242,7 +243,7 @@ const styles = StyleSheet.create({
 
   posRow:    { flexDirection: 'row', alignItems: 'center', gap: 12 },
   posIcon: {
-    width: 44, height: 44, borderRadius: 22,
+    width: 52, height: 52, borderRadius: 26,
     alignItems: 'center', justifyContent: 'center',
   },
   posSymbol:    { fontSize: 15, fontWeight: '700', color: '#191919' },

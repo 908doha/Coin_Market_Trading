@@ -135,8 +135,8 @@ export default function Account() {
               <View style={styles.menuRow}>
                 <View style={styles.menuIcon}><Text style={{ fontSize: 18 }}>📋</Text></View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.menuLabel}>거래 내역</Text>
-                  <Text variant="meta" color="#AEAEB2">충전·출금·거래 기록</Text>
+                  <Text style={styles.menuLabel}>입출금 내역</Text>
+                  <Text variant="meta" color="#AEAEB2">충전·출금 기록</Text>
                 </View>
                 <Text style={styles.menuArrow}>›</Text>
               </View>

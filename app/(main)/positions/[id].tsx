@@ -3,12 +3,11 @@ import {
   View,
   StyleSheet,
   ScrollView,
-  Pressable,
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, router } from 'expo-router';
-import { Text, Card, Badge, Divider } from '@/design-system';
+import { useLocalSearchParams } from 'expo-router';
+import { Text, Card, Badge, Divider, SubPageHeader } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
@@ -146,13 +145,7 @@ export default function PositionDetail() {
   if (isLoading) {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <View style={styles.navBar}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn}>
-            <Text variant="body1">←</Text>
-          </Pressable>
-          <Text variant="heading3">포지션 상세</Text>
-          <View style={{ width: 40 }} />
-        </View>
+        <SubPageHeader title="포지션 상세" />
         <View style={styles.center}>
           <ActivityIndicator color={colors.primary.default} />
         </View>
@@ -163,13 +156,7 @@ export default function PositionDetail() {
   if (error || !position) {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <View style={styles.navBar}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn}>
-            <Text variant="body1">←</Text>
-          </Pressable>
-          <Text variant="heading3">포지션 상세</Text>
-          <View style={{ width: 40 }} />
-        </View>
+        <SubPageHeader title="포지션 상세" />
         <View style={styles.center}>
           <Text variant="body1" color={colors.text.tertiary}>포지션을 찾을 수 없어요</Text>
         </View>
@@ -181,14 +168,7 @@ export default function PositionDetail() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      {/* 헤더 */}
-      <View style={styles.navBar}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
-          <Text variant="body1">←</Text>
-        </Pressable>
-        <Text variant="heading3">포지션 상세</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <SubPageHeader title="포지션 상세" />
 
       <ScrollView
         style={styles.scroll}
@@ -310,7 +290,7 @@ export default function PositionDetail() {
           </View>
         </Card>
 
-        <View style={{ height: spacing[10] }} />
+        <View style={{ height: 120 }} />
       </ScrollView>
     </SafeAreaView>
   );
@@ -319,16 +299,6 @@ export default function PositionDetail() {
 const styles = StyleSheet.create({
   safe:   { flex: 1, backgroundColor: colors.bg.default },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  navBar: {
-    flexDirection:   'row',
-    alignItems:      'center',
-    justifyContent:  'space-between',
-    paddingHorizontal: spacing[5],
-    paddingVertical: spacing[3],
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border.default,
-  },
-  backBtn: { width: 40, paddingVertical: spacing[1] },
   scroll:  { flex: 1 },
   content: { paddingHorizontal: spacing[5], paddingTop: spacing[5] },
 

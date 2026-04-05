@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Pressable, Alert, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
-import { Text, Card, Button, Badge } from '@/design-system';
+import { Text, Card, Button, Badge, SubPageHeader } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { agentService, ApiError } from '@/services';
 import { useApi, useMutation } from '@/hooks/useApi';
@@ -59,13 +58,7 @@ export default function AgentSettings() {
   if (isLoading) {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <View style={styles.navBar}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn}>
-            <Text variant="body1">←</Text>
-          </Pressable>
-          <Text variant="heading3">에이전트 설정</Text>
-          <View style={{ width: 40 }} />
-        </View>
+        <SubPageHeader title="에이전트 설정" />
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator color={colors.primary.default} />
         </View>
@@ -75,13 +68,7 @@ export default function AgentSettings() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <View style={styles.navBar}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
-          <Text variant="body1">←</Text>
-        </Pressable>
-        <Text variant="heading3">에이전트 설정</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <SubPageHeader title="에이전트 설정" />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
@@ -176,12 +163,6 @@ export default function AgentSettings() {
 
 const styles = StyleSheet.create({
   safe:    { flex: 1, backgroundColor: colors.bg.default },
-  navBar: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: spacing[5], paddingVertical: spacing[3],
-    borderBottomWidth: 1, borderBottomColor: colors.border.default,
-  },
-  backBtn: { width: 40, paddingVertical: spacing[1] },
   content: { paddingHorizontal: spacing[5], paddingTop: spacing[5] },
   section: { marginBottom: spacing[4] },
 

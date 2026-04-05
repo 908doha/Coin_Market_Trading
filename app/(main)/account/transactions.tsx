@@ -1,8 +1,7 @@
 import React from 'react';
-import { View, StyleSheet, ScrollView, Pressable, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
-import { Text, Card, Badge } from '@/design-system';
+import { Text, Card, Badge, SubPageHeader } from '@/design-system';
 import { colors, spacing } from '@/design-system/tokens';
 import { accountService } from '@/services';
 import { useApi } from '@/hooks/useApi';
@@ -69,15 +68,9 @@ export default function Transactions() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <View style={styles.navBar}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
-          <Text variant="body1">←</Text>
-        </Pressable>
-        <Text variant="heading3">충전·출금 내역</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <SubPageHeader title="입출금 내역" />
 
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
         {isLoading ? (
           <View style={styles.center}>
             <ActivityIndicator color={colors.primary.default} />
@@ -109,12 +102,6 @@ export default function Transactions() {
 
 const styles = StyleSheet.create({
   safe:   { flex: 1, backgroundColor: colors.bg.default },
-  navBar: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: spacing[5], paddingVertical: spacing[3],
-    borderBottomWidth: 1, borderBottomColor: colors.border.default,
-  },
-  backBtn: { width: 40, paddingVertical: spacing[1] },
   center:  { marginTop: spacing[16], alignItems: 'center' },
   empty:   { marginTop: spacing[16], alignItems: 'center' },
 });

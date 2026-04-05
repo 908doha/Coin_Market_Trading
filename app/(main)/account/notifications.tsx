@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, StyleSheet, ScrollView, Switch, Alert,
-  Animated, Pressable,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Text, PressableScale, Skeleton } from '@/design-system';
+import { Text, PressableScale, Skeleton, SubPageHeader } from '@/design-system';
 import { notificationsService, ApiError } from '@/services';
 import { useApi, useMutation } from '@/hooks/useApi';
 import type { NotificationSettings } from '@/services';
@@ -93,16 +93,9 @@ export default function Notifications() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      {/* 헤더 */}
-      <View style={styles.header}>
-        <PressableScale onPress={() => router.back()} style={styles.backBtn} scaleTo={0.85}>
-          <Text style={styles.backIcon}>‹</Text>
-        </PressableScale>
-      </View>
+      <SubPageHeader title="알림 설정" />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <Text style={styles.title}>알림 설정</Text>
-
         {/* 섹션 헤더 */}
         <Text style={styles.sectionTitle}>알림 항목</Text>
         <Text style={styles.sectionDesc}>꺼진 항목의 알림은 보내지 않아요.</Text>
@@ -151,7 +144,7 @@ export default function Notifications() {
           <Text style={styles.saveBtnText}>{saving ? '저장 중...' : '저장'}</Text>
         </PressableScale>
 
-        <View style={{ height: 40 }} />
+        <View style={{ height: 120 }} />
       </ScrollView>
     </SafeAreaView>
   );
@@ -159,12 +152,8 @@ export default function Notifications() {
 
 const styles = StyleSheet.create({
   root:    { flex: 1, backgroundColor: '#F5F5F5' },
-  header:  { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 0 },
-  backBtn: { width: 36, height: 36, justifyContent: 'center' },
-  backIcon: { fontSize: 28, color: '#191919', lineHeight: 36, fontWeight: '300' },
 
-  content: { paddingHorizontal: 20 },
-  title:   { fontSize: 26, fontWeight: '800', color: '#191919', marginTop: 8, marginBottom: 24 },
+  content: { paddingHorizontal: 20, paddingTop: 8 },
 
   sectionTitle: { fontSize: 15, fontWeight: '700', color: '#191919', marginBottom: 4 },
   sectionDesc:  { fontSize: 13, color: '#AEAEB2', marginBottom: 14 },

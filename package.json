@@ -9,9 +9,7 @@
     "web": "expo start --web",
     "build:android": "eas build --platform android",
     "build:ios": "eas build --platform ios",
-    "build:web": "expo export -p web",
-    "figma:upload": "ts-node --project tsconfig.scripts.json scripts/figma-upload.ts",
-    "figma:tokens": "ts-node --project tsconfig.scripts.json scripts/generate-tokens-json.ts"
+    "build:web": "expo export -p web"
   },
   "dependencies": {
     "@expo/vector-icons": "^14.0.4",
@@ -37,8 +35,6 @@
     "@babel/core": "^7.25.2",
     "@types/react": "~18.3.12",
     "@types/react-dom": "~18.3.1",
-    "axios": "^1.7.9",
-    "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
   },
   "private": true

@@ -12,6 +12,8 @@ export { Divider } from './components/Divider';
 export { Avatar }    from './components/Avatar';
 export { GlassView, GlassCard }   from './components/Glass';
 export { PeriodSelector }         from './components/PeriodSelector';
+export { PressableScale }         from './components/PressableScale';
+export { FadeTabView }            from './components/FadeTabView';
 
 // Types
 export type { TextProps }    from './components/Text';

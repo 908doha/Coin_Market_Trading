@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Pressable, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Text, GlassCard } from '@/design-system';
+import { Text, GlassCard, PressableScale, FadeTabView } from '@/design-system';
 import { positionsService, tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
@@ -18,7 +18,7 @@ export default function Trading() {
   const isLoading = tab === 'positions' ? posLoading : tradeLoading;
 
   return (
-    <View style={styles.root}>
+    <FadeTabView style={styles.root}>
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
         <View style={styles.header}>
           <Text style={styles.title}>트레이딩</Text>
@@ -27,15 +27,16 @@ export default function Trading() {
         <View style={styles.segmentWrap}>
           <View style={styles.segment}>
             {(['positions', 'history'] as Tab[]).map((t) => (
-              <Pressable
+              <PressableScale
                 key={t}
                 style={[styles.segBtn, tab === t && styles.segBtnActive]}
                 onPress={() => setTab(t)}
+                scaleTo={0.96}
               >
                 <Text style={[styles.segText, { color: tab === t ? '#3182F6' : '#AEAEB2' }]}>
                   {t === 'positions' ? '보유 포지션' : '거래 기록'}
                 </Text>
-              </Pressable>
+              </PressableScale>
             ))}
           </View>
         </View>
@@ -51,8 +52,12 @@ export default function Trading() {
             ) : positions.map((pos) => {
               const up = pos.profit >= 0;
               return (
-                <Pressable key={pos.id} onPress={() => router.push(`/(main)/positions/${pos.id}`)}>
-                  <GlassCard intensity="low" radius={20} padding={16} style={styles.card}>
+                <PressableScale
+                  key={pos.id}
+                  onPress={() => router.push(`/(main)/positions/${pos.id}`)}
+                  style={{ marginBottom: 10, borderRadius: 20 }}
+                >
+                  <GlassCard intensity="low" radius={20} padding={16}>
                     <View style={styles.cardRow}>
                       <View style={[styles.icon, { backgroundColor: up ? '#EDFBF3' : '#FFF0F0' }]}>
                         <Text style={{ fontSize: 15, fontWeight: '700', color: up ? '#0D9E45' : '#D93025' }}>
@@ -89,7 +94,7 @@ export default function Trading() {
                       </View>
                     ) : null}
                   </GlassCard>
-                </Pressable>
+                </PressableScale>
               );
             })
           ) : (
@@ -100,8 +105,12 @@ export default function Trading() {
             ) : trades.map((trade) => {
               const up = trade.profit >= 0;
               return (
-                <Pressable key={trade.id} onPress={() => router.push(`/(main)/history/${trade.id}`)}>
-                  <GlassCard intensity="low" radius={20} padding={16} style={styles.card}>
+                <PressableScale
+                  key={trade.id}
+                  onPress={() => router.push(`/(main)/history/${trade.id}`)}
+                  style={{ marginBottom: 10, borderRadius: 20 }}
+                >
+                  <GlassCard intensity="low" radius={20} padding={16}>
                     <View style={styles.cardRow}>
                       <View style={[styles.icon, { backgroundColor: up ? '#EDFBF3' : '#FFF0F0' }]}>
                         <Text style={{ fontSize: 15, fontWeight: '700', color: up ? '#0D9E45' : '#D93025' }}>
@@ -129,14 +138,14 @@ export default function Trading() {
                       </View>
                     </View>
                   </GlassCard>
-                </Pressable>
+                </PressableScale>
               );
             })
           )}
           <View style={{ height: 120 }} />
         </ScrollView>
       </SafeAreaView>
-    </View>
+    </FadeTabView>
   );
 }
 
@@ -154,7 +163,6 @@ const styles = StyleSheet.create({
   segBtnActive: { backgroundColor: '#EEF5FF' },
   segText:      { fontSize: 14, fontWeight: '600' },
   content:      { paddingHorizontal: 20 },
-  card:         { marginBottom: 10 },
   cardRow:      { flexDirection: 'row', alignItems: 'center', gap: 12 },
   icon:         { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   symbol:       { fontSize: 15, fontWeight: '700', color: '#191919' },

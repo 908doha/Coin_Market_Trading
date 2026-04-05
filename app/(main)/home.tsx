@@ -1,11 +1,10 @@
 import React, { useState } from 'react';
 import {
-  View, StyleSheet, ScrollView, Pressable,
-  ActivityIndicator,
+  View, StyleSheet, ScrollView, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Text, GlassCard, PeriodSelector } from '@/design-system';
+import { Text, GlassCard, PeriodSelector, PressableScale, FadeTabView } from '@/design-system';
 import { accountService, agentService, positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAuth } from '@/store/auth';
@@ -38,7 +37,6 @@ function MiniChart({ data, positive }: { data: { value: number }[]; positive: bo
   );
 }
 
-
 const agentStatusMap = {
   running: { label: '운용중',   color: '#1AC24E', bg: '#EDFBF3' },
   paused:  { label: '일시정지', color: '#FF8A00', bg: '#FFF8E8' },
@@ -49,16 +47,16 @@ export default function Home() {
   const [period, setPeriod] = useState<typeof PERIODS[number]>('1M');
   const { user } = useAuth();
 
-  const { data: balance,   isLoading: balLoading }   = useApi(() => accountService.getBalance(), []);
-  const { data: chart }                               = useApi(() => accountService.getChart(period), [period]);
-  const { data: agentStats }                          = useApi(() => agentService.getStats(), []);
-  const { data: positions }                           = useApi(() => positionsService.getAll(), []);
+  const { data: balance,   isLoading: balLoading } = useApi(() => accountService.getBalance(), []);
+  const { data: chart }                             = useApi(() => accountService.getChart(period), [period]);
+  const { data: agentStats }                        = useApi(() => agentService.getStats(), []);
+  const { data: positions }                         = useApi(() => positionsService.getAll(), []);
 
-  const isProfit      = (balance?.profitTotal ?? 0) >= 0;
-  const agentStatus   = agentStatusMap[agentStats?.status ?? 'waiting'];
+  const isProfit    = (balance?.profitTotal ?? 0) >= 0;
+  const agentStatus = agentStatusMap[agentStats?.status ?? 'waiting'];
 
   return (
-    <View style={styles.root}>
+    <FadeTabView style={styles.root}>
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
         <ScrollView
           style={{ flex: 1 }}
@@ -98,19 +96,11 @@ export default function Home() {
                 </View>
               </>
             )}
-
-            {/* 차트 */}
             <View style={styles.chartArea}>
               <MiniChart data={chart ?? []} positive={isProfit} />
             </View>
-
-            {/* 기간 선택 */}
             <View style={styles.periodRow}>
-              <PeriodSelector
-                periods={PERIODS}
-                active={period}
-                onChange={setPeriod}
-              />
+              <PeriodSelector periods={PERIODS} active={period} onChange={setPeriod} />
             </View>
           </GlassCard>
 
@@ -152,9 +142,9 @@ export default function Home() {
           {/* ── 활성 포지션 ── */}
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>활성 포지션</Text>
-            <Pressable onPress={() => router.push('/(main)/positions')}>
+            <PressableScale onPress={() => router.push('/(main)/positions')} style={{ borderRadius: 8 }}>
               <Text style={styles.seeAll}>전체 보기</Text>
-            </Pressable>
+            </PressableScale>
           </View>
 
           {!positions?.length ? (
@@ -165,8 +155,12 @@ export default function Home() {
             positions.slice(0, 2).map((pos) => {
               const up = pos.profit >= 0;
               return (
-                <Pressable key={pos.id} onPress={() => router.push(`/(main)/positions/${pos.id}`)}>
-                  <GlassCard intensity="low" radius={20} padding={16} style={styles.posCard}>
+                <PressableScale
+                  key={pos.id}
+                  onPress={() => router.push(`/(main)/positions/${pos.id}`)}
+                  style={{ marginBottom: 8, borderRadius: 20 }}
+                >
+                  <GlassCard intensity="low" radius={20} padding={16}>
                     <View style={styles.posRow}>
                       <View style={[styles.posIcon, { backgroundColor: up ? '#EDFBF3' : '#FFF0F0' }]}>
                         <Text style={{ fontSize: 15, fontWeight: '700', color: up ? '#0D9E45' : '#D93025' }}>
@@ -184,7 +178,7 @@ export default function Home() {
                             }]}>{pos.direction}</Text>
                           </View>
                         </View>
-                        <Text style={styles.posAmount}>{formatKRW(pos.amount)}</Text>
+                        <Text variant="meta" color="#AEAEB2">{formatKRW(pos.amount)}</Text>
                       </View>
                       <View style={{ alignItems: 'flex-end' }}>
                         <Text style={[styles.posProfit, { color: up ? '#0D9E45' : '#D93025' }]}>
@@ -196,7 +190,7 @@ export default function Home() {
                       </View>
                     </View>
                   </GlassCard>
-                </Pressable>
+                </PressableScale>
               );
             })
           )}
@@ -204,7 +198,7 @@ export default function Home() {
           <View style={{ height: 120 }} />
         </ScrollView>
       </SafeAreaView>
-    </View>
+    </FadeTabView>
   );
 }
 
@@ -222,7 +216,7 @@ const styles = StyleSheet.create({
     borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6,
   },
   agentDot:      { width: 6, height: 6, borderRadius: 3 },
-  agentBadgeText: { fontSize: 12, fontWeight: '600' },
+  agentBadgeText: {},
 
   heroCard:    { marginBottom: 12 },
   heroAmount:  { fontSize: 34, fontWeight: '800', color: '#191919', letterSpacing: -1 },
@@ -243,23 +237,21 @@ const styles = StyleSheet.create({
     alignItems: 'center', marginBottom: 10, marginTop: 4,
   },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: '#191919' },
-  seeAll:       { fontSize: 13, color: '#3182F6', fontWeight: '500' },
+  seeAll:       { fontSize: 13, color: '#3182F6', fontWeight: '500', padding: 4 },
 
-  agentRow:       { flexDirection: 'row', alignItems: 'center' },
+  agentRow:        { flexDirection: 'row', alignItems: 'center' },
   agentStatusText: { fontSize: 14, fontWeight: '600', marginTop: 4 },
-  agentStats:     { flexDirection: 'row', alignItems: 'center', gap: 16 },
-  agentStatItem:  { alignItems: 'center' },
-  agentStatVal:   { fontSize: 18, fontWeight: '700', color: '#191919' },
+  agentStats:      { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  agentStatItem:   { alignItems: 'center' },
+  agentStatVal:    { fontSize: 18, fontWeight: '700', color: '#191919' },
   agentStatDivider: { width: 1, height: 32, backgroundColor: '#F0F0F0' },
 
-  posCard:   { marginBottom: 8 },
   posRow:    { flexDirection: 'row', alignItems: 'center', gap: 12 },
   posIcon: {
     width: 44, height: 44, borderRadius: 22,
     alignItems: 'center', justifyContent: 'center',
   },
   posSymbol:    { fontSize: 15, fontWeight: '700', color: '#191919' },
-  posAmount:    { fontSize: 12, color: '#AEAEB2', marginTop: 2 },
   posProfit:    { fontSize: 15, fontWeight: '700' },
   posProfitRate: { fontSize: 12, fontWeight: '600', marginTop: 2 },
   dirBadge:  { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },

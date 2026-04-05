@@ -1,8 +1,8 @@
 import React from 'react';
-import { View, StyleSheet, ScrollView, Pressable, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Text, GlassCard } from '@/design-system';
+import { Text, GlassCard, PressableScale, FadeTabView } from '@/design-system';
 import { accountService, agentService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAuth } from '@/store/auth';
@@ -23,30 +23,27 @@ export default function Account() {
   const agentStatus = agentStatusMap[agentStats?.status ?? 'waiting'];
 
   return (
-    <View style={styles.root}>
+    <FadeTabView style={styles.root}>
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
-          {/* 헤더 */}
           <View style={styles.header}>
             <Text style={styles.title}>계정</Text>
           </View>
 
           {/* 프로필 카드 */}
-          <GlassCard intensity="medium" radius={24} padding={20} style={styles.profileCard}>
+          <GlassCard intensity="medium" radius={24} padding={20} style={styles.section}>
             <View style={styles.profileRow}>
               <View style={styles.avatar}>
                 <Text style={styles.avatarText}>{user?.name?.[0]?.toUpperCase() ?? '?'}</Text>
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.userName}>{user?.name ?? '-'}</Text>
-                <Text style={styles.userEmail}>{user?.email ?? '-'}</Text>
+                <Text variant="meta" color="#AEAEB2">{user?.email ?? '-'}</Text>
               </View>
               <View style={[styles.statusBadge, { backgroundColor: agentStatus.bg }]}>
                 <View style={[styles.statusDot, { backgroundColor: agentStatus.color }]} />
-                <Text style={[styles.statusText, { color: agentStatus.color }]}>
-                  {agentStatus.label}
-                </Text>
+                <Text variant="meta" style={{ color: agentStatus.color }}>{agentStatus.label}</Text>
               </View>
             </View>
           </GlassCard>
@@ -60,7 +57,9 @@ export default function Account() {
               <>
                 <Text style={styles.balanceAmount}>{formatKRW(balance?.total ?? 0)}</Text>
                 {balance?.totalUsdt != null && (
-                  <Text style={styles.balanceUsdt}>≈ {balance.totalUsdt.toFixed(2)} USDT</Text>
+                  <Text variant="meta" color="#AEAEB2" style={{ marginTop: 2, marginBottom: 4 }}>
+                    ≈ {balance.totalUsdt.toFixed(2)} USDT
+                  </Text>
                 )}
               </>
             )}
@@ -76,27 +75,25 @@ export default function Account() {
               </View>
             </View>
             <View style={styles.fundBtns}>
-              <Pressable
+              <PressableScale
                 style={[styles.fundBtn, { backgroundColor: '#3182F6' }]}
                 onPress={() => router.push('/(main)/account/deposit')}
               >
                 <Text style={styles.fundBtnText}>충전하기</Text>
-              </Pressable>
-              <Pressable
+              </PressableScale>
+              <PressableScale
                 style={[styles.fundBtn, { backgroundColor: '#F5F5F5' }]}
                 onPress={() => router.push('/(main)/account/withdraw')}
               >
                 <Text style={[styles.fundBtnText, { color: '#191919' }]}>출금하기</Text>
-              </Pressable>
+              </PressableScale>
             </View>
           </GlassCard>
 
           {/* 메뉴 */}
           <GlassCard intensity="low" radius={24} padding={0} style={styles.section}>
-            <Pressable style={styles.menuRow} onPress={() => router.push('/(main)/account/agent-settings')}>
-              <View style={styles.menuIcon}>
-                <Text style={{ fontSize: 18 }}>🤖</Text>
-              </View>
+            <PressableScale style={styles.menuRow} onPress={() => router.push('/(main)/account/agent-settings')} scaleTo={0.98}>
+              <View style={styles.menuIcon}><Text style={{ fontSize: 18 }}>🤖</Text></View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.menuLabel}>AI 에이전트 설정</Text>
                 <Text variant="meta" color="#AEAEB2">
@@ -105,48 +102,42 @@ export default function Account() {
                 </Text>
               </View>
               <Text style={styles.menuArrow}>›</Text>
-            </Pressable>
+            </PressableScale>
             <View style={styles.menuDivider} />
-            <Pressable style={styles.menuRow} onPress={() => router.push('/(main)/account/transactions')}>
-              <View style={styles.menuIcon}>
-                <Text style={{ fontSize: 18 }}>📋</Text>
-              </View>
+            <PressableScale style={styles.menuRow} onPress={() => router.push('/(main)/account/transactions')} scaleTo={0.98}>
+              <View style={styles.menuIcon}><Text style={{ fontSize: 18 }}>📋</Text></View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.menuLabel}>거래 내역</Text>
                 <Text variant="meta" color="#AEAEB2">충전·출금·거래 기록</Text>
               </View>
               <Text style={styles.menuArrow}>›</Text>
-            </Pressable>
+            </PressableScale>
             <View style={styles.menuDivider} />
-            <Pressable style={styles.menuRow} onPress={() => router.push('/(main)/account/notifications')}>
-              <View style={styles.menuIcon}>
-                <Text style={{ fontSize: 18 }}>🔔</Text>
-              </View>
+            <PressableScale style={styles.menuRow} onPress={() => router.push('/(main)/account/notifications')} scaleTo={0.98}>
+              <View style={styles.menuIcon}><Text style={{ fontSize: 18 }}>🔔</Text></View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.menuLabel}>알림 설정</Text>
                 <Text variant="meta" color="#AEAEB2">거래 알림, 리포트</Text>
               </View>
               <Text style={styles.menuArrow}>›</Text>
-            </Pressable>
+            </PressableScale>
           </GlassCard>
 
           {/* 로그아웃 */}
           <GlassCard intensity="low" radius={24} padding={0} style={styles.section}>
-            <Pressable style={styles.menuRow} onPress={async () => {
+            <PressableScale style={styles.menuRow} scaleTo={0.98} onPress={async () => {
               await logout();
               router.replace('/(auth)/login');
             }}>
-              <View style={styles.menuIcon}>
-                <Text style={{ fontSize: 18 }}>🚪</Text>
-              </View>
+              <View style={styles.menuIcon}><Text style={{ fontSize: 18 }}>🚪</Text></View>
               <Text style={[styles.menuLabel, { color: '#FF4747' }]}>로그아웃</Text>
-            </Pressable>
+            </PressableScale>
           </GlassCard>
 
           <View style={{ height: 120 }} />
         </ScrollView>
       </SafeAreaView>
-    </View>
+    </FadeTabView>
   );
 }
 
@@ -157,7 +148,7 @@ const styles = StyleSheet.create({
   header: { paddingTop: 8, paddingBottom: 16 },
   title:  { fontSize: 28, fontWeight: '800', color: '#191919' },
 
-  profileCard: { marginBottom: 12 },
+  section:     { marginBottom: 12 },
   profileRow:  { flexDirection: 'row', alignItems: 'center', gap: 14 },
   avatar: {
     width: 52, height: 52, borderRadius: 26,
@@ -166,17 +157,13 @@ const styles = StyleSheet.create({
   },
   avatarText:  { fontSize: 22, fontWeight: '700', color: '#3182F6' },
   userName:    { fontSize: 17, fontWeight: '700', color: '#191919' },
-  userEmail:   { fontSize: 13, color: '#AEAEB2', marginTop: 2 },
   statusBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5,
   },
   statusDot:  { width: 6, height: 6, borderRadius: 3 },
-  statusText: { fontSize: 12, fontWeight: '600' },
 
-  section:       { marginBottom: 12 },
   balanceAmount: { fontSize: 30, fontWeight: '800', color: '#191919', letterSpacing: -0.5 },
-  balanceUsdt:   { fontSize: 13, color: '#AEAEB2', marginTop: 2, marginBottom: 4 },
   balanceRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#F0F0F0',
@@ -184,8 +171,8 @@ const styles = StyleSheet.create({
   balSubValue: { fontSize: 15, fontWeight: '700', color: '#191919', marginTop: 4 },
   balDivider:  { width: 1, height: 36, backgroundColor: '#F0F0F0' },
 
-  fundBtns:    { flexDirection: 'row', gap: 10, marginTop: 16 },
-  fundBtn:     { flex: 1, height: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  fundBtns: { flexDirection: 'row', gap: 10, marginTop: 16 },
+  fundBtn:  { flex: 1, height: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   fundBtnText: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
 
   menuRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 18, gap: 14 },

@@ -1,13 +1,13 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Pressable, Alert } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, StyleSheet, ScrollView, Pressable, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Text, Card, Button, Divider, Badge } from '@/design-system';
+import { Text, Card, Button, Badge } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
-import { mockAgentStats } from '@/mock';
+import { agentService, ApiError } from '@/services';
+import { useApi, useMutation } from '@/hooks/useApi';
+import type { AgentStatus, RiskLevel } from '@/services';
 import { RISK_LABELS, RISK_DESCRIPTIONS } from '@/constants';
-
-type RiskLevel = 'low' | 'medium' | 'high';
 
 const RISK_VARIANTS: Record<RiskLevel, 'positive' | 'cautious' | 'negative'> = {
   low:    'positive',
@@ -16,9 +16,29 @@ const RISK_VARIANTS: Record<RiskLevel, 'positive' | 'cautious' | 'negative'> = {
 };
 
 export default function AgentSettings() {
-  const [status, setStatus]     = useState(mockAgentStats.status);
-  const [risk, setRisk]         = useState<RiskLevel>(mockAgentStats.riskLevel);
-  const [saving, setSaving]     = useState(false);
+  const { data: settings, isLoading } = useApi(() => agentService.getSettings(), []);
+
+  const [status, setStatus] = useState<AgentStatus>('waiting');
+  const [risk, setRisk]     = useState<RiskLevel>('medium');
+
+  useEffect(() => {
+    if (settings) {
+      setStatus(settings.status);
+      setRisk(settings.riskLevel);
+    }
+  }, [settings]);
+
+  const { mutate: save, isLoading: saving } = useMutation(
+    (body: { status: AgentStatus; riskLevel: RiskLevel }) => agentService.updateSettings(body),
+    {
+      onSuccess: () => router.back(),
+      onError: (err) => {
+        const msg = err instanceof ApiError ? err.message : '저장에 실패했어요.';
+        Alert.alert('오류', msg);
+      },
+    },
+  );
+
   const isRunning = status === 'running';
 
   const toggleStatus = () => {
@@ -36,10 +56,22 @@ export default function AgentSettings() {
     }
   };
 
-  const handleSave = () => {
-    setSaving(true);
-    setTimeout(() => { setSaving(false); router.back(); }, 800);
-  };
+  if (isLoading) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <View style={styles.navBar}>
+          <Pressable onPress={() => router.back()} style={styles.backBtn}>
+            <Text variant="body1">←</Text>
+          </Pressable>
+          <Text variant="heading3">에이전트 설정</Text>
+          <View style={{ width: 40 }} />
+        </View>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator color={colors.primary.default} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -134,7 +166,7 @@ export default function AgentSettings() {
         <Button
           variant="primary" size="lg" label="저장" fullWidth
           loading={saving}
-          onPress={handleSave}
+          onPress={() => save({ status, riskLevel: risk })}
           style={{ marginBottom: spacing[10] }}
         />
       </ScrollView>

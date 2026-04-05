@@ -7,30 +7,45 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Text, Card, Input, Button, Divider } from '@/design-system';
 import { colors, spacing } from '@/design-system/tokens';
-import { mockBalance } from '@/mock';
+import { accountService, ApiError } from '@/services';
+import { useApi, useMutation } from '@/hooks/useApi';
 import { WITHDRAW_FEE, BUSINESS_HOURS } from '@/constants';
 import { formatKRW } from '@/utils/format';
 
 const BANKS = ['신한은행', '국민은행', '우리은행', '하나은행', '카카오뱅크', '토스뱅크', '기업은행', 'NH농협'];
 
 export default function Withdraw() {
-  const [amount, setAmount]   = useState('');
-  const [bank, setBank]       = useState('');
-  const [acct, setAcct]       = useState('');
-  const [holder, setHolder]   = useState('');
-  const [loading, setLoading] = useState(false);
-  const [done, setDone]       = useState(false);
+  const [amount, setAmount]       = useState('');
+  const [bank, setBank]           = useState('');
+  const [acct, setAcct]           = useState('');
+  const [holder, setHolder]       = useState('');
+  const [done, setDone]           = useState(false);
   const [showBanks, setShowBanks] = useState(false);
+
+  const { data: balance, isLoading: balanceLoading } = useApi(() => accountService.getBalance(), []);
 
   const numAmount   = Number(amount.replace(/,/g, '')) || 0;
   const netAmount   = Math.max(0, numAmount - WITHDRAW_FEE);
-  const available   = mockBalance.available;
+  const available   = balance?.available ?? 0;
   const isOverLimit = numAmount > available;
+
+  const { mutate, isLoading } = useMutation(
+    (body: { amount: number; bank: string; accountNumber: string; accountHolder: string }) =>
+      accountService.requestWithdraw(body),
+    {
+      onSuccess: () => setDone(true),
+      onError: (err) => {
+        const msg = err instanceof ApiError ? err.message : '출금 신청에 실패했어요.';
+        Alert.alert('오류', msg);
+      },
+    },
+  );
 
   const handleAmountChange = (v: string) => {
     const digits = v.replace(/[^0-9]/g, '');
@@ -48,8 +63,7 @@ export default function Withdraw() {
     if (!bank)              { Alert.alert('은행 선택', '출금 은행을 선택해주세요.'); return; }
     if (!acct.trim())       { Alert.alert('계좌번호 필요', '출금 계좌번호를 입력해주세요.'); return; }
     if (!holder.trim())     { Alert.alert('예금주 필요', '예금주명을 입력해주세요.'); return; }
-    setLoading(true);
-    setTimeout(() => { setLoading(false); setDone(true); }, 800);
+    mutate({ amount: numAmount, bank, accountNumber: acct.trim(), accountHolder: holder.trim() });
   };
 
   if (done) {
@@ -92,7 +106,11 @@ export default function Withdraw() {
           <Card variant="filled" style={styles.section}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
               <Text variant="body2" color={colors.text.tertiary}>출금 가능 금액</Text>
-              <Text variant="body1Medium">{formatKRW(available)}</Text>
+              {balanceLoading ? (
+                <ActivityIndicator size="small" color={colors.primary.default} />
+              ) : (
+                <Text variant="body1Medium">{formatKRW(available)}</Text>
+              )}
             </View>
           </Card>
 
@@ -191,7 +209,7 @@ export default function Withdraw() {
 
           <Button
             variant="primary" size="lg" label="출금 신청하기" fullWidth
-            loading={loading}
+            loading={isLoading}
             disabled={!numAmount || isOverLimit || !bank || !acct || !holder}
             onPress={handleSubmit}
             style={{ marginBottom: spacing[10] }}

@@ -4,16 +4,15 @@ import {
   StyleSheet,
   ScrollView,
   Pressable,
-  Dimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Text, Card, Badge, Divider } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
-import { mockPositions } from '@/mock';
+import { positionsService } from '@/services';
+import { useApi } from '@/hooks/useApi';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
-
-const { width } = Dimensions.get('window');
 
 // ─── 정보 행 ─────────────────────────────────────────────────────────────────
 function InfoRow({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
@@ -139,11 +138,38 @@ const barStyles = StyleSheet.create({
 // ─── 메인 화면 ───────────────────────────────────────────────────────────────
 export default function PositionDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const position = mockPositions.find((p) => p.id === id);
+  const { data: position, isLoading, error } = useApi(
+    () => positionsService.getById(id),
+    [id],
+  );
 
-  if (!position) {
+  if (isLoading) {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
+        <View style={styles.navBar}>
+          <Pressable onPress={() => router.back()} style={styles.backBtn}>
+            <Text variant="body1">←</Text>
+          </Pressable>
+          <Text variant="heading3">포지션 상세</Text>
+          <View style={{ width: 40 }} />
+        </View>
+        <View style={styles.center}>
+          <ActivityIndicator color={colors.primary.default} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (error || !position) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <View style={styles.navBar}>
+          <Pressable onPress={() => router.back()} style={styles.backBtn}>
+            <Text variant="body1">←</Text>
+          </Pressable>
+          <Text variant="heading3">포지션 상세</Text>
+          <View style={{ width: 40 }} />
+        </View>
         <View style={styles.center}>
           <Text variant="body1" color={colors.text.tertiary}>포지션을 찾을 수 없어요</Text>
         </View>

@@ -1,11 +1,14 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Pressable, Switch } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, StyleSheet, ScrollView, Pressable, Switch, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Text, Card, Divider, Button } from '@/design-system';
 import { colors, spacing } from '@/design-system/tokens';
+import { notificationsService, ApiError } from '@/services';
+import { useApi, useMutation } from '@/hooks/useApi';
+import type { NotificationSettings } from '@/services';
 
-type NotifKey = 'trade' | 'bigProfit' | 'bigLoss' | 'weekly' | 'deposit';
+type NotifKey = keyof NotificationSettings;
 
 const NOTIF_ITEMS: { key: NotifKey; label: string; desc: string }[] = [
   { key: 'trade',     label: '거래 발생',      desc: '에이전트가 매수/매도할 때마다 알림' },
@@ -15,14 +18,32 @@ const NOTIF_ITEMS: { key: NotifKey; label: string; desc: string }[] = [
   { key: 'deposit',   label: '충전·출금 완료', desc: '충전/출금 처리 완료 시 알림' },
 ];
 
+const DEFAULT_SETTINGS: NotificationSettings = {
+  trade: true, bigProfit: true, bigLoss: true, weekly: true, deposit: true,
+};
+
 export default function Notifications() {
-  const [settings, setSettings] = useState<Record<NotifKey, boolean>>({
-    trade:     true,
-    bigProfit: true,
-    bigLoss:   true,
-    weekly:    true,
-    deposit:   true,
-  });
+  const { data: serverSettings, isLoading } = useApi(
+    () => notificationsService.getSettings(),
+    [],
+  );
+
+  const [settings, setSettings] = useState<NotificationSettings>(DEFAULT_SETTINGS);
+
+  useEffect(() => {
+    if (serverSettings) setSettings(serverSettings);
+  }, [serverSettings]);
+
+  const { mutate: save, isLoading: saving } = useMutation(
+    (body: Partial<NotificationSettings>) => notificationsService.updateSettings(body),
+    {
+      onSuccess: () => router.back(),
+      onError: (err) => {
+        const msg = err instanceof ApiError ? err.message : '저장에 실패했어요.';
+        Alert.alert('오류', msg);
+      },
+    },
+  );
 
   const toggle = (key: NotifKey) =>
     setSettings((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -37,31 +58,42 @@ export default function Notifications() {
         <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <Card variant="outlined" padding={0}>
-          {NOTIF_ITEMS.map((item, i) => (
-            <View key={item.key}>
-              <View style={styles.row}>
-                <View style={{ flex: 1, marginRight: spacing[4] }}>
-                  <Text variant="body1Medium">{item.label}</Text>
-                  <Text variant="caption1" color={colors.text.tertiary} style={{ marginTop: 2 }}>
-                    {item.desc}
-                  </Text>
+      {isLoading ? (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator color={colors.primary.default} />
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <Card variant="outlined" padding={0}>
+            {NOTIF_ITEMS.map((item, i) => (
+              <View key={item.key}>
+                <View style={styles.row}>
+                  <View style={{ flex: 1, marginRight: spacing[4] }}>
+                    <Text variant="body1Medium">{item.label}</Text>
+                    <Text variant="caption1" color={colors.text.tertiary} style={{ marginTop: 2 }}>
+                      {item.desc}
+                    </Text>
+                  </View>
+                  <Switch
+                    value={settings[item.key]}
+                    onValueChange={() => toggle(item.key)}
+                    trackColor={{ false: colors.border.strong, true: colors.primary.default }}
+                    thumbColor={colors.bg.default}
+                  />
                 </View>
-                <Switch
-                  value={settings[item.key]}
-                  onValueChange={() => toggle(item.key)}
-                  trackColor={{ false: colors.border.strong, true: colors.primary.default }}
-                  thumbColor={colors.bg.default}
-                />
+                {i < NOTIF_ITEMS.length - 1 && <Divider indent={spacing[5]} />}
               </View>
-              {i < NOTIF_ITEMS.length - 1 && <Divider indent={spacing[5]} />}
-            </View>
-          ))}
-        </Card>
+            ))}
+          </Card>
 
-        <View style={{ height: spacing[10] }} />
-      </ScrollView>
+          <Button
+            variant="primary" size="lg" label="저장" fullWidth
+            loading={saving}
+            onPress={() => save(settings)}
+            style={{ marginTop: spacing[6], marginBottom: spacing[10] }}
+          />
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }

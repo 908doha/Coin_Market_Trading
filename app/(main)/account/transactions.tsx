@@ -1,17 +1,19 @@
 import React from 'react';
-import { View, StyleSheet, ScrollView, Pressable } from 'react-native';
+import { View, StyleSheet, ScrollView, Pressable, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Text, Card, Badge } from '@/design-system';
 import { colors, spacing } from '@/design-system/tokens';
-import { mockFundTransactions, type FundTransaction } from '@/mock';
+import { accountService } from '@/services';
+import { useApi } from '@/hooks/useApi';
+import type { FundTransaction } from '@/services';
 import { formatKRW } from '@/utils/format';
 
 const STATUS_MAP: Record<FundTransaction['status'], { label: string; variant: 'positive' | 'cautious' | 'default' | 'negative' }> = {
-  pending:    { label: '검토중',   variant: 'cautious'  },
-  processing: { label: '처리중',   variant: 'informative' as any },
-  done:       { label: '완료',     variant: 'positive'  },
-  rejected:   { label: '반려',     variant: 'negative'  },
+  pending:    { label: '검토중', variant: 'cautious' },
+  processing: { label: '처리중', variant: 'cautious' },
+  done:       { label: '완료',   variant: 'positive' },
+  rejected:   { label: '반려',   variant: 'negative' },
 };
 
 function TransactionRow({ tx }: { tx: FundTransaction }) {
@@ -60,6 +62,11 @@ const rowStyles = StyleSheet.create({
 });
 
 export default function Transactions() {
+  const { data: transactions, isLoading, error, refetch } = useApi(
+    () => accountService.getTransactions(),
+    [],
+  );
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.navBar}>
@@ -71,7 +78,18 @@ export default function Transactions() {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false}>
-        {mockFundTransactions.length === 0 ? (
+        {isLoading ? (
+          <View style={styles.center}>
+            <ActivityIndicator color={colors.primary.default} />
+          </View>
+        ) : error ? (
+          <View style={styles.center}>
+            <Text variant="body1" color={colors.text.tertiary} align="center">{error}</Text>
+            <Pressable onPress={refetch} style={{ marginTop: spacing[4] }}>
+              <Text variant="label1Bold" color={colors.primary.default}>다시 시도</Text>
+            </Pressable>
+          </View>
+        ) : !transactions?.length ? (
           <View style={styles.empty}>
             <Text variant="body1" color={colors.text.tertiary} align="center">
               충전·출금 내역이 없어요
@@ -79,7 +97,7 @@ export default function Transactions() {
           </View>
         ) : (
           <Card variant="outlined" padding={0} style={{ margin: spacing[5] }}>
-            {mockFundTransactions.map((tx) => (
+            {transactions.map((tx) => (
               <TransactionRow key={tx.id} tx={tx} />
             ))}
           </Card>
@@ -97,5 +115,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: colors.border.default,
   },
   backBtn: { width: 40, paddingVertical: spacing[1] },
+  center:  { marginTop: spacing[16], alignItems: 'center' },
   empty:   { marginTop: spacing[16], alignItems: 'center' },
 });

@@ -13,6 +13,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Text, Card, Input, Button, Divider } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
+import { accountService, ApiError } from '@/services';
+import { useMutation } from '@/hooks/useApi';
 import { COMPANY_BANK, DEPOSIT_MIN, BUSINESS_HOURS } from '@/constants';
 import { formatKRW } from '@/utils/format';
 
@@ -21,10 +23,20 @@ const QUICK_AMOUNTS = [100_000, 500_000, 1_000_000, 5_000_000];
 export default function Deposit() {
   const [amount, setAmount]   = useState('');
   const [sender, setSender]   = useState('');
-  const [loading, setLoading] = useState(false);
   const [done, setDone]       = useState(false);
 
   const numAmount = Number(amount.replace(/,/g, '')) || 0;
+
+  const { mutate, isLoading } = useMutation(
+    (body: { amount: number; senderName: string }) => accountService.requestDeposit(body),
+    {
+      onSuccess: () => setDone(true),
+      onError: (err) => {
+        const msg = err instanceof ApiError ? err.message : '충전 신청에 실패했어요.';
+        Alert.alert('오류', msg);
+      },
+    },
+  );
 
   const handleAmountChange = (v: string) => {
     const digits = v.replace(/[^0-9]/g, '');
@@ -50,9 +62,7 @@ export default function Deposit() {
       Alert.alert('입금자명 필요', '통장에 표시되는 입금자명을 입력해주세요.');
       return;
     }
-    setLoading(true);
-    // TODO: API 연동
-    setTimeout(() => { setLoading(false); setDone(true); }, 800);
+    mutate({ amount: numAmount, senderName: sender.trim() });
   };
 
   if (done) {
@@ -182,7 +192,7 @@ export default function Deposit() {
             size="lg"
             label="충전 신청하기"
             fullWidth
-            loading={loading}
+            loading={isLoading}
             disabled={!numAmount || !sender.trim()}
             onPress={handleSubmit}
             style={{ marginBottom: spacing[10] }}

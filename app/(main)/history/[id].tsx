@@ -4,12 +4,14 @@ import {
   StyleSheet,
   ScrollView,
   Pressable,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Text, Card, Badge, Divider } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
-import { mockTrades } from '@/mock';
+import { tradesService } from '@/services';
+import { useApi } from '@/hooks/useApi';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 
 function InfoRow({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
@@ -31,11 +33,38 @@ const rowStyles = StyleSheet.create({
 
 export default function TradeDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const trade = mockTrades.find((t) => t.id === id);
+  const { data: trade, isLoading, error } = useApi(
+    () => tradesService.getById(id),
+    [id],
+  );
 
-  if (!trade) {
+  if (isLoading) {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
+        <View style={styles.navBar}>
+          <Pressable onPress={() => router.back()} style={styles.backBtn}>
+            <Text variant="body1">←</Text>
+          </Pressable>
+          <Text variant="heading3">거래 상세</Text>
+          <View style={{ width: 40 }} />
+        </View>
+        <View style={styles.center}>
+          <ActivityIndicator color={colors.primary.default} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (error || !trade) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <View style={styles.navBar}>
+          <Pressable onPress={() => router.back()} style={styles.backBtn}>
+            <Text variant="body1">←</Text>
+          </Pressable>
+          <Text variant="heading3">거래 상세</Text>
+          <View style={{ width: 40 }} />
+        </View>
         <View style={styles.center}>
           <Text variant="body1" color={colors.text.tertiary}>거래 내역을 찾을 수 없어요</Text>
         </View>
@@ -81,7 +110,7 @@ export default function TradeDetail() {
         </View>
 
         {/* ── 손익 요약 ── */}
-        <Card variant={isProfit ? 'filled' : 'filled'} style={styles.profitCard}>
+        <Card variant="filled" style={styles.profitCard}>
           <View style={styles.profitRow}>
             <View>
               <Text variant="caption1" color={colors.text.tertiary}>실현 손익</Text>

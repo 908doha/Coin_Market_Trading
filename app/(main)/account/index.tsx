@@ -1,8 +1,8 @@
 import React from 'react';
-import { View, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Text, GlassCard, PressableScale, FadeTabView } from '@/design-system';
+import { Text, GlassCard, PressableScale, FadeTabView, AccountSkeleton } from '@/design-system';
 import { accountService, agentService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAuth } from '@/store/auth';
@@ -21,6 +21,7 @@ export default function Account() {
   const { data: agentStats }                         = useApi(() => agentService.getStats(), []);
 
   const agentStatus = agentStatusMap[agentStats?.status ?? 'waiting'];
+  const isLoading   = balanceLoading && !agentStats;
 
   return (
     <FadeTabView style={styles.root}>
@@ -31,6 +32,10 @@ export default function Account() {
             <Text style={styles.title}>계정</Text>
           </View>
 
+          {isLoading ? (
+            <AccountSkeleton />
+          ) : (
+          <>
           {/* 프로필 카드 */}
           <GlassCard intensity="medium" radius={24} padding={20} style={styles.section}>
             <View style={styles.profileRow}>
@@ -135,6 +140,8 @@ export default function Account() {
           </GlassCard>
 
           <View style={{ height: 120 }} />
+          </>
+          )}
         </ScrollView>
       </SafeAreaView>
     </FadeTabView>

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Text, GlassCard, PressableScale, FadeTabView } from '@/design-system';
+import { Text, GlassCard, PressableScale, FadeTabView, TradingListSkeleton } from '@/design-system';
 import { positionsService, tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
@@ -43,7 +43,7 @@ export default function Trading() {
 
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           {isLoading ? (
-            <ActivityIndicator color="#3182F6" style={{ marginTop: 60 }} />
+            <TradingListSkeleton />
           ) : tab === 'positions' ? (
             !positions?.length ? (
               <GlassCard intensity="low" radius={20} padding={32} style={{ alignItems: 'center' }}>

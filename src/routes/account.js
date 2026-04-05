@@ -33,6 +33,7 @@ router.get('/balance', requireAuth, async (req, res) => {
     const unrealised = Math.round(balance.unrealisedPnl * rate);
     res.json({
       total:           totalKrw,
+      totalUsdt:       parseFloat(balance.total.toFixed(2)),
       available:       Math.round(balance.available * rate),
       invested:        Math.round((balance.total - balance.available) * rate),
       profitTotal:     unrealised,

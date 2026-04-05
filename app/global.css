@@ -1,0 +1,6 @@
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css');
+
+* {
+  font-family: 'PretendardVariable', 'Pretendard', -apple-system, BlinkMacSystemFont,
+    'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif;
+}

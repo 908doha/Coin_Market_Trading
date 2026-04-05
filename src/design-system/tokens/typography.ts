@@ -7,6 +7,7 @@
 
 export const fontFamily = {
   sans: [
+    'PretendardVariable',
     'Pretendard',
     '-apple-system',
     'BlinkMacSystemFont',

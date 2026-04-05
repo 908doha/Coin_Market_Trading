@@ -118,7 +118,7 @@ function TabLabel({ label, isActive, tabIndex, activeIdx, onLayout, onPress }: T
     // distance from active: 0 = active, >0 = inactive
     const dist = Math.abs(activeIdx.value - tabIndex);
     const t    = Math.max(0, Math.min(1, 1 - dist)); // clamp 0–1
-    const color = interpolateColor(t, [0, 1], ['#AEAEB2', '#3182F6']);
+    const color = interpolateColor(t, [0, 1], ['#AEAEB2', '#FFFFFF']);
     return { color };
   });
 
@@ -182,7 +182,7 @@ const styles = StyleSheet.create({
     top:             6,
     left:            0,
     bottom:          6,
-    backgroundColor: '#EEF5FF',
+    backgroundColor: '#191919',
     borderRadius:    30,
   },
   tabItem: {

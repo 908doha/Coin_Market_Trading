@@ -1,12 +1,12 @@
 import React from 'react';
-import { View, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Text, GlassCard, PressableScale, FadeTabView, AccountSkeleton, PageHeader } from '@/design-system';
+import { Text, GlassCard, PressableScale, FadeTabView, AccountSkeleton, PageHeader, AssetCardSkeleton } from '@/design-system';
 import { accountService, agentService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAuth } from '@/store/auth';
-import { formatKRW } from '@/utils/format';
+import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 import { RISK_LABELS } from '@/constants';
 
 const agentStatusMap = {
@@ -50,51 +50,70 @@ export default function Account() {
             </View>
           </GlassCard>
 
-          {/* 자산 카드 */}
-          <GlassCard intensity="low" radius={24} padding={20} style={styles.section}>
-            <Text variant="meta" color="#AEAEB2" style={{ marginBottom: 6 }}>총 자산</Text>
+          {/* 자산 카드 — 홈 히어로 카드와 동일한 스타일 */}
+          <GlassCard intensity="medium" radius={24} style={styles.section}>
             {balanceLoading ? (
-              <ActivityIndicator color="#3182F6" style={{ marginVertical: 8 }} />
+              <AssetCardSkeleton />
             ) : (
               <>
-                <Text style={styles.balanceAmount}>{formatKRW(balance?.total ?? 0)}</Text>
+                <Text variant="meta" color="#AEAEB2" style={{ marginBottom: 6 }}>총 자산</Text>
+                <Text style={styles.heroAmount}>{formatKRW(balance?.total ?? 0)}</Text>
+                <View style={styles.heroSubRow}>
+                  <Text style={[styles.heroPnl, {
+                    color: (balance?.profitTotal ?? 0) >= 0 ? '#FF4747' : '#246CF9',
+                  }]}>
+                    {formatKRWSigned(balance?.profitTotal ?? 0)}
+                  </Text>
+                  <View style={[styles.pnlBadge, {
+                    backgroundColor: (balance?.profitTotal ?? 0) >= 0 ? '#FFF0F0' : '#F0F0F0',
+                  }]}>
+                    <Text style={[styles.pnlBadgeText, {
+                      color: (balance?.profitTotal ?? 0) >= 0 ? '#D93025' : '#246CF9',
+                    }]}>
+                      {formatRate(balance?.profitRate ?? 0)}
+                    </Text>
+                  </View>
+                </View>
                 {balance?.totalUsdt != null && (
-                  <Text variant="meta" color="#AEAEB2" style={{ marginTop: 2, marginBottom: 4 }}>
+                  <Text variant="meta" color="#AEAEB2" style={{ marginTop: 8 }}>
                     ≈ {balance.totalUsdt.toFixed(2)} USDT
                   </Text>
                 )}
               </>
             )}
-            <View style={styles.balanceRow}>
-              <View>
-                <Text variant="meta" color="#AEAEB2">가용 자산</Text>
-                <Text style={styles.balSubValue}>{formatKRW(balance?.available ?? 0)}</Text>
-              </View>
-              <View style={styles.balDivider} />
-              <View style={{ alignItems: 'flex-end' }}>
-                <Text variant="meta" color="#AEAEB2">투자 중</Text>
-                <Text style={styles.balSubValue}>{formatKRW(balance?.invested ?? 0)}</Text>
-              </View>
-            </View>
-            <View style={styles.fundBtns}>
-              <PressableScale
-                style={[styles.fundBtn, { backgroundColor: '#191919' }]}
-                onPress={() => router.push('/(main)/account/deposit')}
-              >
-                <View style={styles.fundBtnInner}>
-                  <Text style={styles.fundBtnText}>충전하기</Text>
-                </View>
-              </PressableScale>
-              <PressableScale
-                style={[styles.fundBtn, { backgroundColor: '#F0F0F0' }]}
-                onPress={() => router.push('/(main)/account/withdraw')}
-              >
-                <View style={styles.fundBtnInner}>
-                  <Text style={[styles.fundBtnText, { color: '#191919' }]}>출금하기</Text>
-                </View>
-              </PressableScale>
-            </View>
           </GlassCard>
+
+          {/* 자산 분배 — 홈 statsRow와 동일 */}
+          <View style={[styles.statsRow, styles.section]}>
+            <GlassCard style={{ flex: 1 }} intensity="low" radius={20} padding={16}>
+              <Text variant="meta" color="#AEAEB2" style={{ marginBottom: 6 }}>가용 자산</Text>
+              <Text style={styles.statValue}>{formatKRW(balance?.available ?? 0)}</Text>
+            </GlassCard>
+            <GlassCard style={{ flex: 1 }} intensity="low" radius={20} padding={16}>
+              <Text variant="meta" color="#AEAEB2" style={{ marginBottom: 6 }}>투자 중</Text>
+              <Text style={styles.statValue}>{formatKRW(balance?.invested ?? 0)}</Text>
+            </GlassCard>
+          </View>
+
+          {/* 충전/출금 버튼 */}
+          <View style={[styles.fundBtns, styles.section]}>
+            <PressableScale
+              style={[styles.fundBtn, { backgroundColor: '#191919' }]}
+              onPress={() => router.push('/(main)/account/deposit')}
+            >
+              <View style={styles.fundBtnInner}>
+                <Text style={styles.fundBtnText}>충전하기</Text>
+              </View>
+            </PressableScale>
+            <PressableScale
+              style={[styles.fundBtn, { backgroundColor: '#F0F0F0' }]}
+              onPress={() => router.push('/(main)/account/withdraw')}
+            >
+              <View style={styles.fundBtnInner}>
+                <Text style={[styles.fundBtnText, { color: '#191919' }]}>출금하기</Text>
+              </View>
+            </PressableScale>
+          </View>
 
           {/* 메뉴 */}
           <GlassCard intensity="low" radius={24} padding={0} style={styles.section}>
@@ -176,15 +195,17 @@ const styles = StyleSheet.create({
   },
   statusDot:  { width: 6, height: 6, borderRadius: 3 },
 
-  balanceAmount: { fontSize: 30, fontWeight: '800', color: '#191919', letterSpacing: -0.5 },
-  balanceRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#F0F0F0',
-  },
-  balSubValue: { fontSize: 15, fontWeight: '700', color: '#191919', marginTop: 4 },
-  balDivider:  { width: 1, height: 36, backgroundColor: '#F0F0F0' },
+  // 홈 히어로 카드와 동일한 스타일
+  heroAmount:  { fontSize: 26, fontWeight: '700', color: '#191919', letterSpacing: -0.5, marginTop: 8, marginBottom: 8 },
+  heroSubRow:  { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
+  heroPnl:     { fontSize: 15, fontWeight: '600' },
+  pnlBadge:    { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
+  pnlBadgeText: { fontSize: 13, fontWeight: '600' },
 
-  fundBtns:    { flexDirection: 'row', gap: 10, marginTop: 16 },
+  statsRow:  { flexDirection: 'row', gap: 10 },
+  statValue: { fontSize: 16, fontWeight: '700', color: '#191919' },
+
+  fundBtns:    { flexDirection: 'row', gap: 10 },
   fundBtn:     { flex: 1, height: 46, borderRadius: 14, overflow: 'hidden' },
   fundBtnInner: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   fundBtnText: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },

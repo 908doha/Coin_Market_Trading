@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
+import { View, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Text, Card, Badge, SubPageHeader, ScreenTransition, TransactionListSkeleton } from '@/design-system';
 import { colors, spacing } from '@/design-system/tokens';
@@ -78,7 +78,7 @@ export default function Transactions() {
           <View style={styles.center}>
             <Text variant="body1" color={colors.text.tertiary} align="center">{error}</Text>
             <Pressable onPress={refetch} style={{ marginTop: spacing[4] }}>
-              <Text variant="label1Bold" color={colors.primary.default}>다시 시도</Text>
+              <Text variant="label1Bold" color={colors.text.primary}>다시 시도</Text>
             </Pressable>
           </View>
         ) : !transactions?.length ? (
@@ -96,6 +96,7 @@ export default function Transactions() {
         )}
       </ScrollView>
     </SafeAreaView>
+    </ScreenTransition>
   );
 }
 

@@ -15,7 +15,7 @@ function rowToSettings(row) {
 // GET /notifications/settings
 router.get('/settings', requireAuth, async (req, res) => {
   const db = await getDb();
-  await db.run(`INSERT OR IGNORE INTO notification_settings (user_id) VALUES (?)`, req.user.id);
+  await db.run(`INSERT INTO notification_settings (user_id) VALUES (?) ON CONFLICT DO NOTHING`, req.user.id);
   const row = await db.get('SELECT * FROM notification_settings WHERE user_id = ?', req.user.id);
   res.json(rowToSettings(row));
 });
@@ -24,7 +24,7 @@ router.get('/settings', requireAuth, async (req, res) => {
 router.patch('/settings', requireAuth, async (req, res) => {
   const db     = await getDb();
   const colMap = { trade: 'trade', bigProfit: 'big_profit', bigLoss: 'big_loss', weekly: 'weekly', deposit: 'deposit' };
-  await db.run(`INSERT OR IGNORE INTO notification_settings (user_id) VALUES (?)`, req.user.id);
+  await db.run(`INSERT INTO notification_settings (user_id) VALUES (?) ON CONFLICT DO NOTHING`, req.user.id);
   for (const [key, col] of Object.entries(colMap)) {
     if (req.body[key] !== undefined) {
       await db.run(`UPDATE notification_settings SET ${col} = ? WHERE user_id = ?`,

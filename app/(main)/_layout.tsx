@@ -4,36 +4,38 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from '@/design-system';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 
-// href: null 인 history 탭을 제외한 순서대로 표시
-const TAB_LABELS: Record<string, string> = {
-  home:      '홈',
-  positions: '트레이딩',
-  account:   '계정',
-};
+// 표시할 탭 순서와 레이블 — history 제외
+const VISIBLE_TABS = [
+  { name: 'home',      label: '홈' },
+  { name: 'positions', label: '트레이딩' },
+  { name: 'account',   label: '계정' },
+];
 
 function TossTabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
 
-  // history(href:null) 제외하고 표시할 탭만 필터링
-  const visibleRoutes = state.routes.filter((r) => TAB_LABELS[r.name]);
-
   return (
     <View style={[styles.barWrap, { paddingBottom: insets.bottom + 8 }]}>
       <View style={styles.pill}>
-        {visibleRoutes.map((route) => {
+        {VISIBLE_TABS.map((tab) => {
+          // 라우트 이름이 "positions/index" 형태일 수도 있어서 startsWith로 매칭
+          const route = state.routes.find(
+            (r) => r.name === tab.name || r.name.startsWith(tab.name + '/'),
+          );
+          if (!route) return null;
+
           const idx    = state.routes.indexOf(route);
           const active = state.index === idx;
-          const label  = TAB_LABELS[route.name];
 
           return (
             <Pressable
-              key={route.key}
+              key={tab.name}
               style={[styles.tabItem, active && styles.tabItemActive]}
               onPress={() => navigation.navigate(route.name)}
               android_ripple={{ color: 'transparent' }}
             >
               <Text style={[styles.label, { color: active ? '#3182F6' : '#AEAEB2' }]}>
-                {label}
+                {tab.label}
               </Text>
             </Pressable>
           );

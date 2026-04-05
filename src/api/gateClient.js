@@ -157,19 +157,34 @@ const gateClient = {
    * 싱글 모드와 듀얼 모드 모두 대응
    */
   async getPosition(contract) {
+    // 포지션 응답 파싱 헬퍼
+    const parsePosition = (pos) => {
+      // SDK는 camelCase, raw API는 snake_case일 수 있으므로 둘 다 처리
+      const size = pos.size || 0;
+      const entryPrice = pos.entryPrice || pos.entry_price || '0';
+      const markPrice = pos.markPrice || pos.mark_price || '0';
+      const unrealisedPnl = pos.unrealisedPnl || pos.unrealised_pnl || '0';
+      const leverage = pos.leverage || pos.cross_leverage_limit || pos.crossLeverageLimit || '0';
+      const mode = pos.mode || 'single';
+
+      return {
+        size: Number(size),
+        entryPrice: parseFloat(entryPrice),
+        markPrice: parseFloat(markPrice),
+        unrealisedPnl: parseFloat(unrealisedPnl),
+        leverage: leverage.toString().replace(/[^0-9.]/g, ''),
+        mode,
+      };
+    };
+
     // 싱글 모드 시도
     try {
       const { body } = await futuresApi.getPosition(SETTLE, contract);
-      return {
-        size: body.size,
-        entryPrice: parseFloat(body.entryPrice || '0'),
-        markPrice: parseFloat(body.markPrice || '0'),
-        unrealisedPnl: parseFloat(body.unrealisedPnl || '0'),
-        leverage: body.leverage,
-        mode: body.mode || 'single',
-      };
+      logger.debug(`포지션 원본: ${JSON.stringify(body)}`);
+      const parsed = parsePosition(body);
+      if (parsed.size !== 0) return parsed;
+      return null;
     } catch (err) {
-      // 포지션 없음
       if (err.body && (err.body.label === 'POSITION_NOT_FOUND' || err.body.label === 'POSITION_EMPTY')) {
         return null;
       }
@@ -178,18 +193,12 @@ const gateClient = {
     // 듀얼 모드 시도
     try {
       const { body } = await futuresApi.getDualModePosition(SETTLE, contract);
-      // 듀얼 모드는 long/short 포지션 배열을 반환
       if (Array.isArray(body)) {
         for (const pos of body) {
-          if (pos.size && pos.size !== 0) {
-            return {
-              size: pos.size,
-              entryPrice: parseFloat(pos.entryPrice || '0'),
-              markPrice: parseFloat(pos.markPrice || '0'),
-              unrealisedPnl: parseFloat(pos.unrealisedPnl || '0'),
-              leverage: pos.leverage,
-              mode: pos.mode || 'dual',
-            };
+          const parsed = parsePosition(pos);
+          if (parsed.size !== 0) {
+            logger.debug(`듀얼 포지션 원본: ${JSON.stringify(pos)}`);
+            return parsed;
           }
         }
       }
@@ -198,7 +207,6 @@ const gateClient = {
       if (err.body && (err.body.label === 'POSITION_NOT_FOUND' || err.body.label === 'POSITION_EMPTY')) {
         return null;
       }
-      // 둘 다 실패하면 포지션 없음으로 처리
       logger.debug(`포지션 없음 (${err.message})`);
       return null;
     }

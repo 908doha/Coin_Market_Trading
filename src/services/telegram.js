@@ -92,15 +92,16 @@ class TelegramService {
 
         const direction = pos.size > 0 ? 'LONG 📈' : 'SHORT 📉';
         const pnlEmoji = pos.unrealisedPnl >= 0 ? '🟢' : '🔴';
+        const lev = pos.leverage || '-';
 
         await this.bot.sendMessage(chatId, [
           `━━━ 포지션 정보 ━━━`,
           `방향: ${direction}`,
           `수량: ${Math.abs(pos.size)} 계약`,
-          `진입가: ${pos.entryPrice}`,
-          `현재가: ${pos.markPrice}`,
+          `진입가: ${pos.entryPrice > 0 ? pos.entryPrice.toFixed(2) : '조회 중...'}`,
+          `현재가: ${pos.markPrice > 0 ? pos.markPrice.toFixed(2) : '조회 중...'}`,
           `${pnlEmoji} 미실현 PnL: ${pos.unrealisedPnl.toFixed(2)} USDT`,
-          `레버리지: x${pos.leverage}`,
+          `레버리지: x${lev}`,
         ].join('\n'));
       } catch (err) {
         await this.bot.sendMessage(chatId, `❌ 포지션 조회 실패: ${err.message}`);

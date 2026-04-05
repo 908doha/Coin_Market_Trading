@@ -84,13 +84,17 @@ export default function Account() {
                 style={[styles.fundBtn, { backgroundColor: '#191919' }]}
                 onPress={() => router.push('/(main)/account/deposit')}
               >
-                <Text style={styles.fundBtnText}>충전하기</Text>
+                <View style={styles.fundBtnInner}>
+                  <Text style={styles.fundBtnText}>충전하기</Text>
+                </View>
               </PressableScale>
               <PressableScale
                 style={[styles.fundBtn, { backgroundColor: '#F0F0F0' }]}
                 onPress={() => router.push('/(main)/account/withdraw')}
               >
-                <Text style={[styles.fundBtnText, { color: '#191919' }]}>출금하기</Text>
+                <View style={styles.fundBtnInner}>
+                  <Text style={[styles.fundBtnText, { color: '#191919' }]}>출금하기</Text>
+                </View>
               </PressableScale>
             </View>
           </GlassCard>
@@ -178,8 +182,9 @@ const styles = StyleSheet.create({
   balSubValue: { fontSize: 15, fontWeight: '700', color: '#191919', marginTop: 4 },
   balDivider:  { width: 1, height: 36, backgroundColor: '#F0F0F0' },
 
-  fundBtns: { flexDirection: 'row', gap: 10, marginTop: 16 },
-  fundBtn:  { flex: 1, height: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  fundBtns:    { flexDirection: 'row', gap: 10, marginTop: 16 },
+  fundBtn:     { flex: 1, height: 46, borderRadius: 14, overflow: 'hidden' },
+  fundBtnInner: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   fundBtnText: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
 
   menuRow:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 18, gap: 14 },

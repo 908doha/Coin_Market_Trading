@@ -13,11 +13,35 @@ const notificationsRouter = require('./routes/notifications');
 const app  = express();
 const PORT = process.env.PORT || 4000;
 
-// ── 미들웨어 ──────────────────────────────────────────────────────
+// ── CORS ──────────────────────────────────────────────────────────
 app.use(cors({
-  origin: process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',') : '*',
+  origin: (origin, callback) => {
+    // 오리진 없는 요청 (모바일앱, Postman 등) 허용
+    if (!origin) return callback(null, true);
+
+    // 환경변수로 허용 도메인 지정
+    const allowed = process.env.FRONTEND_URL
+      ? process.env.FRONTEND_URL.split(',').map((u) => u.trim())
+      : [];
+
+    // 명시적으로 허용된 도메인
+    if (allowed.includes(origin) || allowed.includes('*')) {
+      return callback(null, true);
+    }
+
+    // Vercel 프리뷰 배포 전체 허용 (*.vercel.app)
+    if (origin.endsWith('.vercel.app')) return callback(null, true);
+
+    // localhost 개발환경 허용
+    if (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')) {
+      return callback(null, true);
+    }
+
+    callback(new Error(`CORS 차단: ${origin}`));
+  },
   credentials: true,
 }));
+
 app.use(express.json());
 
 // ── 헬스 체크 ─────────────────────────────────────────────────────

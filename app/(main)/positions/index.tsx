@@ -2,6 +2,9 @@ import React, { useState } from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import Animated, {
+  useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing,
+} from 'react-native-reanimated';
 import {
   Text, GlassCard, Chip, PressableScale, FadeTabView, TradingListSkeleton, PageHeader,
 } from '@/design-system';
@@ -14,6 +17,8 @@ type MainTab      = 'positions' | 'history';
 type HistoryFilter = '전체' | '수익' | '손실';
 const HISTORY_FILTERS: HistoryFilter[] = ['전체', '수익', '손실'];
 
+const EASE_OUT = Easing.out(Easing.cubic);
+
 // ─────────────────────────────────────────────
 //  Portfolio Summary Card
 // ─────────────────────────────────────────────
@@ -21,8 +26,7 @@ function PortfolioSummary({ positions }: { positions: Position[] }) {
   const totalInvested   = positions.reduce((s, p) => s + p.amount, 0);
   const totalProfit     = positions.reduce((s, p) => s + p.profit, 0);
   const totalProfitRate = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
-  const pnlColor =
-    totalProfit > 0 ? '#FF4747' : totalProfit < 0 ? '#246CF9' : '#AEAEB2';
+  const pnlColor = totalProfit > 0 ? '#FF4747' : totalProfit < 0 ? '#246CF9' : '#AEAEB2';
 
   return (
     <GlassCard intensity="medium" radius={20} padding={24} style={styles.mb12}>
@@ -134,10 +138,31 @@ function TradeRow({ trade, isLast }: { trade: Trade; isLast: boolean }) {
 }
 
 // ─────────────────────────────────────────────
-//  History Tab Content
+//  History Tab Content (with filter animation)
 // ─────────────────────────────────────────────
 function HistoryContent({ trades }: { trades: Trade[] | null }) {
   const [filter, setFilter] = useState<HistoryFilter>('전체');
+
+  const listOpacity    = useSharedValue(1);
+  const listTranslateY = useSharedValue(0);
+
+  const animateFilterChange = (newFilter: HistoryFilter) => {
+    if (newFilter === filter) return;
+    // Fade out
+    listOpacity.value    = withTiming(0, { duration: 100, easing: Easing.in(Easing.ease) }, () => {
+      runOnJS(setFilter)(newFilter);
+      listTranslateY.value = 10;
+      // Fade in
+      listOpacity.value    = withTiming(1, { duration: 200, easing: EASE_OUT });
+      listTranslateY.value = withTiming(0, { duration: 200, easing: EASE_OUT });
+    });
+  };
+
+  const listAnimStyle = useAnimatedStyle(() => ({
+    opacity:   listOpacity.value,
+    transform: [{ translateY: listTranslateY.value }],
+  }));
+
   const list     = trades ?? [];
   const filtered = list.filter((t) =>
     filter === '수익' ? t.profit >= 0 : filter === '손실' ? t.profit < 0 : true
@@ -146,14 +171,13 @@ function HistoryContent({ trades }: { trades: Trade[] | null }) {
   const total   = list.reduce((s, t) => s + t.profit, 0);
   const winRate = list.length ? Math.round((wins / list.length) * 100) : 0;
 
-  // Neutral gray when there are no trades
   const winRateColor = !list.length ? '#AEAEB2' : winRate >= 50 ? '#FF4747' : '#246CF9';
   const totalColor   = !list.length ? '#AEAEB2' : total > 0 ? '#FF4747' : total < 0 ? '#246CF9' : '#AEAEB2';
 
   const stats = [
-    { label: '총 거래',  value: `${list.length}건`,         color: '#191919'    },
-    { label: '승률',     value: `${winRate}%`,               color: winRateColor },
-    { label: '총 손익',  value: formatKRWSigned(total),       color: totalColor   },
+    { label: '총 거래', value: `${list.length}건`,        color: '#191919'    },
+    { label: '승률',    value: `${winRate}%`,              color: winRateColor },
+    { label: '총 손익', value: formatKRWSigned(total),     color: totalColor   },
   ];
 
   return (
@@ -181,23 +205,25 @@ function HistoryContent({ trades }: { trades: Trade[] | null }) {
             label={f}
             size="md"
             selected={filter === f}
-            onPress={() => setFilter(f)}
+            onPress={() => animateFilterChange(f)}
           />
         ))}
       </View>
 
-      {/* ── List ── */}
-      {filtered.length === 0 ? (
-        <GlassCard intensity="low" radius={20} padding={40} style={{ alignItems: 'center' }}>
-          <Text variant="body2" color="#AEAEB2">해당하는 거래 내역이 없어요</Text>
-        </GlassCard>
-      ) : (
-        <GlassCard intensity="medium" radius={20} padding={0} style={{ overflow: 'hidden' }}>
-          {filtered.map((trade, i) => (
-            <TradeRow key={trade.id} trade={trade} isLast={i === filtered.length - 1} />
-          ))}
-        </GlassCard>
-      )}
+      {/* ── List (animated) ── */}
+      <Animated.View style={listAnimStyle}>
+        {filtered.length === 0 ? (
+          <GlassCard intensity="low" radius={20} padding={40} style={{ alignItems: 'center' }}>
+            <Text variant="body2" color="#AEAEB2">해당하는 거래 내역이 없어요</Text>
+          </GlassCard>
+        ) : (
+          <GlassCard intensity="medium" radius={20} padding={0} style={{ overflow: 'hidden' }}>
+            {filtered.map((trade, i) => (
+              <TradeRow key={trade.id} trade={trade} isLast={i === filtered.length - 1} />
+            ))}
+          </GlassCard>
+        )}
+      </Animated.View>
     </>
   );
 }
@@ -208,8 +234,30 @@ function HistoryContent({ trades }: { trades: Trade[] | null }) {
 export default function Trading() {
   const [tab, setTab] = useState<MainTab>('positions');
 
-  const { data: positions, isLoading: posLoading }   = useApi(() => positionsService.getAll(), []);
-  const { data: trades,    isLoading: tradeLoading }  = useApi(() => tradesService.getAll(), []);
+  const { data: positions, isLoading: posLoading }  = useApi(() => positionsService.getAll(), []);
+  const { data: trades,    isLoading: tradeLoading } = useApi(() => tradesService.getAll(), []);
+
+  // Tab content animation
+  const tabOpacity    = useSharedValue(1);
+  const tabTranslateX = useSharedValue(0);
+
+  const switchTab = (newTab: MainTab) => {
+    if (newTab === tab) return;
+    const dir = newTab === 'history' ? 1 : -1;
+    // Fade + slide out
+    tabOpacity.value    = withTiming(0, { duration: 120, easing: Easing.in(Easing.ease) }, () => {
+      runOnJS(setTab)(newTab);
+      tabTranslateX.value = 24 * dir;
+      // Fade + slide in from opposite side
+      tabOpacity.value    = withTiming(1, { duration: 220, easing: EASE_OUT });
+      tabTranslateX.value = withTiming(0, { duration: 220, easing: EASE_OUT });
+    });
+  };
+
+  const tabAnimStyle = useAnimatedStyle(() => ({
+    opacity:   tabOpacity.value,
+    transform: [{ translateX: tabTranslateX.value }],
+  }));
 
   const isLoading = tab === 'positions' ? posLoading : tradeLoading;
 
@@ -217,17 +265,16 @@ export default function Trading() {
     <FadeTabView style={styles.root}>
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
 
-        {/* Header */}
         <PageHeader title="트레이딩" />
 
-        {/* Segment */}
+        {/* ── Segment Control ── */}
         <View style={styles.segWrap}>
           <GlassCard intensity="medium" radius={16} padding={4} style={styles.seg}>
             {(['positions', 'history'] as MainTab[]).map((t) => (
               <PressableScale
                 key={t}
                 style={[styles.segBtn, tab === t && styles.segBtnActive]}
-                onPress={() => setTab(t)}
+                onPress={() => switchTab(t)}
                 scaleTo={0.97}
               >
                 <View style={styles.segBtnInner}>
@@ -240,31 +287,33 @@ export default function Trading() {
           </GlassCard>
         </View>
 
-        {/* Content */}
+        {/* ── Content (animated) ── */}
         <ScrollView
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
         >
-          {isLoading ? (
-            <TradingListSkeleton />
-          ) : tab === 'positions' ? (
-            !positions?.length ? (
-              <GlassCard intensity="low" radius={20} padding={48} style={{ alignItems: 'center' }}>
-                <Text variant="body2" color="#AEAEB2">활성 포지션이 없어요</Text>
-              </GlassCard>
-            ) : (
-              <>
-                <PortfolioSummary positions={positions} />
-                <GlassCard intensity="medium" radius={20} padding={0} style={{ overflow: 'hidden' }}>
-                  {positions.map((pos, i) => (
-                    <PositionCard key={pos.id} pos={pos} isLast={i === positions.length - 1} />
-                  ))}
+          <Animated.View style={tabAnimStyle}>
+            {isLoading ? (
+              <TradingListSkeleton />
+            ) : tab === 'positions' ? (
+              !positions?.length ? (
+                <GlassCard intensity="low" radius={20} padding={48} style={{ alignItems: 'center' }}>
+                  <Text variant="body2" color="#AEAEB2">활성 포지션이 없어요</Text>
                 </GlassCard>
-              </>
-            )
-          ) : (
-            <HistoryContent trades={trades ?? null} />
-          )}
+              ) : (
+                <>
+                  <PortfolioSummary positions={positions} />
+                  <GlassCard intensity="medium" radius={20} padding={0} style={{ overflow: 'hidden' }}>
+                    {positions.map((pos, i) => (
+                      <PositionCard key={pos.id} pos={pos} isLast={i === positions.length - 1} />
+                    ))}
+                  </GlassCard>
+                </>
+              )
+            ) : (
+              <HistoryContent trades={trades ?? null} />
+            )}
+          </Animated.View>
           <View style={{ height: 120 }} />
         </ScrollView>
       </SafeAreaView>
@@ -287,21 +336,17 @@ const styles = StyleSheet.create({
 
   content:  { paddingHorizontal: 20, paddingTop: 4 },
 
-  // Summary card
   summaryRow:     { flexDirection: 'row', alignItems: 'center' },
   summaryDivider: { width: 1, height: 48, backgroundColor: '#F0F0F0', marginHorizontal: 20 },
   summaryMain:    { fontSize: 20, fontWeight: '700', color: '#191919' },
   summaryRate:    { fontSize: 13, fontWeight: '600', marginTop: 3 },
 
-  // Stats row (history summary)
   statsRow:     { flexDirection: 'row', alignItems: 'center' },
   statsDivider: { width: 1, height: 40, backgroundColor: '#F0F0F0' },
   statsValue:   { fontSize: 17, fontWeight: '700' },
 
-  // Filter
   filterRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
 
-  // Spacing helpers
   mb6:  { marginBottom: 6 },
   mb12: { marginBottom: 12 },
   mb14: { marginBottom: 14 },

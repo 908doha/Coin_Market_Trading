@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Text, Card, Button, Badge, SubPageHeader } from '@/design-system';
+import { Text, Card, Button, Badge, SubPageHeader, ScreenTransition, AgentSettingsSkeleton } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { agentService, ApiError } from '@/services';
 import { useApi, useMutation } from '@/hooks/useApi';
@@ -55,22 +55,15 @@ export default function AgentSettings() {
     }
   };
 
-  if (isLoading) {
-    return (
-      <SafeAreaView style={styles.safe} edges={['top']}>
-        <SubPageHeader title="에이전트 설정" />
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <ActivityIndicator color={colors.primary.default} />
-        </View>
-      </SafeAreaView>
-    );
-  }
-
   return (
+    <ScreenTransition>
     <SafeAreaView style={styles.safe} edges={['top']}>
       <SubPageHeader title="에이전트 설정" />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {isLoading ? (
+          <AgentSettingsSkeleton />
+        ) : (<>
 
         {/* ── 운용 상태 ── */}
         <Card variant="outlined" style={styles.section}>
@@ -156,8 +149,10 @@ export default function AgentSettings() {
           onPress={() => save({ status, riskLevel: risk })}
           style={{ marginBottom: spacing[10] }}
         />
+        </>)}
       </ScrollView>
     </SafeAreaView>
+    </ScreenTransition>
   );
 }
 

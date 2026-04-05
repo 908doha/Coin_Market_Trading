@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Text, Card, Input, Button, Divider, SubPageHeader } from '@/design-system';
+import { Text, Card, Input, Button, Divider, SubPageHeader, ScreenTransition } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { accountService, ApiError } from '@/services';
 import { useMutation } from '@/hooks/useApi';
@@ -92,6 +92,7 @@ export default function Deposit() {
   }
 
   return (
+    <ScreenTransition>
     <SafeAreaView style={styles.safe} edges={['top']}>
       <SubPageHeader title="충전하기" />
 
@@ -195,6 +196,7 @@ export default function Deposit() {
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
+    </ScreenTransition>
   );
 }
 

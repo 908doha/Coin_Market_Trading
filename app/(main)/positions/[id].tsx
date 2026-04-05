@@ -3,11 +3,10 @@ import {
   View,
   StyleSheet,
   ScrollView,
-  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
-import { Text, Card, Badge, Divider, SubPageHeader } from '@/design-system';
+import { Text, Card, Badge, Divider, SubPageHeader, ScreenTransition, PositionDetailSkeleton } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
@@ -142,31 +141,10 @@ export default function PositionDetail() {
     [id],
   );
 
-  if (isLoading) {
-    return (
-      <SafeAreaView style={styles.safe} edges={['top']}>
-        <SubPageHeader title="포지션 상세" />
-        <View style={styles.center}>
-          <ActivityIndicator color={colors.primary.default} />
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (error || !position) {
-    return (
-      <SafeAreaView style={styles.safe} edges={['top']}>
-        <SubPageHeader title="포지션 상세" />
-        <View style={styles.center}>
-          <Text variant="body1" color={colors.text.tertiary}>포지션을 찾을 수 없어요</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  const isProfit = position.profit >= 0;
+  const isProfit = position ? position.profit >= 0 : false;
 
   return (
+    <ScreenTransition>
     <SafeAreaView style={styles.safe} edges={['top']}>
       <SubPageHeader title="포지션 상세" />
 
@@ -175,6 +153,13 @@ export default function PositionDetail() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
+        {isLoading ? (
+          <PositionDetailSkeleton />
+        ) : (error || !position) ? (
+          <View style={styles.center}>
+            <Text variant="body1" color={colors.text.tertiary}>포지션을 찾을 수 없어요</Text>
+          </View>
+        ) : (<>
         {/* ── 코인 헤더 ───────────────────────────── */}
         <View style={styles.coinHeader}>
           <View style={styles.coinIcon}>
@@ -291,8 +276,10 @@ export default function PositionDetail() {
         </Card>
 
         <View style={{ height: 120 }} />
+        </>)}
       </ScrollView>
     </SafeAreaView>
+    </ScreenTransition>
   );
 }
 

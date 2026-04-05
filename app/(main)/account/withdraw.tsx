@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Text, Card, Input, Button, Divider, SubPageHeader } from '@/design-system';
+import { Text, Card, Input, Button, Divider, SubPageHeader, ScreenTransition } from '@/design-system';
 import { colors, spacing } from '@/design-system/tokens';
 import { accountService, ApiError } from '@/services';
 import { useApi, useMutation } from '@/hooks/useApi';
@@ -90,6 +90,7 @@ export default function Withdraw() {
   }
 
   return (
+    <ScreenTransition>
     <SafeAreaView style={styles.safe} edges={['top']}>
       <SubPageHeader title="출금하기" />
 
@@ -212,6 +213,7 @@ export default function Withdraw() {
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
+    </ScreenTransition>
   );
 }
 

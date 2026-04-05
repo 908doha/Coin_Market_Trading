@@ -1,7 +1,7 @@
 import React from 'react';
-import { View, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Text, Card, Badge, SubPageHeader } from '@/design-system';
+import { Text, Card, Badge, SubPageHeader, ScreenTransition, TransactionListSkeleton } from '@/design-system';
 import { colors, spacing } from '@/design-system/tokens';
 import { accountService } from '@/services';
 import { useApi } from '@/hooks/useApi';
@@ -67,14 +67,13 @@ export default function Transactions() {
   );
 
   return (
+    <ScreenTransition>
     <SafeAreaView style={styles.safe} edges={['top']}>
       <SubPageHeader title="입출금 내역" />
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
         {isLoading ? (
-          <View style={styles.center}>
-            <ActivityIndicator color={colors.primary.default} />
-          </View>
+          <TransactionListSkeleton />
         ) : error ? (
           <View style={styles.center}>
             <Text variant="body1" color={colors.text.tertiary} align="center">{error}</Text>

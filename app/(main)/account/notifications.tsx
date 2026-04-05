@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Text, PressableScale, Skeleton, SubPageHeader } from '@/design-system';
+import { Text, PressableScale, Skeleton, SubPageHeader, ScreenTransition } from '@/design-system';
 import { notificationsService, ApiError } from '@/services';
 import { useApi, useMutation } from '@/hooks/useApi';
 import type { NotificationSettings } from '@/services';
@@ -56,7 +56,7 @@ function NotifRow({
         <Switch
           value={value}
           onValueChange={handleToggle}
-          trackColor={{ false: '#E2E2E2', true: '#3182F6' }}
+          trackColor={{ false: '#E2E2E2', true: '#191919' }}
           thumbColor="#FFFFFF"
           ios_backgroundColor="#E2E2E2"
         />
@@ -92,6 +92,7 @@ export default function Notifications() {
     setSettings((prev) => ({ ...prev, [key]: !prev[key] }));
 
   return (
+    <ScreenTransition>
     <SafeAreaView style={styles.root} edges={['top']}>
       <SubPageHeader title="알림 설정" />
 
@@ -147,6 +148,7 @@ export default function Notifications() {
         <View style={{ height: 120 }} />
       </ScrollView>
     </SafeAreaView>
+    </ScreenTransition>
   );
 }
 
@@ -188,7 +190,7 @@ const styles = StyleSheet.create({
   linkArrow: { fontSize: 20, color: '#C4C4C4' },
 
   saveBtn: {
-    backgroundColor: '#3182F6',
+    backgroundColor: '#191919',
     borderRadius: 16,
     height: 52,
     alignItems: 'center',

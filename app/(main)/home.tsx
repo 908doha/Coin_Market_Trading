@@ -5,7 +5,6 @@ import { router } from 'expo-router';
 import { Text, GlassCard, PeriodSelector, PressableScale, FadeTabView, AssetCardSkeleton, PageHeader } from '@/design-system';
 import { accountService, agentService, positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
-import { useAuth } from '@/store/auth';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 
 const PERIODS = ['1W', '1M', '3M', '6M', '1Y'] as const;
@@ -43,8 +42,6 @@ const agentStatusMap = {
 
 export default function Home() {
   const [period, setPeriod] = useState<typeof PERIODS[number]>('1M');
-  const { user } = useAuth();
-
   const { data: balance,   isLoading: balLoading } = useApi(() => accountService.getBalance(), []);
   const { data: chart }                             = useApi(() => accountService.getChart(period), [period]);
   const { data: agentStats }                        = useApi(() => agentService.getStats(), []);
@@ -58,7 +55,7 @@ export default function Home() {
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
           {/* ── 헤더 ── */}
           <PageHeader
-            title={user?.name ?? 'Osprey'}
+            title="🐦‍⬛ Osprey"
             rightElement={
               <View style={[styles.agentBadge, { backgroundColor: agentStatus.bg }]}>
                 <View style={[styles.agentDot, { backgroundColor: agentStatus.color }]} />

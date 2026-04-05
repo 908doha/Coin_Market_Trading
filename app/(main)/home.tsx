@@ -138,27 +138,30 @@ export default function Home() {
           </GlassCard>
 
           {/* ── 활성 포지션 ── */}
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>활성 포지션</Text>
-            <PressableScale onPress={() => router.push('/(main)/positions')} style={{ borderRadius: 8 }}>
-              <Text style={styles.seeAll}>전체 보기</Text>
+          <GlassCard intensity="low" radius={20} padding={20} style={styles.section}>
+            {/* 카드 헤더 */}
+            <PressableScale
+              onPress={() => router.push('/(main)/positions')}
+              style={styles.posHeader}
+              scaleTo={0.98}
+            >
+              <Text style={styles.sectionTitle}>활성 포지션</Text>
+              <Text style={styles.posArrow}>›</Text>
             </PressableScale>
-          </View>
 
-          {!positions?.length ? (
-            <GlassCard intensity="low" radius={20} padding={24} style={{ alignItems: 'center' }}>
-              <Text style={styles.emptyText}>현재 활성 포지션이 없어요</Text>
-            </GlassCard>
-          ) : (
-            positions.slice(0, 2).map((pos) => {
-              const up = pos.profit >= 0;
-              return (
-                <PressableScale
-                  key={pos.id}
-                  onPress={() => router.push(`/(main)/positions/${pos.id}`)}
-                  style={{ marginBottom: 8, borderRadius: 20 }}
-                >
-                  <GlassCard intensity="low" radius={20} padding={16}>
+            {!positions?.length ? (
+              <View style={{ paddingTop: 16, alignItems: 'center' }}>
+                <Text style={styles.emptyText}>현재 활성 포지션이 없어요</Text>
+              </View>
+            ) : (
+              positions.slice(0, 2).map((pos, idx) => {
+                const up = pos.profit >= 0;
+                return (
+                  <PressableScale
+                    key={pos.id}
+                    onPress={() => router.push(`/(main)/positions/${pos.id}`)}
+                    style={[styles.posItem, idx === 0 && { marginTop: 16 }]}
+                  >
                     <View style={styles.posRow}>
                       <View style={[styles.posIcon, { backgroundColor: up ? '#EDFBF3' : '#FFF0F0' }]}>
                         <Text style={{ fontSize: 15, fontWeight: '700', color: up ? '#0D9E45' : '#D93025' }}>
@@ -187,11 +190,11 @@ export default function Home() {
                         </Text>
                       </View>
                     </View>
-                  </GlassCard>
-                </PressableScale>
-              );
-            })
-          )}
+                  </PressableScale>
+                );
+              })
+            )}
+          </GlassCard>
 
           <View style={{ height: 120 }} />
         </ScrollView>
@@ -229,13 +232,14 @@ const styles = StyleSheet.create({
   statCard:  { flex: 1 },
   statValue: { fontSize: 16, fontWeight: '700', color: '#191919' },
 
-  section: { marginBottom: 12 },
-  sectionHeader: {
-    flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'center', marginBottom: 10, marginTop: 4,
-  },
+  section:      { marginBottom: 12 },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: '#191919' },
-  seeAll:       { fontSize: 13, color: '#3182F6', fontWeight: '500', padding: 4 },
+  posHeader: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  posArrow: { fontSize: 22, color: '#C4C4C4', lineHeight: 26 },
+  posItem:  { marginTop: 12 },
 
   agentRow:        { flexDirection: 'row', alignItems: 'center' },
   agentStatusText: { fontSize: 14, fontWeight: '600', marginTop: 4 },

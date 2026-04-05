@@ -2,7 +2,7 @@ import React from 'react';
 import { View, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Text, GlassCard, PressableScale, FadeTabView, AccountSkeleton } from '@/design-system';
+import { Text, GlassCard, PressableScale, FadeTabView, AccountSkeleton, PageHeader } from '@/design-system';
 import { accountService, agentService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAuth } from '@/store/auth';
@@ -28,9 +28,7 @@ export default function Account() {
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
-          <View style={styles.header}>
-            <Text style={styles.title}>계정</Text>
-          </View>
+          <PageHeader title="계정" />
 
           {isLoading ? (
             <AccountSkeleton />
@@ -155,9 +153,6 @@ export default function Account() {
 const styles = StyleSheet.create({
   root:    { flex: 1, backgroundColor: '#F5F5F5' },
   content: { paddingHorizontal: 20 },
-
-  header: { paddingTop: 20, paddingBottom: 20 },
-  title:  { fontSize: 28, fontWeight: '800', color: '#191919' },
 
   section:     { marginBottom: 12 },
   profileRow:  { flexDirection: 'row', alignItems: 'center', gap: 14 },

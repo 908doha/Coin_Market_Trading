@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Text, GlassCard, PeriodSelector, PressableScale, FadeTabView, AssetCardSkeleton } from '@/design-system';
+import { Text, GlassCard, PeriodSelector, PressableScale, FadeTabView, AssetCardSkeleton, PageHeader } from '@/design-system';
 import { accountService, agentService, positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAuth } from '@/store/auth';
@@ -62,15 +62,15 @@ export default function Home() {
           showsVerticalScrollIndicator={false}
         >
           {/* ── 헤더 ── */}
-          <View style={styles.header}>
-            <Text style={styles.userName}>{user?.name ?? 'Osprey'}</Text>
-            <View style={[styles.agentBadge, { backgroundColor: agentStatus.bg }]}>
-              <View style={[styles.agentDot, { backgroundColor: agentStatus.color }]} />
-              <Text variant="meta" style={[styles.agentBadgeText, { color: agentStatus.color }]}>
-                {agentStatus.label}
-              </Text>
-            </View>
-          </View>
+          <PageHeader
+            title={user?.name ?? 'Osprey'}
+            rightElement={
+              <View style={[styles.agentBadge, { backgroundColor: agentStatus.bg }]}>
+                <View style={[styles.agentDot, { backgroundColor: agentStatus.color }]} />
+                <Text variant="meta" style={{ color: agentStatus.color }}>{agentStatus.label}</Text>
+              </View>
+            }
+          />
 
           {/* ── 총 자산 카드 ── */}
           <GlassCard style={styles.heroCard} intensity="medium" radius={24}>
@@ -205,13 +205,8 @@ export default function Home() {
 
 const styles = StyleSheet.create({
   root:    { flex: 1, backgroundColor: '#F5F5F5' },
-  content: { paddingHorizontal: 20, paddingTop: 8 },
+  content: { paddingHorizontal: 20 },
 
-  header: {
-    flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'center', marginBottom: 20,
-  },
-  userName:  { fontSize: 22, fontWeight: '700', color: '#191919' },
   agentBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6,

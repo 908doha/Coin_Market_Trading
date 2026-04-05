@@ -11,6 +11,7 @@ export { Badge }   from './components/Badge';
 export { Divider } from './components/Divider';
 export { Avatar }    from './components/Avatar';
 export { GlassView, GlassCard }   from './components/Glass';
+export { PageHeader }            from './components/PageHeader';
 export { PeriodSelector }         from './components/PeriodSelector';
 export { PressableScale }         from './components/PressableScale';
 export { FadeTabView }            from './components/FadeTabView';

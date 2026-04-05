@@ -3,7 +3,7 @@ import { View, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import {
-  Text, GlassCard, Chip, PressableScale, FadeTabView, TradingListSkeleton,
+  Text, GlassCard, Chip, PressableScale, FadeTabView, TradingListSkeleton, PageHeader,
 } from '@/design-system';
 import { positionsService, tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
@@ -218,9 +218,7 @@ export default function Trading() {
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
 
         {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.title}>트레이딩</Text>
-        </View>
+        <PageHeader title="트레이딩" />
 
         {/* Segment */}
         <View style={styles.segWrap}>
@@ -279,8 +277,6 @@ export default function Trading() {
 // ─────────────────────────────────────────────
 const styles = StyleSheet.create({
   root:    { flex: 1, backgroundColor: '#F5F5F5' },
-  header:  { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12 },
-  title:   { fontSize: 28, fontWeight: '800', color: '#191919' },
 
   segWrap: { paddingHorizontal: 20, paddingBottom: 20 },
   seg:     { flexDirection: 'row' },

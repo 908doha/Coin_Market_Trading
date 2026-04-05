@@ -1,10 +1,8 @@
 import React, { useState } from 'react';
-import {
-  View, StyleSheet, ScrollView, ActivityIndicator,
-} from 'react-native';
+import { View, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Text, GlassCard, PeriodSelector, PressableScale, FadeTabView } from '@/design-system';
+import { Text, GlassCard, PeriodSelector, PressableScale, FadeTabView, AssetCardSkeleton } from '@/design-system';
 import { accountService, agentService, positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAuth } from '@/store/auth';
@@ -76,11 +74,11 @@ export default function Home() {
 
           {/* ── 총 자산 카드 ── */}
           <GlassCard style={styles.heroCard} intensity="medium" radius={24}>
-            <Text variant="meta" color="#AEAEB2" style={{ marginBottom: 6 }}>총 자산</Text>
             {balLoading ? (
-              <ActivityIndicator color="#3182F6" style={{ marginVertical: 12 }} />
+              <AssetCardSkeleton />
             ) : (
               <>
+                <Text variant="meta" color="#AEAEB2" style={{ marginBottom: 6 }}>총 자산</Text>
                 <Text style={styles.heroAmount}>
                   {formatKRW(balance?.total ?? 0)}
                 </Text>
@@ -94,14 +92,14 @@ export default function Home() {
                     </Text>
                   </View>
                 </View>
+                <View style={styles.chartArea}>
+                  <MiniChart data={chart ?? []} positive={isProfit} />
+                </View>
+                <View style={styles.periodRow}>
+                  <PeriodSelector periods={PERIODS} active={period} onChange={setPeriod} />
+                </View>
               </>
             )}
-            <View style={styles.chartArea}>
-              <MiniChart data={chart ?? []} positive={isProfit} />
-            </View>
-            <View style={styles.periodRow}>
-              <PeriodSelector periods={PERIODS} active={period} onChange={setPeriod} />
-            </View>
           </GlassCard>
 
           {/* ── 자산 분배 ── */}

@@ -14,6 +14,7 @@ export { GlassView, GlassCard }   from './components/Glass';
 export { PeriodSelector }         from './components/PeriodSelector';
 export { PressableScale }         from './components/PressableScale';
 export { FadeTabView }            from './components/FadeTabView';
+export { Skeleton, AssetCardSkeleton } from './components/Skeleton';
 
 // Types
 export type { TextProps }    from './components/Text';

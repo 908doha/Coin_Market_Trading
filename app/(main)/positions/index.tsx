@@ -1,64 +1,67 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Pressable } from 'react-native';
+import { View, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Text, PressableScale, FadeTabView, TradingListSkeleton } from '@/design-system';
+import {
+  Text, GlassCard, Chip, PressableScale, FadeTabView, TradingListSkeleton,
+} from '@/design-system';
 import { positionsService, tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 import type { Trade, Position } from '@/services';
 
-type MainTab  = 'positions' | 'history';
+type MainTab      = 'positions' | 'history';
 type HistoryFilter = '전체' | '수익' | '손실';
 const HISTORY_FILTERS: HistoryFilter[] = ['전체', '수익', '손실'];
 
-// ──────────────────────────────────────────────
-//  Portfolio Summary (top of positions tab)
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
+//  Portfolio Summary Card
+// ─────────────────────────────────────────────
 function PortfolioSummary({ positions }: { positions: Position[] }) {
   const totalInvested   = positions.reduce((s, p) => s + p.amount, 0);
   const totalProfit     = positions.reduce((s, p) => s + p.profit, 0);
   const totalProfitRate = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
-  const up = totalProfit >= 0;
+  const pnlColor =
+    totalProfit > 0 ? '#FF4747' : totalProfit < 0 ? '#246CF9' : '#AEAEB2';
 
   return (
-    <View style={summary.card}>
-      <View style={summary.row}>
+    <GlassCard intensity="medium" radius={20} padding={24} style={styles.mb12}>
+      <View style={styles.summaryRow}>
         <View style={{ flex: 1 }}>
-          <Text style={summary.label}>총 투자금</Text>
-          <Text style={summary.value}>{formatKRW(totalInvested)}</Text>
+          <Text variant="meta" color="#AEAEB2" style={styles.mb6}>총 투자금</Text>
+          <Text style={styles.summaryMain}>{formatKRW(totalInvested)}</Text>
         </View>
-        <View style={summary.divider} />
+        <View style={styles.summaryDivider} />
         <View style={{ flex: 1, alignItems: 'flex-end' }}>
-          <Text style={summary.label}>평가 손익</Text>
-          <Text style={[summary.pnl, { color: up ? '#FF4747' : '#246CF9' }]}>
+          <Text variant="meta" color="#AEAEB2" style={styles.mb6}>평가 손익</Text>
+          <Text style={[styles.summaryMain, { color: pnlColor }]}>
             {formatKRWSigned(totalProfit)}
           </Text>
-          <Text style={[summary.rate, { color: up ? '#FF4747' : '#246CF9' }]}>
+          <Text style={[styles.summaryRate, { color: pnlColor }]}>
             {totalProfitRate >= 0 ? '+' : ''}{totalProfitRate.toFixed(2)}%
           </Text>
         </View>
       </View>
-    </View>
+    </GlassCard>
   );
 }
 
-// ──────────────────────────────────────────────
-//  Holding Position Card
-// ──────────────────────────────────────────────
-function PositionCard({ pos }: { pos: Position }) {
+// ─────────────────────────────────────────────
+//  Position Card Row
+// ─────────────────────────────────────────────
+function PositionCard({ pos, isLast }: { pos: Position; isLast: boolean }) {
   const up = pos.profit >= 0;
   return (
     <PressableScale
       onPress={() => router.push(`/(main)/positions/${pos.id}`)}
-      style={{ marginBottom: 1 }}
+      scaleTo={0.98}
     >
-      <View style={card.wrap}>
-        <View style={card.iconWrap}>
+      <View style={[card.row, !isLast && card.rowBorder]}>
+        <View style={card.icon}>
           <Text style={card.iconText}>{pos.coin.slice(0, 2)}</Text>
         </View>
         <View style={{ flex: 1 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <View style={card.symbolRow}>
             <Text style={card.symbol}>{pos.symbol}</Text>
             <View style={[card.badge, {
               backgroundColor: pos.direction === 'Long' ? '#F0F0F0' : '#FFF0F0',
@@ -70,10 +73,12 @@ function PositionCard({ pos }: { pos: Position }) {
               </Text>
             </View>
           </View>
-          <Text style={card.sub}>{formatKRW(pos.amount)}</Text>
+          <Text variant="meta" color="#AEAEB2" style={{ marginTop: 3 }}>
+            {formatKRW(pos.amount)}
+          </Text>
         </View>
         <View style={{ alignItems: 'flex-end' }}>
-          <Text style={[card.amount, { color: up ? '#FF4747' : '#246CF9' }]}>
+          <Text style={[card.profit, { color: up ? '#FF4747' : '#246CF9' }]}>
             {formatKRWSigned(pos.profit)}
           </Text>
           <Text style={[card.rate, { color: up ? '#FF4747' : '#246CF9' }]}>
@@ -83,125 +88,128 @@ function PositionCard({ pos }: { pos: Position }) {
       </View>
       {pos.agentReason ? (
         <View style={card.hint}>
-          <Text style={card.hintText} numberOfLines={1}>🤖 {pos.agentReason}</Text>
+          <Text variant="meta" color="#AEAEB2" numberOfLines={1}>🤖 {pos.agentReason}</Text>
         </View>
       ) : null}
     </PressableScale>
   );
 }
 
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 //  Trade History Row
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 function TradeRow({ trade, isLast }: { trade: Trade; isLast: boolean }) {
-  const up = trade.profit >= 0;
+  const up      = trade.profit >= 0;
   const dateStr = (() => {
     const d = new Date(trade.exitAt);
     if (isNaN(d.getTime())) return trade.exitAt?.slice(5, 10)?.replace('-', '.') ?? '';
     return `${d.getMonth() + 1}.${String(d.getDate()).padStart(2, '0')}`;
   })();
-
   const typeLabel = trade.type === 'stop_loss' ? '손절' : (trade.direction === 'Long' ? '롱 청산' : '숏 청산');
 
   return (
-    <Pressable
+    <PressableScale
       onPress={() => router.push(`/(main)/history/${trade.id}`)}
-      style={({ pressed }) => [row.wrap, pressed && { backgroundColor: '#FAFAFA' }]}
+      scaleTo={0.98}
     >
-      <Text style={row.date}>{dateStr}</Text>
-      <View style={{ flex: 1 }}>
-        <Text style={row.symbol}>{trade.symbol}</Text>
-        <Text style={row.meta}>{typeLabel} · {trade.holdingDays}일</Text>
+      <View style={[hist.row, !isLast && hist.rowBorder]}>
+        <Text style={hist.date}>{dateStr}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={hist.symbol}>{trade.symbol}</Text>
+          <Text variant="meta" color="#AEAEB2" style={{ marginTop: 3 }}>
+            {typeLabel} · {trade.holdingDays}일
+          </Text>
+        </View>
+        <View style={{ alignItems: 'flex-end' }}>
+          <Text style={[hist.amount, { color: up ? '#FF4747' : '#246CF9' }]}>
+            {formatKRWSigned(trade.profit)}
+          </Text>
+          <Text style={[hist.rate, { color: up ? '#FF4747' : '#246CF9' }]}>
+            {formatRate(trade.profitRate)}
+          </Text>
+        </View>
       </View>
-      <View style={{ alignItems: 'flex-end' }}>
-        <Text style={[row.amount, { color: up ? '#FF4747' : '#246CF9' }]}>
-          {formatKRWSigned(trade.profit)}
-        </Text>
-        <Text style={[row.rate, { color: up ? '#FF4747' : '#246CF9' }]}>
-          {formatRate(trade.profitRate)}
-        </Text>
-      </View>
-      {!isLast && <View style={row.divider} />}
-    </Pressable>
+    </PressableScale>
   );
 }
 
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 //  History Tab Content
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 function HistoryContent({ trades }: { trades: Trade[] | null }) {
   const [filter, setFilter] = useState<HistoryFilter>('전체');
+  const list     = trades ?? [];
+  const filtered = list.filter((t) =>
+    filter === '수익' ? t.profit >= 0 : filter === '손실' ? t.profit < 0 : true
+  );
+  const wins    = list.filter((t) => t.profit >= 0).length;
+  const total   = list.reduce((s, t) => s + t.profit, 0);
+  const winRate = list.length ? Math.round((wins / list.length) * 100) : 0;
 
-  const filtered = (trades ?? []).filter((t) => {
-    if (filter === '수익') return t.profit >= 0;
-    if (filter === '손실') return t.profit < 0;
-    return true;
-  });
+  // Neutral gray when there are no trades
+  const winRateColor = !list.length ? '#AEAEB2' : winRate >= 50 ? '#FF4747' : '#246CF9';
+  const totalColor   = !list.length ? '#AEAEB2' : total > 0 ? '#FF4747' : total < 0 ? '#246CF9' : '#AEAEB2';
 
-  const wins    = (trades ?? []).filter((t) => t.profit >= 0).length;
-  const total   = (trades ?? []).reduce((s, t) => s + t.profit, 0);
-  const winRate = trades?.length ? Math.round((wins / trades.length) * 100) : 0;
+  const stats = [
+    { label: '총 거래',  value: `${list.length}건`,         color: '#191919'    },
+    { label: '승률',     value: `${winRate}%`,               color: winRateColor },
+    { label: '총 손익',  value: formatKRWSigned(total),       color: totalColor   },
+  ];
 
   return (
     <>
-      {/* ── Summary Card ── */}
-      <View style={hist.summaryCard}>
-        <View style={hist.summaryRow}>
-          {[
-            { label: '총 거래',  value: `${trades?.length ?? 0}건` },
-            { label: '승률',     value: `${winRate}%`,            color: winRate >= 50 ? '#FF4747' : '#246CF9' },
-            { label: '총 손익',  value: formatKRWSigned(total),   color: total >= 0   ? '#FF4747' : '#246CF9' },
-          ].map((item, i) => (
-            <React.Fragment key={item.label}>
-              {i > 0 && <View style={hist.summaryDivider} />}
+      {/* ── Summary ── */}
+      <GlassCard intensity="medium" radius={20} padding={24} style={styles.mb14}>
+        <View style={styles.statsRow}>
+          {stats.map((s, i) => (
+            <React.Fragment key={s.label}>
+              {i > 0 && <View style={styles.statsDivider} />}
               <View style={{ flex: 1, alignItems: 'center' }}>
-                <Text style={hist.summaryLabel}>{item.label}</Text>
-                <Text style={[hist.summaryValue, item.color ? { color: item.color } : {}]}>
-                  {item.value}
-                </Text>
+                <Text variant="meta" color="#AEAEB2" style={styles.mb6}>{s.label}</Text>
+                <Text style={[styles.statsValue, { color: s.color }]}>{s.value}</Text>
               </View>
             </React.Fragment>
           ))}
         </View>
-      </View>
+      </GlassCard>
 
-      {/* ── Filter Tabs ── */}
-      <View style={hist.filterRow}>
+      {/* ── Filter Chips ── */}
+      <View style={styles.filterRow}>
         {HISTORY_FILTERS.map((f) => (
-          <Pressable
+          <Chip
             key={f}
+            label={f}
+            size="md"
+            selected={filter === f}
             onPress={() => setFilter(f)}
-            style={[hist.filterBtn, filter === f && hist.filterBtnActive]}
-          >
-            <Text style={[hist.filterText, { color: filter === f ? '#191919' : '#AEAEB2' }]}>{f}</Text>
-          </Pressable>
+          />
         ))}
       </View>
 
-      {/* ── Transaction List ── */}
+      {/* ── List ── */}
       {filtered.length === 0 ? (
-        <View style={hist.emptyWrap}>
-          <Text style={hist.emptyText}>해당하는 거래 내역이 없어요</Text>
-        </View>
+        <GlassCard intensity="low" radius={20} padding={40} style={{ alignItems: 'center' }}>
+          <Text variant="body2" color="#AEAEB2">해당하는 거래 내역이 없어요</Text>
+        </GlassCard>
       ) : (
-        <View style={hist.listCard}>
+        <GlassCard intensity="medium" radius={20} padding={0} style={{ overflow: 'hidden' }}>
           {filtered.map((trade, i) => (
             <TradeRow key={trade.id} trade={trade} isLast={i === filtered.length - 1} />
           ))}
-        </View>
+        </GlassCard>
       )}
     </>
   );
 }
 
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 //  Main Screen
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 export default function Trading() {
   const [tab, setTab] = useState<MainTab>('positions');
 
-  const { data: positions, isLoading: posLoading } = useApi(() => positionsService.getAll(), []);
-  const { data: trades,    isLoading: tradeLoading } = useApi(() => tradesService.getAll(), []);
+  const { data: positions, isLoading: posLoading }   = useApi(() => positionsService.getAll(), []);
+  const { data: trades,    isLoading: tradeLoading }  = useApi(() => tradesService.getAll(), []);
 
   const isLoading = tab === 'positions' ? posLoading : tradeLoading;
 
@@ -209,43 +217,51 @@ export default function Trading() {
     <FadeTabView style={styles.root}>
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
 
-        {/* ── Header ── */}
+        {/* Header */}
         <View style={styles.header}>
           <Text style={styles.title}>트레이딩</Text>
         </View>
 
-        {/* ── Segment Control ── */}
-        <View style={styles.segmentWrap}>
-          <View style={styles.segment}>
+        {/* Segment */}
+        <View style={styles.segWrap}>
+          <GlassCard intensity="medium" radius={16} padding={4} style={styles.seg}>
             {(['positions', 'history'] as MainTab[]).map((t) => (
               <PressableScale
                 key={t}
                 style={[styles.segBtn, tab === t && styles.segBtnActive]}
                 onPress={() => setTab(t)}
-                scaleTo={0.96}
+                scaleTo={0.97}
               >
-                <Text style={[styles.segText, { color: tab === t ? '#191919' : '#AEAEB2' }]}>
-                  {t === 'positions' ? '보유 포지션' : '거래 내역'}
-                </Text>
+                <View style={styles.segBtnInner}>
+                  <Text style={[styles.segText, { color: tab === t ? '#191919' : '#AEAEB2' }]}>
+                    {t === 'positions' ? '보유 포지션' : '거래 내역'}
+                  </Text>
+                </View>
               </PressableScale>
             ))}
-          </View>
+          </GlassCard>
         </View>
 
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Content */}
+        <ScrollView
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+        >
           {isLoading ? (
             <TradingListSkeleton />
           ) : tab === 'positions' ? (
             !positions?.length ? (
-              <View style={styles.emptyCard}>
-                <Text style={styles.emptyText}>활성 포지션이 없어요</Text>
-              </View>
+              <GlassCard intensity="low" radius={20} padding={48} style={{ alignItems: 'center' }}>
+                <Text variant="body2" color="#AEAEB2">활성 포지션이 없어요</Text>
+              </GlassCard>
             ) : (
               <>
                 <PortfolioSummary positions={positions} />
-                <View style={styles.positionList}>
-                  {positions.map((pos) => <PositionCard key={pos.id} pos={pos} />)}
-                </View>
+                <GlassCard intensity="medium" radius={20} padding={0} style={{ overflow: 'hidden' }}>
+                  {positions.map((pos, i) => (
+                    <PositionCard key={pos.id} pos={pos} isLast={i === positions.length - 1} />
+                  ))}
+                </GlassCard>
               </>
             )
           ) : (
@@ -258,137 +274,62 @@ export default function Trading() {
   );
 }
 
-// ── Styles ────────────────────────────────────
-
+// ─────────────────────────────────────────────
+//  Styles
+// ─────────────────────────────────────────────
 const styles = StyleSheet.create({
-  root:        { flex: 1, backgroundColor: '#F5F5F5' },
-  header:      { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12 },
-  title:       { fontSize: 28, fontWeight: '800', color: '#191919' },
-  segmentWrap: { paddingHorizontal: 20, paddingBottom: 20 },
-  segment: {
-    flexDirection:  'row',
-    backgroundColor: '#FFFFFF',
-    borderRadius:   16,
-    padding:        4,
-    borderWidth:    1,
-    borderColor:    '#F0F0F0',
-  },
-  segBtn:       { flex: 1, paddingVertical: 13, borderRadius: 12, alignItems: 'center' },
+  root:    { flex: 1, backgroundColor: '#F5F5F5' },
+  header:  { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12 },
+  title:   { fontSize: 28, fontWeight: '800', color: '#191919' },
+
+  segWrap: { paddingHorizontal: 20, paddingBottom: 20 },
+  seg:     { flexDirection: 'row' },
+  segBtn:  { flex: 1, borderRadius: 12, overflow: 'hidden' },
   segBtnActive: { backgroundColor: '#F0F0F0' },
+  segBtnInner:  { paddingVertical: 13, alignItems: 'center', justifyContent: 'center' },
   segText:      { fontSize: 14, fontWeight: '600' },
-  content:      { paddingHorizontal: 20, paddingTop: 4 },
-  positionList: {
-    backgroundColor: '#FFFFFF',
-    borderRadius:    20,
-    overflow:        'hidden',
-  },
-  emptyCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 48,
-    alignItems: 'center',
-  },
-  emptyText: { fontSize: 14, color: '#AEAEB2' },
-});
 
-// Portfolio summary styles
-const summary = StyleSheet.create({
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius:    20,
-    padding:         24,
-    marginBottom:    12,
-  },
-  row:     { flexDirection: 'row', alignItems: 'center' },
-  divider: { width: 1, height: 48, backgroundColor: '#F0F0F0', marginHorizontal: 20 },
-  label:   { fontSize: 12, color: '#AEAEB2', marginBottom: 6 },
-  value:   { fontSize: 20, fontWeight: '700', color: '#191919' },
-  pnl:     { fontSize: 20, fontWeight: '700' },
-  rate:    { fontSize: 13, fontWeight: '600', marginTop: 3 },
-});
+  content:  { paddingHorizontal: 20, paddingTop: 4 },
 
-// Position card styles
-const card = StyleSheet.create({
-  wrap:     { backgroundColor: '#FFFFFF', paddingVertical: 20, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', gap: 14, borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
-  iconWrap: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center' },
-  iconText: { fontSize: 15, fontWeight: '700', color: '#555555' },
-  symbol:   { fontSize: 16, fontWeight: '700', color: '#191919' },
-  sub:      { fontSize: 13, fontWeight: '500', color: '#AEAEB2', marginTop: 3 },
-  amount:   { fontSize: 16, fontWeight: '700' },
-  rate:     { fontSize: 13, fontWeight: '600', marginTop: 3 },
-  badge:    { borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3 },
-  badgeText: { fontSize: 11, fontWeight: '600' },
-  hint:     { backgroundColor: '#FFFFFF', paddingHorizontal: 20, paddingBottom: 14, paddingTop: 0 },
-  hintText: { fontSize: 12, color: '#AEAEB2' },
-});
-
-// History row styles
-const row = StyleSheet.create({
-  wrap: {
-    flexDirection:     'row',
-    alignItems:        'center',
-    gap:               14,
-    paddingVertical:   18,
-    paddingHorizontal: 20,
-    position:          'relative',
-  },
-  date:    { fontSize: 12, fontWeight: '600', color: '#AEAEB2', width: 36, flexShrink: 0 },
-  symbol:  { fontSize: 15, fontWeight: '600', color: '#191919' },
-  meta:    { fontSize: 12, color: '#AEAEB2', marginTop: 3 },
-  amount:  { fontSize: 15, fontWeight: '700' },
-  rate:    { fontSize: 12, fontWeight: '600', marginTop: 3 },
-  divider: {
-    position:        'absolute',
-    bottom:          0,
-    left:            16,
-    right:           16,
-    height:          1,
-    backgroundColor: '#F5F5F5',
-  },
-});
-
-// History section styles
-const hist = StyleSheet.create({
-  summaryCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius:    20,
-    padding:         24,
-    marginBottom:    14,
-  },
+  // Summary card
   summaryRow:     { flexDirection: 'row', alignItems: 'center' },
-  summaryDivider: { width: 1, height: 40, backgroundColor: '#F0F0F0' },
-  summaryLabel:   { fontSize: 12, color: '#AEAEB2', marginBottom: 6 },
-  summaryValue:   { fontSize: 17, fontWeight: '700', color: '#191919' },
+  summaryDivider: { width: 1, height: 48, backgroundColor: '#F0F0F0', marginHorizontal: 20 },
+  summaryMain:    { fontSize: 20, fontWeight: '700', color: '#191919' },
+  summaryRate:    { fontSize: 13, fontWeight: '600', marginTop: 3 },
 
-  filterRow: {
-    flexDirection: 'row',
-    gap:           8,
-    marginBottom:  14,
-  },
-  filterBtn: {
-    paddingHorizontal: 16,
-    paddingVertical:    9,
-    borderRadius:       20,
-    backgroundColor:   '#FFFFFF',
-    borderWidth:        1,
-    borderColor:        '#F0F0F0',
-  },
-  filterBtnActive: {
-    backgroundColor: '#F0F0F0',
-    borderColor:     '#E0E0E0',
-  },
-  filterText: { fontSize: 13, fontWeight: '600' },
+  // Stats row (history summary)
+  statsRow:     { flexDirection: 'row', alignItems: 'center' },
+  statsDivider: { width: 1, height: 40, backgroundColor: '#F0F0F0' },
+  statsValue:   { fontSize: 17, fontWeight: '700' },
 
-  listCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius:    20,
-    overflow:        'hidden',
-  },
-  emptyWrap: {
-    backgroundColor: '#FFFFFF',
-    borderRadius:    20,
-    padding:         40,
-    alignItems:      'center',
-  },
-  emptyText: { fontSize: 14, color: '#AEAEB2' },
+  // Filter
+  filterRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
+
+  // Spacing helpers
+  mb6:  { marginBottom: 6 },
+  mb12: { marginBottom: 12 },
+  mb14: { marginBottom: 14 },
+});
+
+const card = StyleSheet.create({
+  row:       { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 20, paddingHorizontal: 20 },
+  rowBorder: { borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
+  icon:      { width: 48, height: 48, borderRadius: 24, backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center' },
+  iconText:  { fontSize: 15, fontWeight: '700', color: '#555555' },
+  symbolRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  symbol:    { fontSize: 16, fontWeight: '700', color: '#191919' },
+  badge:     { borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3 },
+  badgeText: { fontSize: 11, fontWeight: '600' },
+  profit:    { fontSize: 16, fontWeight: '700' },
+  rate:      { fontSize: 13, fontWeight: '600', marginTop: 3 },
+  hint:      { paddingHorizontal: 20, paddingBottom: 14, paddingTop: 0 },
+});
+
+const hist = StyleSheet.create({
+  row:       { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 18, paddingHorizontal: 20 },
+  rowBorder: { borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
+  date:      { fontSize: 12, fontWeight: '600', color: '#AEAEB2', width: 36, flexShrink: 0 },
+  symbol:    { fontSize: 15, fontWeight: '600', color: '#191919' },
+  amount:    { fontSize: 15, fontWeight: '700' },
+  rate:      { fontSize: 12, fontWeight: '600', marginTop: 3 },
 });

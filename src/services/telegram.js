@@ -172,10 +172,9 @@ class TelegramService {
     // /analyze - ICT 전략 실시간 분석
     this.bot.onText(/\/analyze/, async (msg) => {
       if (!auth(msg)) return;
-      await this.bot.sendMessage(chatId, '🔍 ICT 분석 중...');
+      await this.bot.sendMessage(chatId, '🔍 ICT v2 분석 중...');
 
       try {
-        // 3개 타임프레임 캔들 조회
         const [htfCandles, mtfCandles, ltfCandles] = await Promise.all([
           gateClient.getCandles(config.tradePair, config.timeframes.htf, 200),
           gateClient.getCandles(config.tradePair, config.timeframes.mtf, 200),
@@ -184,152 +183,100 @@ class TelegramService {
 
         const currentPrice = ltfCandles[ltfCandles.length - 1].close;
         const lines = [];
-        lines.push(`━━━ ICT 분석: ${config.tradePair} ━━━`);
+        lines.push(`━━━ ICT v2 분석: ${config.tradePair} ━━━`);
         lines.push(`💰 현재가: ${currentPrice.toFixed(2)}`);
+
+        // 세션 상태
+        const session = indicators.getActiveSession();
+        lines.push(`⏰ ${session.active ? `✅ ${session.name}` : `❌ ${session.reason}`}`);
         lines.push('');
 
-        // ========== HTF 분석 ==========
-        const htfSwingHighs = indicators.findSwingHighs(htfCandles, config.ict.structureShiftBars);
-        const htfSwingLows = indicators.findSwingLows(htfCandles, config.ict.structureShiftBars);
-        let htfDirection = null;
-
-        lines.push(`📊 HTF (${config.timeframes.htf}) 방향 판단`);
-
-        if (htfSwingHighs.length >= 2 && htfSwingLows.length >= 2) {
-          const lastHigh = htfSwingHighs[htfSwingHighs.length - 1].price;
-          const prevHigh = htfSwingHighs[htfSwingHighs.length - 2].price;
-          const lastLow = htfSwingLows[htfSwingLows.length - 1].price;
-          const prevLow = htfSwingLows[htfSwingLows.length - 2].price;
-
-          const hh = lastHigh > prevHigh;
-          const hl = lastLow > prevLow;
-          const lh = lastHigh < prevHigh;
-          const ll = lastLow < prevLow;
-
-          if (hh && hl) {
-            htfDirection = 'bullish';
-            lines.push(`  ✅ BULLISH (HH + HL)`);
-          } else if (lh && ll) {
-            htfDirection = 'bearish';
-            lines.push(`  ✅ BEARISH (LH + LL)`);
-          } else {
-            const mss = indicators.detectMarketStructureShift(htfCandles, htfSwingHighs, htfSwingLows);
-            if (mss) {
-              htfDirection = mss;
-              lines.push(`  ✅ ${mss.toUpperCase()} (MSS 감지)`);
-            } else {
-              lines.push(`  ⚠️ 방향 불명확 (횡보)`);
-            }
-          }
-
-          lines.push(`  스윙 하이: ${lastHigh.toFixed(2)} (이전: ${prevHigh.toFixed(2)})`);
-          lines.push(`  스윙 로우: ${lastLow.toFixed(2)} (이전: ${prevLow.toFixed(2)})`);
-        } else {
-          lines.push(`  ⚠️ 스윙 포인트 부족`);
+        // HTF
+        lines.push(`📊 HTF (${config.timeframes.htf})`);
+        const htfSH = indicators.findSwingHighs(htfCandles, config.ict.structureShiftBars);
+        const htfSL = indicators.findSwingLows(htfCandles, config.ict.structureShiftBars);
+        if (htfSH.length >= 2 && htfSL.length >= 2) {
+          const lh = htfSH[htfSH.length - 1].price, ph = htfSH[htfSH.length - 2].price;
+          const ll = htfSL[htfSL.length - 1].price, pl = htfSL[htfSL.length - 2].price;
+          if (lh > ph && ll > pl) lines.push(`  ✅ BULLISH (HH+HL)`);
+          else if (lh < ph && ll < pl) lines.push(`  ✅ BEARISH (LH+LL)`);
+          else lines.push(`  ⚠️ 횡보`);
+          lines.push(`  SH: ${lh.toFixed(2)} | SL: ${ll.toFixed(2)}`);
         }
 
+        // PDH/PDL
+        const pdhl = indicators.calculatePDHL(htfCandles);
+        if (pdhl) {
+          lines.push(`  PDH: ${pdhl.pdh.toFixed(2)} ${pdhl.pdhSweep ? '🔄 Sweep!' : ''}`);
+          lines.push(`  PDL: ${pdhl.pdl.toFixed(2)} ${pdhl.pdlSweep ? '🔄 Sweep!' : ''}`);
+        }
         lines.push('');
 
-        // ========== MTF 분석 ==========
-        lines.push(`📊 MTF (${config.timeframes.mtf}) 구조 확인`);
-
-        const mtfSwingHighs = indicators.findSwingHighs(mtfCandles, config.ict.structureShiftBars);
-        const mtfSwingLows = indicators.findSwingLows(mtfCandles, config.ict.structureShiftBars);
-
-        // MSS
-        const mtfMss = (mtfSwingHighs.length >= 2 && mtfSwingLows.length >= 2)
-          ? indicators.detectMarketStructureShift(mtfCandles, mtfSwingHighs, mtfSwingLows)
-          : null;
+        // MTF
+        lines.push(`📊 MTF (${config.timeframes.mtf})`);
+        const mtfMss = (() => {
+          const sh = indicators.findSwingHighs(mtfCandles, config.ict.structureShiftBars);
+          const sl = indicators.findSwingLows(mtfCandles, config.ict.structureShiftBars);
+          return (sh.length >= 2 && sl.length >= 2) ? indicators.detectMarketStructureShift(mtfCandles, sh, sl) : null;
+        })();
         lines.push(`  MSS: ${mtfMss ? `✅ ${mtfMss.toUpperCase()}` : '❌ 없음'}`);
 
-        // Order Block
         const mtfOBs = indicators.findOrderBlocks(mtfCandles);
-        lines.push(`  Bullish OB: ${mtfOBs.bullish.length}개`);
-        if (mtfOBs.bullish.length > 0) {
-          const ob = mtfOBs.bullish[mtfOBs.bullish.length - 1];
-          lines.push(`    └ 최근: ${ob.low.toFixed(2)} ~ ${ob.high.toFixed(2)}`);
-        }
-        lines.push(`  Bearish OB: ${mtfOBs.bearish.length}개`);
-        if (mtfOBs.bearish.length > 0) {
-          const ob = mtfOBs.bearish[mtfOBs.bearish.length - 1];
-          lines.push(`    └ 최근: ${ob.low.toFixed(2)} ~ ${ob.high.toFixed(2)}`);
-        }
+        lines.push(`  OB: Bull ${mtfOBs.bullish.length}개 / Bear ${mtfOBs.bearish.length}개`);
 
-        // FVG
         const mtfFVGs = indicators.findFairValueGaps(mtfCandles);
-        lines.push(`  Bullish FVG: ${mtfFVGs.bullish.length}개`);
-        if (mtfFVGs.bullish.length > 0) {
-          const fvg = mtfFVGs.bullish[mtfFVGs.bullish.length - 1];
-          lines.push(`    └ 최근: ${fvg.bottom.toFixed(2)} ~ ${fvg.top.toFixed(2)}`);
+        const mtfBullUnfilled = mtfFVGs.bullish.filter(f => !f.isFilled);
+        const mtfBearUnfilled = mtfFVGs.bearish.filter(f => !f.isFilled);
+        lines.push(`  FVG(미메움): Bull ${mtfBullUnfilled.length}개 / Bear ${mtfBearUnfilled.length}개`);
+        if (mtfBullUnfilled.length > 0) {
+          const f = mtfBullUnfilled[mtfBullUnfilled.length - 1];
+          lines.push(`    └ CE: ${f.ce.toFixed(2)} (${f.fillPercent}% filled)`);
         }
-        lines.push(`  Bearish FVG: ${mtfFVGs.bearish.length}개`);
-        if (mtfFVGs.bearish.length > 0) {
-          const fvg = mtfFVGs.bearish[mtfFVGs.bearish.length - 1];
-          lines.push(`    └ 최근: ${fvg.bottom.toFixed(2)} ~ ${fvg.top.toFixed(2)}`);
+        if (mtfBearUnfilled.length > 0) {
+          const f = mtfBearUnfilled[mtfBearUnfilled.length - 1];
+          lines.push(`    └ CE: ${f.ce.toFixed(2)} (${f.fillPercent}% filled)`);
         }
-
         lines.push('');
 
-        // ========== LTF 분석 ==========
-        lines.push(`📊 LTF (${config.timeframes.ltf}) 진입 조건`);
-
-        // Kill Zone
-        const killZone = indicators.isInKillZone();
-        lines.push(`  Kill Zone: ${killZone.active ? `✅ ${killZone.zone}` : '❌ 비활성'}`);
-
-        // LTF 스윙
-        const ltfSwingHighs = indicators.findSwingHighs(ltfCandles, config.ict.structureShiftBars);
-        const ltfSwingLows = indicators.findSwingLows(ltfCandles, config.ict.structureShiftBars);
-
-        // Liquidity Sweep
-        const sweeps = (ltfSwingHighs.length >= 1 && ltfSwingLows.length >= 1)
-          ? indicators.detectLiquiditySweep(ltfCandles, ltfSwingHighs, ltfSwingLows)
-          : [];
-        lines.push(`  Liquidity Sweep: ${sweeps.length > 0 ? `✅ ${sweeps.map(s => `${s.type} @ ${s.level.toFixed(2)}`).join(', ')}` : '❌ 없음'}`);
-
-        // OTE
-        if (ltfSwingHighs.length >= 1 && ltfSwingLows.length >= 1) {
-          const recentHigh = ltfSwingHighs[ltfSwingHighs.length - 1].price;
-          const recentLow = ltfSwingLows[ltfSwingLows.length - 1].price;
-          const ote = indicators.calculateOTE(recentHigh, recentLow);
-
-          const inBullishOTE = currentPrice >= ote.bullish.lower && currentPrice <= ote.bullish.upper;
-          const inBearishOTE = currentPrice >= ote.bearish.lower && currentPrice <= ote.bearish.upper;
-
-          lines.push(`  Bullish OTE: ${ote.bullish.lower.toFixed(2)} ~ ${ote.bullish.upper.toFixed(2)} ${inBullishOTE ? '✅ 구간 내' : ''}`);
-          lines.push(`  Bearish OTE: ${ote.bearish.lower.toFixed(2)} ~ ${ote.bearish.upper.toFixed(2)} ${inBearishOTE ? '✅ 구간 내' : ''}`);
-        }
-
-        // LTF MSS
-        const ltfMss = (ltfSwingHighs.length >= 2 && ltfSwingLows.length >= 2)
-          ? indicators.detectMarketStructureShift(ltfCandles, ltfSwingHighs, ltfSwingLows)
-          : null;
-        lines.push(`  LTF MSS: ${ltfMss ? `✅ ${ltfMss.toUpperCase()}` : '❌ 없음'}`);
-
-        // LTF FVG
+        // LTF
+        lines.push(`📊 LTF (${config.timeframes.ltf})`);
         const ltfFVGs = indicators.findFairValueGaps(ltfCandles);
-        const inBullishFVG = ltfFVGs.bullish.find(f => currentPrice >= f.bottom && currentPrice <= f.top);
-        const inBearishFVG = ltfFVGs.bearish.find(f => currentPrice >= f.bottom && currentPrice <= f.top);
-        lines.push(`  LTF FVG: Bullish ${ltfFVGs.bullish.length}개${inBullishFVG ? ' ✅ 구간 내' : ''} / Bearish ${ltfFVGs.bearish.length}개${inBearishFVG ? ' ✅ 구간 내' : ''}`);
+        const ltfBullCE = ltfFVGs.bullish.filter(f => !f.isFilled && f.atCE);
+        const ltfBearCE = ltfFVGs.bearish.filter(f => !f.isFilled && f.atCE);
+        lines.push(`  FVG CE 진입: Bull ${ltfBullCE.length}개 / Bear ${ltfBearCE.length}개`);
+
+        const ltfBullFill = ltfFVGs.bullish.filter(f => !f.isFilled && f.inRange && f.fillPercent >= 50);
+        const ltfBearFill = ltfFVGs.bearish.filter(f => !f.isFilled && f.inRange && f.fillPercent >= 50);
+        lines.push(`  FVG Fill 진입: Bull ${ltfBullFill.length}개 / Bear ${ltfBearFill.length}개`);
+
+        const iofeds = indicators.detectIOFED(ltfCandles);
+        const recentIOFED = iofeds.filter(d => ltfCandles.length - d.index <= 5);
+        lines.push(`  IOFED: ${recentIOFED.length > 0 ? `✅ ${recentIOFED.map(d => `${d.type}(${d.consecutiveBars}봉)`).join(', ')}` : '❌ 없음'}`);
+
+        // Session Range
+        const sRanges = indicators.calculateSessionRanges(ltfCandles);
+        if (Object.keys(sRanges).length > 0) {
+          lines.push('');
+          lines.push('📏 Session Range');
+          for (const [, sr] of Object.entries(sRanges)) {
+            lines.push(`  ${sr.name}: ${sr.low.toFixed(2)} ~ ${sr.high.toFixed(2)} ${sr.highSweep || sr.lowSweep ? '🔄 Sweep!' : ''}`);
+          }
+        }
 
         lines.push('');
 
-        // ========== 종합 판단 ==========
+        // 종합 판단
         lines.push('📋 종합 판단');
         const signal = this.tradingBot.strategy.analyze({ htf: htfCandles, mtf: mtfCandles, ltf: ltfCandles });
-
         if (signal.signal) {
           const emoji = signal.signal === 'long' ? '📈' : '📉';
-          lines.push(`  ${emoji} ${signal.signal.toUpperCase()} 신호 발생!`);
-          lines.push(`  진입가: ${signal.entry}`);
-          lines.push(`  SL: ${signal.sl} | TP: ${signal.tp}`);
-          lines.push(`  컨플루언스: ${signal.confluence.length}개`);
+          lines.push(`  ${emoji} ${signal.signal.toUpperCase()} 신호!`);
+          lines.push(`  진입: ${signal.entry} | SL: ${signal.sl} | TP: ${signal.tp}`);
+          lines.push(`  컨플루언스 ${signal.confluence.length}개:`);
           signal.confluence.forEach(c => lines.push(`    • ${c}`));
         } else {
-          lines.push(`  ⏸️ 신호 없음`);
-          lines.push(`  사유: ${signal.reason}`);
+          lines.push(`  ⏸️ ${signal.reason}`);
           if (signal.confluence && signal.confluence.length > 0) {
-            lines.push(`  충족된 조건:`);
             signal.confluence.forEach(c => lines.push(`    • ${c}`));
           }
         }

@@ -3,31 +3,27 @@ const config = require('../config');
 const logger = require('../utils/logger');
 
 /**
- * ICT (Inner Circle Trading) 멀티 타임프레임 전략
+ * ICT (Inner Circle Trading) 전략 v2
+ *
+ * 변경사항:
+ *  - 타임프레임: 4h → 15m → 5m
+ *  - 진입 근거: FVG CE, FVG Fill, IOFED
+ *  - 세션: Asian / London / NY (점심시간 제외, 주말 제외)
+ *  - PDH/PDL 유동성
+ *  - Session Range 유동성
  *
  * 3단계 분석:
- *  HTF (4h) - 전체 방향 판단 (트렌드 바이어스)
- *  MTF (1h) - 구조 확인 (MSS, OB, FVG)
- *  LTF (15m) - 정밀 진입 타이밍 (OTE, Liquidity Sweep)
- *
- * 진입 조건 (Long):
- *  1. HTF: Bullish 트렌드 (Higher High, Higher Low)
- *  2. MTF: Bullish MSS + Bullish OB 또는 FVG 존재
- *  3. LTF: Kill Zone 내 + OTE 구간 진입 또는 Liquidity Sweep
- *
- * 진입 조건 (Short):
- *  1. HTF: Bearish 트렌드 (Lower High, Lower Low)
- *  2. MTF: Bearish MSS + Bearish OB 또는 FVG 존재
- *  3. LTF: Kill Zone 내 + OTE 구간 진입 또는 Liquidity Sweep
+ *  HTF (4h)  - 방향 판단 + PDH/PDL 유동성 레벨
+ *  MTF (15m) - 구조 확인 (MSS + OB/FVG)
+ *  LTF (5m)  - 정밀 진입 (FVG CE / FVG Fill / IOFED)
  */
 class IctStrategy {
   constructor() {
-    this.name = 'ICT Multi-Timeframe Strategy';
+    this.name = 'ICT Strategy v2';
   }
 
   /**
    * 멀티 타임프레임 분석
-   * @param {Object} candleData - { htf: [], mtf: [], ltf: [] }
    */
   analyze(candleData) {
     const { htf, mtf, ltf } = candleData;
@@ -45,44 +41,53 @@ class IctStrategy {
     const currentPrice = ltf[ltf.length - 1].close;
     const confluence = [];
 
-    // ========== STEP 1: HTF (4h) 방향 판단 ==========
+    // ========== 세션 체크 (주말 + 점심 제외) ==========
+    const session = indicators.getActiveSession();
+    if (!session.active) {
+      return { signal: null, reason: session.reason || '세션 외 시간' };
+    }
+    confluence.push(`세션: ${session.name}`);
+
+    // ========== STEP 1: HTF (4h) 방향 + PDH/PDL ==========
     const htfBias = this._analyzeHTF(htf);
     if (!htfBias.direction) {
       return { signal: null, reason: `HTF 방향 불명확: ${htfBias.reason}` };
     }
-    confluence.push(`HTF(${config.timeframes.htf}) ${htfBias.direction.toUpperCase()} 바이어스`);
-    logger.debug(`[HTF] ${htfBias.direction} - ${htfBias.reason}`);
+    confluence.push(`HTF(${config.timeframes.htf}) ${htfBias.direction.toUpperCase()}`);
 
-    // ========== STEP 2: MTF (1h) 구조 확인 ==========
+    // PDH/PDL
+    if (htfBias.pdhl) {
+      if (htfBias.pdhl.pdhSweep) confluence.push(`PDH Sweep (${htfBias.pdhl.pdh.toFixed(2)})`);
+      if (htfBias.pdhl.pdlSweep) confluence.push(`PDL Sweep (${htfBias.pdhl.pdl.toFixed(2)})`);
+    }
+
+    // ========== STEP 2: MTF (15m) 구조 확인 ==========
     const mtfStructure = this._analyzeMTF(mtf, htfBias.direction);
     if (!mtfStructure.confirmed) {
       return { signal: null, reason: `MTF 구조 미확인: ${mtfStructure.reason}`, confluence };
     }
     confluence.push(...mtfStructure.confluence);
-    logger.debug(`[MTF] 구조 확인됨 - ${mtfStructure.confluence.join(', ')}`);
 
-    // ========== STEP 3: LTF (15m) 진입 타이밍 ==========
-    const ltfEntry = this._analyzeLTF(ltf, htfBias.direction, currentPrice);
+    // ========== STEP 3: LTF (5m) 정밀 진입 ==========
+    const ltfEntry = this._analyzeLTF(ltf, htfBias.direction, currentPrice, session);
     if (!ltfEntry.ready) {
-      return { signal: null, reason: `LTF 진입 조건 미충족: ${ltfEntry.reason}`, confluence };
+      return { signal: null, reason: `LTF 진입 미충족: ${ltfEntry.reason}`, confluence };
     }
     confluence.push(...ltfEntry.confluence);
-    logger.debug(`[LTF] 진입 준비 - ${ltfEntry.confluence.join(', ')}`);
 
-    // ========== 최종 신호 생성 ==========
-    const direction = htfBias.direction; // 'bullish' or 'bearish'
+    // ========== 최종 신호 ==========
+    const direction = htfBias.direction;
     const signal = direction === 'bullish' ? 'long' : 'short';
 
-    // SL/TP 계산
     const { sl, tp } = this._calculateSLTP(
-      currentPrice, direction, mtfStructure, ltfEntry
+      currentPrice, direction, mtfStructure, ltfEntry, htfBias
     );
 
-    logger.info(`[MTF 신호] ${signal.toUpperCase()} | ${confluence.length}개 컨플루언스`);
+    logger.info(`[ICT v2] ${signal.toUpperCase()} | ${confluence.length}개 컨플루언스`);
 
     return {
       signal,
-      reason: `ICT MTF ${signal.toUpperCase()} - HTF→MTF→LTF ${confluence.length}개 컨플루언스`,
+      reason: `ICT v2 ${signal.toUpperCase()} - ${confluence.length}개 컨플루언스`,
       entry: currentPrice,
       sl: parseFloat(sl.toFixed(2)),
       tp: parseFloat(tp.toFixed(2)),
@@ -91,13 +96,12 @@ class IctStrategy {
   }
 
   /**
-   * HTF (4h): 전체 트렌드 방향 판단
-   * - Higher High + Higher Low = Bullish
-   * - Lower High + Lower Low = Bearish
+   * HTF (4h): 방향 판단 + PDH/PDL
    */
   _analyzeHTF(candles) {
     const swingHighs = indicators.findSwingHighs(candles, config.ict.structureShiftBars);
     const swingLows = indicators.findSwingLows(candles, config.ict.structureShiftBars);
+    const pdhl = indicators.calculatePDHL(candles);
 
     if (swingHighs.length < 2 || swingLows.length < 2) {
       return { direction: null, reason: 'HTF 스윙 포인트 부족' };
@@ -113,28 +117,40 @@ class IctStrategy {
     const lowerHigh = lastHigh < prevHigh;
     const lowerLow = lastLow < prevLow;
 
+    let direction = null;
+    let reason = '';
+
     if (higherHigh && higherLow) {
-      return { direction: 'bullish', reason: 'HH + HL (상승 구조)', swingHighs, swingLows };
-    }
-    if (lowerHigh && lowerLow) {
-      return { direction: 'bearish', reason: 'LH + LL (하락 구조)', swingHighs, swingLows };
-    }
-
-    // 단일 조건이라도 MSS로 판단
-    const mss = indicators.detectMarketStructureShift(candles, swingHighs, swingLows);
-    if (mss === 'bullish') {
-      return { direction: 'bullish', reason: 'HTF Bullish MSS', swingHighs, swingLows };
-    }
-    if (mss === 'bearish') {
-      return { direction: 'bearish', reason: 'HTF Bearish MSS', swingHighs, swingLows };
+      direction = 'bullish';
+      reason = 'HH + HL';
+    } else if (lowerHigh && lowerLow) {
+      direction = 'bearish';
+      reason = 'LH + LL';
+    } else {
+      const mss = indicators.detectMarketStructureShift(candles, swingHighs, swingLows);
+      if (mss) {
+        direction = mss;
+        reason = `HTF ${mss} MSS`;
+      }
     }
 
-    return { direction: null, reason: '트렌드 불명확 (횡보 구간)' };
+    // PDH/PDL sweep으로 방향 보강
+    if (!direction && pdhl) {
+      if (pdhl.pdlSweep) { direction = 'bullish'; reason = 'PDL Sweep 반전'; }
+      if (pdhl.pdhSweep) { direction = 'bearish'; reason = 'PDH Sweep 반전'; }
+    }
+
+    return {
+      direction,
+      reason: direction ? reason : '트렌드 불명확',
+      swingHighs,
+      swingLows,
+      pdhl,
+    };
   }
 
   /**
-   * MTF (1h): 구조 확인
-   * HTF 방향과 일치하는 MSS + OB 또는 FVG 존재 여부
+   * MTF (15m): 구조 확인
    */
   _analyzeMTF(candles, htfDirection) {
     const confluence = [];
@@ -145,58 +161,51 @@ class IctStrategy {
       return { confirmed: false, reason: 'MTF 스윙 포인트 부족' };
     }
 
-    // MSS 확인
     const mss = indicators.detectMarketStructureShift(candles, swingHighs, swingLows);
     const mssAligned = mss === htfDirection;
 
     if (mssAligned) {
-      confluence.push(`MTF(${config.timeframes.mtf}) ${htfDirection} MSS 확인`);
+      confluence.push(`MTF(${config.timeframes.mtf}) ${htfDirection} MSS`);
     }
 
-    // Order Block 탐색
     const orderBlocks = indicators.findOrderBlocks(candles);
     const relevantOBs = htfDirection === 'bullish' ? orderBlocks.bullish : orderBlocks.bearish;
     if (relevantOBs.length > 0) {
-      const latestOB = relevantOBs[relevantOBs.length - 1];
-      confluence.push(`MTF OB [${latestOB.low.toFixed(2)} - ${latestOB.high.toFixed(2)}]`);
+      const ob = relevantOBs[relevantOBs.length - 1];
+      confluence.push(`MTF OB [${ob.low.toFixed(2)}-${ob.high.toFixed(2)}]`);
     }
 
-    // FVG 탐색
     const fvgs = indicators.findFairValueGaps(candles);
     const relevantFVGs = htfDirection === 'bullish' ? fvgs.bullish : fvgs.bearish;
-    if (relevantFVGs.length > 0) {
-      const latestFVG = relevantFVGs[relevantFVGs.length - 1];
-      confluence.push(`MTF FVG [${latestFVG.bottom.toFixed(2)} - ${latestFVG.top.toFixed(2)}]`);
+    // 미메움 FVG만 필터
+    const unfilled = relevantFVGs.filter(f => !f.isFilled);
+    if (unfilled.length > 0) {
+      const fvg = unfilled[unfilled.length - 1];
+      confluence.push(`MTF FVG [${fvg.bottom.toFixed(2)}-${fvg.top.toFixed(2)}] CE:${fvg.ce.toFixed(2)}`);
     }
 
-    // MSS + (OB 또는 FVG) 필요
     const hasStructure = mssAligned || relevantOBs.length > 0;
-    const hasPOI = relevantOBs.length > 0 || relevantFVGs.length > 0; // Point of Interest
+    const hasPOI = relevantOBs.length > 0 || unfilled.length > 0;
 
     return {
       confirmed: hasStructure && hasPOI,
       reason: hasStructure && hasPOI ? '구조 확인됨' : 'MSS 또는 POI 부족',
       confluence,
       orderBlocks: relevantOBs,
-      fvgs: relevantFVGs,
+      fvgs: unfilled,
       swingHighs,
       swingLows,
     };
   }
 
   /**
-   * LTF (15m): 정밀 진입 타이밍
-   * Kill Zone + OTE 구간 또는 Liquidity Sweep
+   * LTF (5m): 정밀 진입
+   * 진입 근거: FVG CE, FVG Fill, IOFED
    */
-  _analyzeLTF(candles, htfDirection, currentPrice) {
+  _analyzeLTF(candles, htfDirection, currentPrice, session) {
     const confluence = [];
-
-    // Kill Zone 확인
-    const killZone = indicators.isInKillZone();
-    if (!killZone.active) {
-      return { ready: false, reason: 'Kill Zone 외 시간대' };
-    }
-    confluence.push(`Kill Zone: ${killZone.zone}`);
+    let entryConfirmed = false;
+    let entryType = null;
 
     const swingHighs = indicators.findSwingHighs(candles, config.ict.structureShiftBars);
     const swingLows = indicators.findSwingLows(candles, config.ict.structureShiftBars);
@@ -205,92 +214,118 @@ class IctStrategy {
       return { ready: false, reason: 'LTF 스윙 포인트 부족' };
     }
 
-    let entryConfirmed = false;
+    // Session Range 확인
+    const sessionRanges = indicators.calculateSessionRanges(candles);
+    if (sessionRanges[session.session]) {
+      const sr = sessionRanges[session.session];
+      if (sr.highSweep || sr.lowSweep) {
+        confluence.push(`${sr.name} Range Sweep`);
+      }
+    }
 
-    // Liquidity Sweep 확인
+    // ===== 진입 근거 1: FVG CE (Consequent Encroachment) =====
+    const fvgs = indicators.findFairValueGaps(candles);
+    const relevantFVGs = htfDirection === 'bullish' ? fvgs.bullish : fvgs.bearish;
+    const unfilledFVGs = relevantFVGs.filter(f => !f.isFilled);
+
+    for (const fvg of unfilledFVGs) {
+      if (fvg.atCE) {
+        confluence.push(`LTF FVG CE @ ${fvg.ce.toFixed(2)} (${fvg.fillPercent}% filled)`);
+        entryConfirmed = true;
+        entryType = 'FVG_CE';
+        break;
+      }
+    }
+
+    // ===== 진입 근거 2: FVG Fill =====
+    if (!entryConfirmed) {
+      for (const fvg of unfilledFVGs) {
+        if (fvg.inRange && fvg.fillPercent >= 50 && fvg.fillPercent < 100) {
+          confluence.push(`LTF FVG Fill @ ${fvg.fillPercent}% [${fvg.bottom.toFixed(2)}-${fvg.top.toFixed(2)}]`);
+          entryConfirmed = true;
+          entryType = 'FVG_FILL';
+          break;
+        }
+      }
+    }
+
+    // ===== 진입 근거 3: IOFED =====
+    if (!entryConfirmed) {
+      const iofeds = indicators.detectIOFED(candles);
+      const relevantIOFED = iofeds.filter(d => d.type === htfDirection);
+
+      if (relevantIOFED.length > 0) {
+        const latest = relevantIOFED[relevantIOFED.length - 1];
+        // 최근 5봉 내의 IOFED만 유효
+        if (candles.length - latest.index <= 5) {
+          confluence.push(`IOFED ${latest.type} (${latest.consecutiveBars}연속봉 후 반전)`);
+          entryConfirmed = true;
+          entryType = 'IOFED';
+        }
+      }
+    }
+
+    // Liquidity Sweep 추가 컨플루언스
     const sweeps = indicators.detectLiquiditySweep(candles, swingHighs, swingLows);
-    const relevantSweep = sweeps.find((s) => s.type === htfDirection);
+    const relevantSweep = sweeps.find(s => s.type === htfDirection);
     if (relevantSweep) {
-      confluence.push(`LTF(${config.timeframes.ltf}) ${htfDirection} Liquidity Sweep @ ${relevantSweep.level.toFixed(2)}`);
-      entryConfirmed = true;
-    }
-
-    // OTE 구간 확인
-    const recentHigh = swingHighs[swingHighs.length - 1].price;
-    const recentLow = swingLows[swingLows.length - 1].price;
-    const ote = indicators.calculateOTE(recentHigh, recentLow);
-
-    if (htfDirection === 'bullish') {
-      if (currentPrice >= ote.bullish.lower && currentPrice <= ote.bullish.upper) {
-        confluence.push(`LTF OTE [${ote.bullish.lower.toFixed(2)} - ${ote.bullish.upper.toFixed(2)}]`);
+      confluence.push(`LTF Sweep @ ${relevantSweep.level.toFixed(2)}`);
+      if (!entryConfirmed) {
         entryConfirmed = true;
-      }
-    } else {
-      if (currentPrice >= ote.bearish.lower && currentPrice <= ote.bearish.upper) {
-        confluence.push(`LTF OTE [${ote.bearish.lower.toFixed(2)} - ${ote.bearish.upper.toFixed(2)}]`);
-        entryConfirmed = true;
+        entryType = 'SWEEP';
       }
     }
 
-    // LTF MSS 확인 (추가 컨플루언스)
+    // LTF MSS 추가 컨플루언스
     const ltfMss = indicators.detectMarketStructureShift(candles, swingHighs, swingLows);
     if (ltfMss === htfDirection) {
       confluence.push(`LTF ${htfDirection} MSS`);
-      entryConfirmed = true;
-    }
-
-    // LTF FVG 확인
-    const ltfFvgs = indicators.findFairValueGaps(candles);
-    const relevantFVGs = htfDirection === 'bullish' ? ltfFvgs.bullish : ltfFvgs.bearish;
-    const inFVG = relevantFVGs.find((fvg) =>
-      currentPrice >= fvg.bottom && currentPrice <= fvg.top
-    );
-    if (inFVG) {
-      confluence.push(`LTF FVG [${inFVG.bottom.toFixed(2)} - ${inFVG.top.toFixed(2)}]`);
-      entryConfirmed = true;
     }
 
     return {
       ready: entryConfirmed,
-      reason: entryConfirmed ? '진입 조건 충족' : 'OTE/Sweep/MSS 미충족',
+      reason: entryConfirmed ? `${entryType} 진입` : 'FVG CE/Fill/IOFED 미충족',
       confluence,
-      ote,
+      entryType,
       swingHighs,
       swingLows,
+      sessionRanges,
     };
   }
 
   /**
    * SL/TP 계산
-   * SL: MTF OB/FVG 기반, TP: R:R = 1:3
    */
-  _calculateSLTP(price, direction, mtfStructure, ltfEntry) {
+  _calculateSLTP(price, direction, mtfStructure, ltfEntry, htfBias) {
     let sl, tp;
 
     if (direction === 'bullish') {
-      // SL: MTF OB 하단 또는 LTF 스윙 로우 아래
+      // SL 우선순위: MTF OB 하단 → LTF 스윙 로우 → PDL → 고정 비율
       if (mtfStructure.orderBlocks.length > 0) {
         const ob = mtfStructure.orderBlocks[mtfStructure.orderBlocks.length - 1];
         sl = ob.low * (1 - config.stopLossPercent / 100 * 0.3);
       } else if (ltfEntry.swingLows && ltfEntry.swingLows.length > 0) {
         sl = ltfEntry.swingLows[ltfEntry.swingLows.length - 1].price * (1 - 0.001);
+      } else if (htfBias.pdhl) {
+        sl = htfBias.pdhl.pdl * (1 - 0.001);
       } else {
         sl = price * (1 - config.stopLossPercent / 100);
       }
       const risk = price - sl;
-      tp = price + risk * 3; // R:R = 1:3
+      tp = price + risk * 3;
     } else {
-      // SL: MTF OB 상단 또는 LTF 스윙 하이 위
       if (mtfStructure.orderBlocks.length > 0) {
         const ob = mtfStructure.orderBlocks[mtfStructure.orderBlocks.length - 1];
         sl = ob.high * (1 + config.stopLossPercent / 100 * 0.3);
       } else if (ltfEntry.swingHighs && ltfEntry.swingHighs.length > 0) {
         sl = ltfEntry.swingHighs[ltfEntry.swingHighs.length - 1].price * (1 + 0.001);
+      } else if (htfBias.pdhl) {
+        sl = htfBias.pdhl.pdh * (1 + 0.001);
       } else {
         sl = price * (1 + config.stopLossPercent / 100);
       }
       const risk = sl - price;
-      tp = price - risk * 3; // R:R = 1:3
+      tp = price - risk * 3;
     }
 
     return { sl, tp };

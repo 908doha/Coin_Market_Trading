@@ -19,8 +19,8 @@ const config = {
   // Multi-Timeframe (HTF → MTF → LTF)
   timeframes: {
     htf: process.env.HTF_INTERVAL || '4h',   // 상위: 방향 판단
-    mtf: process.env.MTF_INTERVAL || '1h',   // 중위: 구조 확인
-    ltf: process.env.LTF_INTERVAL || '15m',  // 하위: 진입 타이밍
+    mtf: process.env.MTF_INTERVAL || '15m',  // 중위: 구조 확인
+    ltf: process.env.LTF_INTERVAL || '5m',   // 하위: 정밀 진입
   },
 
   // Telegram
@@ -28,26 +28,44 @@ const config = {
   telegramChatId: process.env.TELEGRAM_CHAT_ID || '',
 
   // Bot
-  candleInterval: process.env.CANDLE_INTERVAL || '15m',
   cronSchedule: process.env.BOT_CRON_SCHEDULE || '*/1 * * * *',
   logLevel: process.env.LOG_LEVEL || 'info',
 
-  // ICT Kill Zone times (UTC)
-  killZones: {
-    asianOpen:   { start: '00:00', end: '04:00' },
-    londonOpen:  { start: '07:00', end: '10:00' },
-    nyOpen:      { start: '12:00', end: '15:00' },
-    londonClose: { start: '15:00', end: '17:00' },
+  // Trading Sessions (UTC) - 점심시간 제외
+  sessions: {
+    asian: {
+      name: 'Asian',
+      am:  { start: '00:00', end: '03:00' },  // 아시아 오전
+      pm:  { start: '04:00', end: '06:30' },  // 아시아 오후
+      // 점심: 03:00 ~ 04:00 UTC (KST 12:00~13:00)
+      full: { start: '00:00', end: '06:30' },
+    },
+    london: {
+      name: 'London',
+      am:  { start: '07:00', end: '10:30' },  // 런던 오전
+      pm:  { start: '11:30', end: '14:00' },  // 런던 오후
+      // 점심: 10:30 ~ 11:30 UTC (런던 11:30~12:30)
+      full: { start: '07:00', end: '14:00' },
+    },
+    ny: {
+      name: 'New York',
+      am:  { start: '13:30', end: '16:00' },  // NY 오전
+      pm:  { start: '17:00', end: '19:30' },  // NY 오후
+      // 점심: 16:00 ~ 17:00 UTC (NY 12:00~13:00)
+      full: { start: '13:30', end: '19:30' },
+    },
   },
 
   // ICT Strategy Parameters
   ict: {
-    swingLookback: 20,         // 스윙 하이/로우 탐색 범위
-    fvgMinGapPercent: 0.05,    // FVG 최소 갭 비율 (%)
-    oteFibLow: 0.62,           // OTE 피보나치 하단
-    oteFibHigh: 0.79,          // OTE 피보나치 상단
-    orderBlockLookback: 50,    // 오더블록 탐색 범위
-    structureShiftBars: 5,     // MSS 확인 봉 수
+    swingLookback: 20,
+    fvgMinGapPercent: 0.05,
+    oteFibLow: 0.62,
+    oteFibHigh: 0.79,
+    orderBlockLookback: 50,
+    structureShiftBars: 5,
+    fvgCeThreshold: 0.01,     // FVG CE 진입 허용 오차 (1%)
+    iofedMinBars: 3,           // IOFED 최소 연속 봉 수
   },
 };
 

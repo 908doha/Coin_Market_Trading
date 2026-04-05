@@ -16,27 +16,13 @@ const PORT = process.env.PORT || 4000;
 // ── CORS ──────────────────────────────────────────────────────────
 app.use(cors({
   origin: (origin, callback) => {
-    // 오리진 없는 요청 (모바일앱, Postman 등) 허용
     if (!origin) return callback(null, true);
-
-    // 환경변수로 허용 도메인 지정
     const allowed = process.env.FRONTEND_URL
       ? process.env.FRONTEND_URL.split(',').map((u) => u.trim())
       : [];
-
-    // 명시적으로 허용된 도메인
-    if (allowed.includes(origin) || allowed.includes('*')) {
-      return callback(null, true);
-    }
-
-    // Vercel 프리뷰 배포 전체 허용 (*.vercel.app)
+    if (allowed.includes(origin) || allowed.includes('*')) return callback(null, true);
     if (origin.endsWith('.vercel.app')) return callback(null, true);
-
-    // localhost 개발환경 허용
-    if (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')) {
-      return callback(null, true);
-    }
-
+    if (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')) return callback(null, true);
     callback(new Error(`CORS 차단: ${origin}`));
   },
   credentials: true,
@@ -60,6 +46,51 @@ app.get('/debug/db', async (_, res) => {
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
   }
+});
+
+// ── Gate.io 진단 ──────────────────────────────────────────────────
+app.get('/debug/gateio', async (_, res) => {
+  const config = require('./config');
+  const result = {
+    keySet:    !!config.apiKey && config.apiKey.length > 0,
+    secretSet: !!config.apiSecret && config.apiSecret.length > 0,
+    keyPrefix: config.apiKey   ? config.apiKey.slice(0, 6)   + '...' : '(없음)',
+    futures:   null,
+    spot:      null,
+    error:     null,
+  };
+
+  try {
+    const GateApi = require('gate-api');
+    const client  = new GateApi.ApiClient();
+    client.setApiKeySecret(config.apiKey, config.apiSecret);
+    const futuresApi = new GateApi.FuturesApi(client);
+    const spotApi    = new GateApi.SpotApi(client);
+
+    const [futRes, spotRes] = await Promise.allSettled([
+      futuresApi.listFuturesAccounts('usdt'),
+      spotApi.listSpotAccounts({ currency: 'USDT' }),
+    ]);
+
+    if (futRes.status === 'fulfilled') {
+      const b = futRes.value.body;
+      result.futures = { total: b.total, available: b.available, unrealisedPnl: b.unrealisedPnl };
+    } else {
+      result.futures = { error: futRes.reason?.message, body: futRes.reason?.body };
+    }
+
+    if (spotRes.status === 'fulfilled') {
+      const accounts = spotRes.value.body;
+      const usdt = Array.isArray(accounts) ? accounts.find((a) => a.currency === 'USDT') : null;
+      result.spot = usdt ? { available: usdt.available, locked: usdt.locked } : { note: 'USDT 계좌 없음', raw: accounts?.slice(0, 3) };
+    } else {
+      result.spot = { error: spotRes.reason?.message };
+    }
+  } catch (err) {
+    result.error = err.message;
+  }
+
+  res.json(result);
 });
 
 // ── 라우터 ────────────────────────────────────────────────────────

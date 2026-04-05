@@ -19,34 +19,47 @@ async function getKrwRate() {
 router.get('/balance', requireAuth, async (req, res) => {
   try {
     const rate    = await getKrwRate();
-    const balance = await gateClient.getBalance();
-    const totalKrw = Math.round(balance.total * rate);
-    const today    = new Date().toISOString().slice(0, 10);
-    const db = await getDb();
-    const existing = await db.get(
-      'SELECT id FROM chart_snapshots WHERE user_id = ? AND date = ?',
-      req.user.id, today
-    );
-    if (existing) {
-      await db.run('UPDATE chart_snapshots SET value = ? WHERE id = ?', totalKrw, existing.id);
-    } else {
-      await db.run(
-        'INSERT INTO chart_snapshots (id, user_id, date, value) VALUES (?, ?, ?, ?)',
-        uuid(), req.user.id, today, totalKrw
+    const balance = await gateClient.getBalance();   // ← Gate.io API
+    const totalKrw    = Math.round(balance.total * rate);
+    const unrealised  = Math.round((balance.unrealisedPnl || 0) * rate);
+
+    // DB 스냅샷 저장 — 실패해도 잔고 응답은 반환한다
+    const today = new Date().toISOString().slice(0, 10);
+    try {
+      const db = await getDb();
+      const existing = await db.get(
+        'SELECT id FROM chart_snapshots WHERE user_id = ? AND date = ?',
+        req.user.id, today
       );
+      if (existing) {
+        await db.run('UPDATE chart_snapshots SET value = ? WHERE id = ?', totalKrw, existing.id);
+      } else {
+        await db.run(
+          'INSERT INTO chart_snapshots (id, user_id, date, value) VALUES (?, ?, ?, ?)',
+          uuid(), req.user.id, today, totalKrw
+        );
+      }
+    } catch (dbErr) {
+      // DB 오류는 로그만 남기고 잔고 응답은 정상 반환
+      console.error('[balance] DB 스냅샷 저장 실패 (무시):', dbErr.message);
     }
-    const unrealised = Math.round(balance.unrealisedPnl * rate);
+
     res.json({
       total:           totalKrw,
-      totalUsdt:       parseFloat(balance.total.toFixed(2)),
-      available:       Math.round(balance.available * rate),
-      invested:        Math.round((balance.total - balance.available) * rate),
+      totalUsdt:       parseFloat((balance.total || 0).toFixed(2)),
+      available:       Math.round((balance.available || 0) * rate),
+      invested:        Math.round(((balance.total || 0) - (balance.available || 0)) * rate),
       profitTotal:     unrealised,
-      profitRate:      balance.total > 0 ? parseFloat(((balance.unrealisedPnl / balance.total) * 100).toFixed(2)) : 0,
+      profitRate:      balance.total > 0
+        ? parseFloat((((balance.unrealisedPnl || 0) / balance.total) * 100).toFixed(2))
+        : 0,
       profitToday:     unrealised,
-      profitTodayRate: balance.total > 0 ? parseFloat(((balance.unrealisedPnl / balance.total) * 100).toFixed(2)) : 0,
+      profitTodayRate: balance.total > 0
+        ? parseFloat((((balance.unrealisedPnl || 0) / balance.total) * 100).toFixed(2))
+        : 0,
     });
   } catch (err) {
+    console.error('[balance] Gate.io 오류:', err.message, err.body || '');
     res.status(502).json({ message: `거래소 연결 오류: ${err.message}` });
   }
 });
@@ -55,26 +68,33 @@ router.get('/balance', requireAuth, async (req, res) => {
 router.get('/chart', requireAuth, async (req, res) => {
   const periodDays = { '1W': 7, '1M': 30, '3M': 90, '6M': 180, '1Y': 365 };
   const days   = periodDays[req.query.period] || 30;
-  // SQLite date('now', ?) 대신 JS에서 날짜 계산 후 문자열로 전달
   const cutoff = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
-  const db     = await getDb();
-  const rows   = await db.all(
-    `SELECT date, value FROM chart_snapshots WHERE user_id = ? AND date >= ? ORDER BY date ASC`,
-    req.user.id, cutoff
-  );
-  res.json(rows.map((r) => ({ date: r.date, value: r.value })));
+  try {
+    const db   = await getDb();
+    const rows = await db.all(
+      `SELECT date, value FROM chart_snapshots WHERE user_id = ? AND date >= ? ORDER BY date ASC`,
+      req.user.id, cutoff
+    );
+    res.json(rows.map((r) => ({ date: r.date, value: r.value })));
+  } catch (err) {
+    res.json([]);
+  }
 });
 
 // GET /account/transactions
 router.get('/transactions', requireAuth, async (req, res) => {
-  const db   = await getDb();
-  const rows = await db.all(
-    `SELECT * FROM fund_transactions WHERE user_id = ? ORDER BY requested_at DESC`, req.user.id
-  );
-  res.json(rows.map((r) => ({
-    id: r.id, type: r.type, amount: r.amount, status: r.status,
-    requestedAt: r.requested_at, completedAt: r.completed_at ?? undefined,
-  })));
+  try {
+    const db   = await getDb();
+    const rows = await db.all(
+      `SELECT * FROM fund_transactions WHERE user_id = ? ORDER BY requested_at DESC`, req.user.id
+    );
+    res.json(rows.map((r) => ({
+      id: r.id, type: r.type, amount: r.amount, status: r.status,
+      requestedAt: r.requested_at, completedAt: r.completed_at ?? undefined,
+    })));
+  } catch (err) {
+    res.json([]);
+  }
 });
 
 // POST /account/deposit

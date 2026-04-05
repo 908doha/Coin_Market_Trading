@@ -50,7 +50,7 @@ export default function Account() {
             </View>
           </GlassCard>
 
-          {/* 자산 카드 — 홈 히어로 카드와 동일한 스타일 */}
+          {/* 자산 카드 */}
           <GlassCard intensity="medium" radius={24} style={styles.section}>
             {balanceLoading ? (
               <AssetCardSkeleton />
@@ -75,45 +75,46 @@ export default function Account() {
                   </View>
                 </View>
                 {balance?.totalUsdt != null && (
-                  <Text variant="meta" color="#AEAEB2" style={{ marginTop: 8 }}>
+                  <Text variant="meta" color="#AEAEB2" style={{ marginTop: 4 }}>
                     ≈ {balance.totalUsdt.toFixed(2)} USDT
                   </Text>
                 )}
+
+                {/* 가용/투자중 */}
+                <View style={styles.balanceRow}>
+                  <View>
+                    <Text variant="meta" color="#AEAEB2">가용 자산</Text>
+                    <Text style={styles.statValue}>{formatKRW(balance?.available ?? 0)}</Text>
+                  </View>
+                  <View style={styles.balDivider} />
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text variant="meta" color="#AEAEB2">투자 중</Text>
+                    <Text style={styles.statValue}>{formatKRW(balance?.invested ?? 0)}</Text>
+                  </View>
+                </View>
+
+                {/* 충전/출금 버튼 */}
+                <View style={styles.fundBtns}>
+                  <PressableScale
+                    style={[styles.fundBtn, { backgroundColor: '#191919' }]}
+                    onPress={() => router.push('/(main)/account/deposit')}
+                  >
+                    <View style={styles.fundBtnInner}>
+                      <Text style={styles.fundBtnText}>충전하기</Text>
+                    </View>
+                  </PressableScale>
+                  <PressableScale
+                    style={[styles.fundBtn, { backgroundColor: '#F0F0F0' }]}
+                    onPress={() => router.push('/(main)/account/withdraw')}
+                  >
+                    <View style={styles.fundBtnInner}>
+                      <Text style={[styles.fundBtnText, { color: '#191919' }]}>출금하기</Text>
+                    </View>
+                  </PressableScale>
+                </View>
               </>
             )}
           </GlassCard>
-
-          {/* 자산 분배 — 홈 statsRow와 동일 */}
-          <View style={[styles.statsRow, styles.section]}>
-            <GlassCard style={{ flex: 1 }} intensity="low" radius={20} padding={16}>
-              <Text variant="meta" color="#AEAEB2" style={{ marginBottom: 6 }}>가용 자산</Text>
-              <Text style={styles.statValue}>{formatKRW(balance?.available ?? 0)}</Text>
-            </GlassCard>
-            <GlassCard style={{ flex: 1 }} intensity="low" radius={20} padding={16}>
-              <Text variant="meta" color="#AEAEB2" style={{ marginBottom: 6 }}>투자 중</Text>
-              <Text style={styles.statValue}>{formatKRW(balance?.invested ?? 0)}</Text>
-            </GlassCard>
-          </View>
-
-          {/* 충전/출금 버튼 */}
-          <View style={[styles.fundBtns, styles.section]}>
-            <PressableScale
-              style={[styles.fundBtn, { backgroundColor: '#191919' }]}
-              onPress={() => router.push('/(main)/account/deposit')}
-            >
-              <View style={styles.fundBtnInner}>
-                <Text style={styles.fundBtnText}>충전하기</Text>
-              </View>
-            </PressableScale>
-            <PressableScale
-              style={[styles.fundBtn, { backgroundColor: '#F0F0F0' }]}
-              onPress={() => router.push('/(main)/account/withdraw')}
-            >
-              <View style={styles.fundBtnInner}>
-                <Text style={[styles.fundBtnText, { color: '#191919' }]}>출금하기</Text>
-              </View>
-            </PressableScale>
-          </View>
 
           {/* 메뉴 */}
           <GlassCard intensity="low" radius={24} padding={0} style={styles.section}>
@@ -202,10 +203,14 @@ const styles = StyleSheet.create({
   pnlBadge:    { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
   pnlBadgeText: { fontSize: 13, fontWeight: '600' },
 
-  statsRow:  { flexDirection: 'row', gap: 10 },
-  statValue: { fontSize: 16, fontWeight: '700', color: '#191919' },
+  balanceRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#F0F0F0',
+  },
+  balDivider: { width: 1, height: 36, backgroundColor: '#F0F0F0' },
+  statValue:  { fontSize: 15, fontWeight: '700', color: '#191919', marginTop: 4 },
 
-  fundBtns:    { flexDirection: 'row', gap: 10 },
+  fundBtns:    { flexDirection: 'row', gap: 10, marginTop: 16 },
   fundBtn:     { flex: 1, height: 46, borderRadius: 14, overflow: 'hidden' },
   fundBtnInner: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   fundBtnText: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },

@@ -163,7 +163,7 @@ export default function AgentSettings() {
 
 const styles = StyleSheet.create({
   safe:    { flex: 1, backgroundColor: colors.bg.default },
-  content: { paddingHorizontal: spacing[5], paddingTop: spacing[5] },
+  content: { paddingHorizontal: spacing[5], paddingTop: spacing[5], paddingBottom: 120 },
   section: { marginBottom: spacing[4] },
 
   statusHeader: {

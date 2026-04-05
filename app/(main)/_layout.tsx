@@ -47,7 +47,10 @@ export default function MainLayout() {
   return (
     <Tabs
       tabBar={(props) => <TossTabBar {...props} />}
-      screenOptions={{ headerShown: false }}
+      screenOptions={{
+        headerShown: false,
+        tabBarStyle: { display: 'none' },
+      }}
     >
       <Tabs.Screen name="home"      options={{ title: '홈' }} />
       <Tabs.Screen name="positions" options={{ title: '트레이딩' }} />

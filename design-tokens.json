@@ -1,0 +1,221 @@
+{
+  "$schema": "https://json.schemastore.org/tokens",
+  "description": "Coin Market Trading — Toss SEED-inspired Black Design System",
+
+  "color": {
+    "$type": "color",
+
+    "primary": {
+      "default":    { "$value": "#000000", "$description": "Brand primary" },
+      "subtle":     { "$value": "#1A1A1A" },
+      "muted":      { "$value": "#2E2E2E" },
+      "foreground": { "$value": "#FFFFFF" }
+    },
+
+    "gray": {
+      "950": { "$value": "#0A0A0A" },
+      "900": { "$value": "#1A1A1A" },
+      "850": { "$value": "#242424" },
+      "800": { "$value": "#2E2E2E" },
+      "750": { "$value": "#383838" },
+      "700": { "$value": "#404040" },
+      "650": { "$value": "#4A4A4A" },
+      "600": { "$value": "#525252" },
+      "500": { "$value": "#737373" },
+      "400": { "$value": "#A3A3A3" },
+      "300": { "$value": "#C4C4C4" },
+      "200": { "$value": "#D9D9D9" },
+      "150": { "$value": "#E2E2E2" },
+      "100": { "$value": "#EBEBEB" },
+      "75":  { "$value": "#F0F0F0" },
+      "50":  { "$value": "#F5F5F5" },
+      "25":  { "$value": "#FAFAFA" }
+    },
+
+    "green": {
+      "600": { "$value": "#0D9E45" },
+      "500": { "$value": "#1AC24E" },
+      "400": { "$value": "#2DD962" },
+      "300": { "$value": "#6EE89A" },
+      "100": { "$value": "#D1F7E1" },
+      "50":  { "$value": "#EDFBF3" }
+    },
+
+    "red": {
+      "600": { "$value": "#D93025" },
+      "500": { "$value": "#FF4747" },
+      "400": { "$value": "#FF6B6B" },
+      "300": { "$value": "#FF9595" },
+      "100": { "$value": "#FFD6D6" },
+      "50":  { "$value": "#FFF0F0" }
+    },
+
+    "orange": {
+      "600": { "$value": "#D97706" },
+      "500": { "$value": "#FF8A00" },
+      "400": { "$value": "#FFAA33" },
+      "100": { "$value": "#FFE8B3" },
+      "50":  { "$value": "#FFF8E8" }
+    },
+
+    "blue": {
+      "600": { "$value": "#1741C4" },
+      "500": { "$value": "#246CF9" },
+      "400": { "$value": "#5090FF" },
+      "300": { "$value": "#84B4FF" },
+      "100": { "$value": "#D1E4FF" },
+      "50":  { "$value": "#EEF5FF" }
+    },
+
+    "semantic": {
+      "bg-default":        { "$value": "#FFFFFF" },
+      "bg-subtle":         { "$value": "#FAFAFA" },
+      "bg-elevated":       { "$value": "#F5F5F5" },
+      "text-primary":      { "$value": "#000000" },
+      "text-secondary":    { "$value": "#404040" },
+      "text-tertiary":     { "$value": "#737373" },
+      "text-disabled":     { "$value": "#A3A3A3" },
+      "text-inverse":      { "$value": "#FFFFFF" },
+      "border-default":    { "$value": "#EBEBEB" },
+      "border-strong":     { "$value": "#D9D9D9" },
+      "border-focus":      { "$value": "#000000" },
+      "positive-default":  { "$value": "#1AC24E" },
+      "positive-subtle":   { "$value": "#EDFBF3" },
+      "positive-text":     { "$value": "#0D9E45" },
+      "negative-default":  { "$value": "#FF4747" },
+      "negative-subtle":   { "$value": "#FFF0F0" },
+      "negative-text":     { "$value": "#D93025" },
+      "cautious-default":  { "$value": "#FF8A00" },
+      "cautious-subtle":   { "$value": "#FFF8E8" },
+      "cautious-text":     { "$value": "#D97706" },
+      "informative-default": { "$value": "#246CF9" },
+      "informative-subtle":  { "$value": "#EEF5FF" },
+      "informative-text":    { "$value": "#1741C4" },
+      "market-rise":       { "$value": "#FF4747", "$description": "Korean market: red = up" },
+      "market-fall":       { "$value": "#246CF9", "$description": "Korean market: blue = down" },
+      "market-neutral":    { "$value": "#737373" }
+    }
+  },
+
+  "typography": {
+    "fontFamily": {
+      "sans": { "$type": "fontFamily", "$value": ["Pretendard", "-apple-system", "SF Pro Display", "Helvetica Neue", "Arial", "sans-serif"] },
+      "mono": { "$type": "fontFamily", "$value": ["SF Mono", "Fira Code", "Consolas", "monospace"] }
+    },
+
+    "fontWeight": {
+      "$type": "fontWeight",
+      "regular":   { "$value": 400 },
+      "medium":    { "$value": 500 },
+      "semiBold":  { "$value": 600 },
+      "bold":      { "$value": 700 },
+      "extraBold": { "$value": 800 }
+    },
+
+    "fontSize": {
+      "$type": "dimension",
+      "3xs": { "$value": "10px" },
+      "2xs": { "$value": "11px" },
+      "xs":  { "$value": "12px" },
+      "sm":  { "$value": "13px" },
+      "md":  { "$value": "14px" },
+      "base":{ "$value": "15px" },
+      "lg":  { "$value": "16px" },
+      "xl":  { "$value": "17px" },
+      "2xl": { "$value": "18px" },
+      "3xl": { "$value": "20px" },
+      "4xl": { "$value": "22px" },
+      "5xl": { "$value": "24px" },
+      "6xl": { "$value": "28px" },
+      "7xl": { "$value": "32px" },
+      "8xl": { "$value": "36px" },
+      "9xl": { "$value": "40px" }
+    },
+
+    "textStyle": {
+      "$type": "typography",
+      "display2":       { "$value": { "fontFamily": "Pretendard", "fontWeight": "700", "fontSize": "36px", "lineHeight": "43.2px", "letterSpacing": "-0.5px" } },
+      "display1":       { "$value": { "fontFamily": "Pretendard", "fontWeight": "700", "fontSize": "32px", "lineHeight": "38.4px", "letterSpacing": "-0.5px" } },
+      "title1":         { "$value": { "fontFamily": "Pretendard", "fontWeight": "700", "fontSize": "28px", "lineHeight": "37.8px", "letterSpacing": "-0.3px" } },
+      "title2":         { "$value": { "fontFamily": "Pretendard", "fontWeight": "700", "fontSize": "24px", "lineHeight": "32.4px", "letterSpacing": "-0.3px" } },
+      "title3":         { "$value": { "fontFamily": "Pretendard", "fontWeight": "600", "fontSize": "22px", "lineHeight": "29.7px", "letterSpacing": "-0.2px" } },
+      "heading1":       { "$value": { "fontFamily": "Pretendard", "fontWeight": "600", "fontSize": "20px", "lineHeight": "27px",   "letterSpacing": "0px"    } },
+      "heading2":       { "$value": { "fontFamily": "Pretendard", "fontWeight": "600", "fontSize": "18px", "lineHeight": "24.3px", "letterSpacing": "0px"    } },
+      "heading3":       { "$value": { "fontFamily": "Pretendard", "fontWeight": "600", "fontSize": "17px", "lineHeight": "25.5px", "letterSpacing": "0px"    } },
+      "body1":          { "$value": { "fontFamily": "Pretendard", "fontWeight": "400", "fontSize": "16px", "lineHeight": "24px",   "letterSpacing": "0px"    } },
+      "body1Medium":    { "$value": { "fontFamily": "Pretendard", "fontWeight": "500", "fontSize": "16px", "lineHeight": "24px",   "letterSpacing": "0px"    } },
+      "body2":          { "$value": { "fontFamily": "Pretendard", "fontWeight": "400", "fontSize": "15px", "lineHeight": "22.5px", "letterSpacing": "0px"    } },
+      "body2Medium":    { "$value": { "fontFamily": "Pretendard", "fontWeight": "500", "fontSize": "15px", "lineHeight": "22.5px", "letterSpacing": "0px"    } },
+      "label1":         { "$value": { "fontFamily": "Pretendard", "fontWeight": "500", "fontSize": "14px", "lineHeight": "21px",   "letterSpacing": "0px"    } },
+      "label1Bold":     { "$value": { "fontFamily": "Pretendard", "fontWeight": "600", "fontSize": "14px", "lineHeight": "21px",   "letterSpacing": "0px"    } },
+      "label2":         { "$value": { "fontFamily": "Pretendard", "fontWeight": "500", "fontSize": "13px", "lineHeight": "19.5px", "letterSpacing": "0.2px"  } },
+      "caption1":       { "$value": { "fontFamily": "Pretendard", "fontWeight": "400", "fontSize": "12px", "lineHeight": "19.2px", "letterSpacing": "0.2px"  } },
+      "caption1Medium": { "$value": { "fontFamily": "Pretendard", "fontWeight": "500", "fontSize": "12px", "lineHeight": "19.2px", "letterSpacing": "0.2px"  } },
+      "caption2":       { "$value": { "fontFamily": "Pretendard", "fontWeight": "400", "fontSize": "11px", "lineHeight": "17.6px", "letterSpacing": "0.2px"  } },
+      "numericLarge":   { "$value": { "fontFamily": "Pretendard", "fontWeight": "700", "fontSize": "32px", "lineHeight": "38.4px", "letterSpacing": "-0.5px" } },
+      "numericMedium":  { "$value": { "fontFamily": "Pretendard", "fontWeight": "600", "fontSize": "22px", "lineHeight": "29.7px", "letterSpacing": "0px"    } },
+      "numericSmall":   { "$value": { "fontFamily": "Pretendard", "fontWeight": "500", "fontSize": "16px", "lineHeight": "24px",   "letterSpacing": "0px"    } }
+    }
+  },
+
+  "spacing": {
+    "$type": "dimension",
+    "0":    { "$value": "0px"   },
+    "0.5":  { "$value": "2px"   },
+    "1":    { "$value": "4px"   },
+    "1.5":  { "$value": "6px"   },
+    "2":    { "$value": "8px"   },
+    "2.5":  { "$value": "10px"  },
+    "3":    { "$value": "12px"  },
+    "3.5":  { "$value": "14px"  },
+    "4":    { "$value": "16px"  },
+    "5":    { "$value": "20px"  },
+    "6":    { "$value": "24px"  },
+    "7":    { "$value": "28px"  },
+    "8":    { "$value": "32px"  },
+    "9":    { "$value": "36px"  },
+    "10":   { "$value": "40px"  },
+    "11":   { "$value": "44px"  },
+    "12":   { "$value": "48px"  },
+    "14":   { "$value": "56px"  },
+    "16":   { "$value": "64px"  },
+    "20":   { "$value": "80px"  },
+    "24":   { "$value": "96px"  },
+    "32":   { "$value": "128px" }
+  },
+
+  "borderRadius": {
+    "$type": "dimension",
+    "none":  { "$value": "0px"    },
+    "xs":    { "$value": "4px"    },
+    "sm":    { "$value": "8px"    },
+    "md":    { "$value": "12px"   },
+    "lg":    { "$value": "16px"   },
+    "xl":    { "$value": "20px"   },
+    "2xl":   { "$value": "24px"   },
+    "3xl":   { "$value": "28px"   },
+    "4xl":   { "$value": "32px"   },
+    "full":  { "$value": "9999px" }
+  },
+
+  "shadow": {
+    "$type": "shadow",
+    "none": { "$value": "none" },
+    "xs":   { "$value": { "offsetX": "0px", "offsetY": "1px",  "blur": "2px",  "spread": "0px", "color": "rgba(0,0,0,0.04)" } },
+    "sm":   { "$value": { "offsetX": "0px", "offsetY": "2px",  "blur": "4px",  "spread": "0px", "color": "rgba(0,0,0,0.06)" } },
+    "md":   { "$value": { "offsetX": "0px", "offsetY": "4px",  "blur": "8px",  "spread": "0px", "color": "rgba(0,0,0,0.08)" } },
+    "lg":   { "$value": { "offsetX": "0px", "offsetY": "8px",  "blur": "16px", "spread": "0px", "color": "rgba(0,0,0,0.10)" } },
+    "xl":   { "$value": { "offsetX": "0px", "offsetY": "12px", "blur": "24px", "spread": "0px", "color": "rgba(0,0,0,0.12)" } },
+    "2xl":  { "$value": { "offsetX": "0px", "offsetY": "16px", "blur": "32px", "spread": "0px", "color": "rgba(0,0,0,0.14)" } }
+  },
+
+  "duration": {
+    "$type": "duration",
+    "instant":  { "$value": "0ms"   },
+    "fast":     { "$value": "100ms" },
+    "normal":   { "$value": "200ms" },
+    "moderate": { "$value": "300ms" },
+    "slow":     { "$value": "400ms" },
+    "sluggish": { "$value": "600ms" }
+  }
+}

@@ -56,11 +56,6 @@ export default function Home() {
   return (
     <FadeTabView style={styles.root}>
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={styles.content}
-          showsVerticalScrollIndicator={false}
-        >
           {/* ── 헤더 ── */}
           <PageHeader
             title={user?.name ?? 'Osprey'}
@@ -71,6 +66,11 @@ export default function Home() {
               </View>
             }
           />
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+        >
 
           {/* ── 총 자산 카드 ── */}
           <GlassCard style={styles.heroCard} intensity="medium" radius={24}>

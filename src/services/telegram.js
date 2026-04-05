@@ -137,14 +137,14 @@ class TelegramService {
       ].join('\n'));
     });
 
-    // /close - 포지션 청산
+    // /close - 포지션 청산 (SL/TP 조건부 주문도 함께 취소)
     this.bot.onText(/\/close/, async (msg) => {
       if (!auth(msg)) return;
       try {
-        const result = await gateClient.closePosition(config.tradePair);
+        const result = await this.tradingBot.orderManager.closeAndCleanup(config.tradePair);
         if (result) {
           this.tradingBot.activePosition = null;
-          await this.bot.sendMessage(chatId, '✅ 포지션 청산 완료');
+          await this.bot.sendMessage(chatId, '✅ 포지션 청산 + SL/TP 주문 취소 완료');
         } else {
           await this.bot.sendMessage(chatId, '📊 청산할 포지션 없음');
         }

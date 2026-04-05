@@ -199,6 +199,132 @@ const gateClient = {
       throw err;
     }
   },
+
+  /**
+   * 조건부 주문 생성 (Price Trigger Order)
+   * SL/TP를 거래소에 지정가로 등록
+   *
+   * @param {string} contract - 거래쌍
+   * @param {number} size - 수량 (양수: buy, 음수: sell)
+   * @param {number} triggerPrice - 트리거 가격 (이 가격 도달 시 주문 발동)
+   * @param {number} orderPrice - 실제 체결될 지정가 (0이면 시장가)
+   * @param {string} triggerRule - 트리거 조건: '1' = >=, '2' = <=
+   */
+  async createPriceTriggerOrder(contract, size, triggerPrice, orderPrice, triggerRule) {
+    try {
+      const triggerOrder = {
+        initial: {
+          contract,
+          size,
+          price: orderPrice.toString(),
+          tif: 'gtc',
+        },
+        trigger: {
+          strategy_type: 0, // 0: price trigger
+          price_type: 1,    // 1: mark price
+          price: triggerPrice.toString(),
+          rule: triggerRule, // 1: >=, 2: <=
+        },
+        orderType: 'close-long-order',
+      };
+
+      // 방향에 따라 orderType 설정
+      if (size > 0) {
+        triggerOrder.orderType = 'close-short-order'; // 숏 청산 (매수)
+      } else {
+        triggerOrder.orderType = 'close-long-order';  // 롱 청산 (매도)
+      }
+
+      const { body } = await futuresApi.createPriceTriggeredOrder(SETTLE, triggerOrder);
+      logger.info(`조건부 주문 등록: ${contract} trigger=${triggerPrice} order=${orderPrice} id=${body.id}`);
+      return body;
+    } catch (err) {
+      logger.error(`조건부 주문 실패: ${err.message}`);
+      throw err;
+    }
+  },
+
+  /**
+   * SL/TP 지정가 주문 세트 등록
+   *
+   * @param {string} contract - 거래쌍
+   * @param {number} size - 포지션 수량 (양수)
+   * @param {string} direction - 'long' 또는 'short'
+   * @param {number} sl - 손절 가격
+   * @param {number} tp - 익절 가격
+   */
+  async placeSLTP(contract, size, direction, sl, tp) {
+    const results = { slOrder: null, tpOrder: null };
+
+    if (direction === 'long') {
+      // Long SL: 가격이 SL 이하로 떨어지면 → 매도 지정가
+      results.slOrder = await this.createPriceTriggerOrder(
+        contract,
+        -Math.abs(size),  // 매도
+        sl,               // 트리거 가격
+        sl,               // 지정가 (SL 가격으로 청산)
+        '2'               // rule 2: 가격 <= triggerPrice
+      );
+
+      // Long TP: 가격이 TP 이상으로 오르면 → 매도 지정가
+      results.tpOrder = await this.createPriceTriggerOrder(
+        contract,
+        -Math.abs(size),  // 매도
+        tp,               // 트리거 가격
+        tp,               // 지정가 (TP 가격으로 청산)
+        '1'               // rule 1: 가격 >= triggerPrice
+      );
+    } else {
+      // Short SL: 가격이 SL 이상으로 오르면 → 매수 지정가
+      results.slOrder = await this.createPriceTriggerOrder(
+        contract,
+        Math.abs(size),   // 매수
+        sl,               // 트리거 가격
+        sl,               // 지정가
+        '1'               // rule 1: 가격 >= triggerPrice
+      );
+
+      // Short TP: 가격이 TP 이하로 떨어지면 → 매수 지정가
+      results.tpOrder = await this.createPriceTriggerOrder(
+        contract,
+        Math.abs(size),   // 매수
+        tp,               // 트리거 가격
+        tp,               // 지정가
+        '2'               // rule 2: 가격 <= triggerPrice
+      );
+    }
+
+    logger.info(`SL/TP 지정가 등록 완료: SL=${sl} TP=${tp}`);
+    return results;
+  },
+
+  /**
+   * 조건부 주문 전체 취소
+   */
+  async cancelAllTriggerOrders(contract) {
+    try {
+      await futuresApi.cancelPriceTriggeredOrderList(SETTLE, contract);
+      logger.info(`조건부 주문 전체 취소: ${contract}`);
+    } catch (err) {
+      logger.error(`조건부 주문 취소 실패: ${err.message}`);
+      throw err;
+    }
+  },
+
+  /**
+   * 조건부 주문 목록 조회
+   */
+  async listTriggerOrders(contract, status = 'open') {
+    try {
+      const { body } = await futuresApi.listPriceTriggeredOrders(SETTLE, status, {
+        contract,
+      });
+      return body;
+    } catch (err) {
+      logger.error(`조건부 주문 조회 실패: ${err.message}`);
+      throw err;
+    }
+  },
 };
 
 module.exports = gateClient;

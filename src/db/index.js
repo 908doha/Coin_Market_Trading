@@ -1,4 +1,8 @@
 const { Pool } = require('pg');
+const dns = require('dns');
+
+// Railway → Supabase IPv6 문제 해결: IPv4 우선 강제
+dns.setDefaultResultOrder('ipv4first');
 
 // 개별 환경변수 우선, 없으면 DATABASE_URL 파싱
 function buildConfig() {

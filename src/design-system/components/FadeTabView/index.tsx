@@ -9,7 +9,6 @@ import Animated, {
   useAnimatedStyle,
   withTiming,
   cancelAnimation,
-  runOnUI,
   Easing,
 } from 'react-native-reanimated';
 import { useFocusEffect } from 'expo-router';
@@ -25,27 +24,24 @@ export function FadeTabView({ children, style }: FadeTabViewProps) {
 
   useFocusEffect(
     React.useCallback(() => {
-      // UI 스레드에서 리셋 → 애니메이션 순서 보장
-      runOnUI(() => {
-        'worklet';
-        cancelAnimation(opacity);
-        cancelAnimation(translateY);
-        opacity.value    = 0;
-        translateY.value = 12;
-        opacity.value = withTiming(1, {
-          duration: 240,
-          easing:   Easing.out(Easing.cubic),
-        });
-        translateY.value = withTiming(0, {
-          duration: 240,
-          easing:   Easing.out(Easing.cubic),
-        });
-      })();
+      // JS 스레드에서 직접 처리 — web/native 모두 호환
+      cancelAnimation(opacity);
+      cancelAnimation(translateY);
+      opacity.value    = 0;
+      translateY.value = 12;
+      opacity.value = withTiming(1, {
+        duration: 240,
+        easing:   Easing.out(Easing.cubic),
+      });
+      translateY.value = withTiming(0, {
+        duration: 240,
+        easing:   Easing.out(Easing.cubic),
+      });
     }, [])
   );
 
   const animStyle = useAnimatedStyle(() => ({
-    opacity,
+    opacity:   opacity.value,
     transform: [{ translateY: translateY.value }],
   }));
 

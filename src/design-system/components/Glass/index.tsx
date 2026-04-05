@@ -24,11 +24,6 @@ export function GlassView({ children, style, intensity = 'medium' }: GlassViewPr
         backgroundColor: bg,
         borderWidth: 1,
         borderColor: border,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.06,
-        shadowRadius: 8,
-        elevation: 2,
       },
       style,
     ]}>

@@ -53,7 +53,7 @@ export default function Account() {
 
           {/* 자산 카드 */}
           <GlassCard intensity="low" radius={24} padding={20} style={styles.section}>
-            <Text style={styles.cardLabel}>총 자산</Text>
+            <Text variant="meta" color="#AEAEB2" style={{ marginBottom: 6 }}>총 자산</Text>
             {balanceLoading ? (
               <ActivityIndicator color="#3182F6" style={{ marginVertical: 8 }} />
             ) : (
@@ -66,12 +66,12 @@ export default function Account() {
             )}
             <View style={styles.balanceRow}>
               <View>
-                <Text style={styles.balSubLabel}>가용 자산</Text>
+                <Text variant="meta" color="#AEAEB2">가용 자산</Text>
                 <Text style={styles.balSubValue}>{formatKRW(balance?.available ?? 0)}</Text>
               </View>
               <View style={styles.balDivider} />
               <View style={{ alignItems: 'flex-end' }}>
-                <Text style={styles.balSubLabel}>투자 중</Text>
+                <Text variant="meta" color="#AEAEB2">투자 중</Text>
                 <Text style={styles.balSubValue}>{formatKRW(balance?.invested ?? 0)}</Text>
               </View>
             </View>
@@ -99,7 +99,7 @@ export default function Account() {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.menuLabel}>AI 에이전트 설정</Text>
-                <Text style={styles.menuSub}>
+                <Text variant="meta" color="#AEAEB2">
                   {agentStats?.status === 'running' ? '운용 중' : agentStatus.label}
                   {agentStats?.riskLevel ? ` · ${RISK_LABELS[agentStats.riskLevel]}` : ''}
                 </Text>
@@ -113,7 +113,7 @@ export default function Account() {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.menuLabel}>거래 내역</Text>
-                <Text style={styles.menuSub}>충전·출금·거래 기록</Text>
+                <Text variant="meta" color="#AEAEB2">충전·출금·거래 기록</Text>
               </View>
               <Text style={styles.menuArrow}>›</Text>
             </Pressable>
@@ -124,7 +124,7 @@ export default function Account() {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.menuLabel}>알림 설정</Text>
-                <Text style={styles.menuSub}>거래 알림, 리포트</Text>
+                <Text variant="meta" color="#AEAEB2">거래 알림, 리포트</Text>
               </View>
               <Text style={styles.menuArrow}>›</Text>
             </Pressable>
@@ -175,14 +175,12 @@ const styles = StyleSheet.create({
   statusText: { fontSize: 12, fontWeight: '600' },
 
   section:       { marginBottom: 12 },
-  cardLabel:     { fontSize: 13, color: '#AEAEB2', marginBottom: 6 },
   balanceAmount: { fontSize: 30, fontWeight: '800', color: '#191919', letterSpacing: -0.5 },
   balanceUsdt:   { fontSize: 13, color: '#AEAEB2', marginTop: 2, marginBottom: 4 },
   balanceRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#F0F0F0',
   },
-  balSubLabel: { fontSize: 12, color: '#AEAEB2' },
   balSubValue: { fontSize: 15, fontWeight: '700', color: '#191919', marginTop: 4 },
   balDivider:  { width: 1, height: 36, backgroundColor: '#F0F0F0' },
 
@@ -197,7 +195,6 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   menuLabel:   { fontSize: 15, fontWeight: '600', color: '#191919' },
-  menuSub:     { fontSize: 12, color: '#AEAEB2', marginTop: 2 },
   menuArrow:   { fontSize: 20, color: '#C4C4C4', lineHeight: 24 },
   menuDivider: { height: 1, backgroundColor: '#F5F5F5', marginHorizontal: 18 },
 });

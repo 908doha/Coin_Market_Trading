@@ -70,7 +70,7 @@ export default function Trading() {
                             }]}>{pos.direction}</Text>
                           </View>
                         </View>
-                        <Text style={styles.sub}>{formatKRW(pos.amount)} 투자</Text>
+                        <Text variant="meta" color="#AEAEB2">{formatKRW(pos.amount)} 투자</Text>
                       </View>
                       <View style={{ alignItems: 'flex-end' }}>
                         <Text style={[styles.profit, { color: up ? '#0D9E45' : '#D93025' }]}>
@@ -83,7 +83,7 @@ export default function Trading() {
                     </View>
                     {pos.agentReason ? (
                       <View style={styles.agentHint}>
-                        <Text style={styles.agentHintText} numberOfLines={1}>
+                        <Text variant="meta" color="#AEAEB2" numberOfLines={1}>
                           🤖 {pos.agentReason}
                         </Text>
                       </View>
@@ -117,7 +117,7 @@ export default function Trading() {
                             </View>
                           )}
                         </View>
-                        <Text style={styles.sub}>{trade.exitAt} · {trade.holdingDays}일</Text>
+                        <Text variant="meta" color="#AEAEB2">{trade.exitAt} · {trade.holdingDays}일</Text>
                       </View>
                       <View style={{ alignItems: 'flex-end' }}>
                         <Text style={[styles.profit, { color: up ? '#0D9E45' : '#D93025' }]}>
@@ -158,12 +158,10 @@ const styles = StyleSheet.create({
   cardRow:      { flexDirection: 'row', alignItems: 'center', gap: 12 },
   icon:         { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   symbol:       { fontSize: 15, fontWeight: '700', color: '#191919' },
-  sub:          { fontSize: 12, color: '#AEAEB2', marginTop: 2 },
   profit:       { fontSize: 15, fontWeight: '700' },
   rate:         { fontSize: 12, fontWeight: '600', marginTop: 2 },
   badge:        { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   badgeText:    { fontSize: 11, fontWeight: '600' },
   agentHint:    { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F5F5F5' },
-  agentHintText: { fontSize: 12, color: '#AEAEB2' },
   emptyText:    { fontSize: 14, color: '#AEAEB2' },
 });

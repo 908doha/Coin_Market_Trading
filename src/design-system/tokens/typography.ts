@@ -173,6 +173,14 @@ export const textStyles = {
     letterSpacing: letterSpacing.wide,
   },
 
+  // Meta — consistent small label used across cards (가용자산, 투자중, 승률 등)
+  meta: {
+    fontSize:      fontSize.xs,        // 12px
+    fontWeight:    fontWeight.medium,
+    lineHeight:    fontSize.xs * lineHeight.normal,
+    letterSpacing: letterSpacing.normal,
+  },
+
   // Caption — helper text, timestamps, metadata
   caption1: {
     fontSize:      fontSize.xs,        // 12px

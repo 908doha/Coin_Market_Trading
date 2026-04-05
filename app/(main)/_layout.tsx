@@ -5,9 +5,9 @@ import { Text } from '@/design-system';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 
 const TABS = [
-  { name: 'home',      label: '홈',      icon: '⊙' },
-  { name: 'positions', label: '트레이딩', icon: '⊞' },
-  { name: 'account',   label: '계정',    icon: '⊕' },
+  { name: 'home',      label: '홈' },
+  { name: 'positions', label: '트레이딩' },
+  { name: 'account',   label: '계정' },
 ];
 
 function TossTabBar({ state, navigation }: BottomTabBarProps) {
@@ -29,9 +29,6 @@ function TossTabBar({ state, navigation }: BottomTabBarProps) {
               onPress={() => navigation.navigate(tab.name)}
               android_ripple={{ color: 'transparent' }}
             >
-              <Text style={[styles.icon, { color: active ? '#3182F6' : '#AEAEB2' }]}>
-                {tab.icon}
-              </Text>
               <Text style={[styles.label, { color: active ? '#3182F6' : '#AEAEB2' }]}>
                 {tab.label}
               </Text>
@@ -93,12 +90,8 @@ const styles = StyleSheet.create({
   tabItemActive: {
     backgroundColor: '#EEF5FF',
   },
-  icon: {
-    fontSize:   18,
-    lineHeight: 22,
-  },
   label: {
-    fontSize:      11,
+    fontSize:      13,
     fontWeight:    '600',
     letterSpacing: 0.2,
   },

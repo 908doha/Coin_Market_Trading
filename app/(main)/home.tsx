@@ -78,13 +78,10 @@ export default function Home() {
         >
           {/* ── 헤더 ── */}
           <View style={styles.header}>
-            <View>
-              <Text style={styles.greeting}>안녕하세요</Text>
-              <Text style={styles.userName}>{user?.name ?? 'Osprey'}</Text>
-            </View>
+            <Text style={styles.userName}>{user?.name ?? 'Osprey'}</Text>
             <View style={[styles.agentBadge, { backgroundColor: agentStatus.bg }]}>
               <View style={[styles.agentDot, { backgroundColor: agentStatus.color }]} />
-              <Text style={[styles.agentBadgeText, { color: agentStatus.color }]}>
+              <Text variant="meta" style={[styles.agentBadgeText, { color: agentStatus.color }]}>
                 {agentStatus.label}
               </Text>
             </View>
@@ -92,7 +89,7 @@ export default function Home() {
 
           {/* ── 총 자산 카드 ── */}
           <GlassCard style={styles.heroCard} intensity="medium" radius={24}>
-            <Text style={styles.heroLabel}>총 자산</Text>
+            <Text variant="meta" color="#AEAEB2" style={{ marginBottom: 6 }}>총 자산</Text>
             {balLoading ? (
               <ActivityIndicator color="#3182F6" style={{ marginVertical: 12 }} />
             ) : (
@@ -129,11 +126,11 @@ export default function Home() {
           {/* ── 자산 분배 ── */}
           <View style={styles.statsRow}>
             <GlassCard style={styles.statCard} intensity="low" radius={20} padding={16}>
-              <Text style={styles.statLabel}>가용 자산</Text>
+              <Text variant="meta" color="#AEAEB2" style={{ marginBottom: 6 }}>가용 자산</Text>
               <Text style={styles.statValue}>{formatKRW(balance?.available ?? 0)}</Text>
             </GlassCard>
             <GlassCard style={styles.statCard} intensity="low" radius={20} padding={16}>
-              <Text style={styles.statLabel}>투자 중</Text>
+              <Text variant="meta" color="#AEAEB2" style={{ marginBottom: 6 }}>투자 중</Text>
               <Text style={styles.statValue}>{formatKRW(balance?.invested ?? 0)}</Text>
             </GlassCard>
           </View>
@@ -150,12 +147,12 @@ export default function Home() {
               <View style={styles.agentStats}>
                 <View style={styles.agentStatItem}>
                   <Text style={styles.agentStatVal}>{agentStats?.winRate30d ?? 0}%</Text>
-                  <Text style={styles.agentStatLabel}>30일 승률</Text>
+                  <Text variant="meta" color="#AEAEB2" style={{ marginTop: 2 }}>30일 승률</Text>
                 </View>
                 <View style={styles.agentStatDivider} />
                 <View style={styles.agentStatItem}>
                   <Text style={styles.agentStatVal}>{agentStats?.totalTrades ?? 0}</Text>
-                  <Text style={styles.agentStatLabel}>총 거래</Text>
+                  <Text variant="meta" color="#AEAEB2" style={{ marginTop: 2 }}>총 거래</Text>
                 </View>
               </View>
             </View>
@@ -228,7 +225,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row', justifyContent: 'space-between',
     alignItems: 'center', marginBottom: 20,
   },
-  greeting:  { fontSize: 13, color: '#AEAEB2', marginBottom: 2 },
   userName:  { fontSize: 22, fontWeight: '700', color: '#191919' },
   agentBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
@@ -238,7 +234,6 @@ const styles = StyleSheet.create({
   agentBadgeText: { fontSize: 12, fontWeight: '600' },
 
   heroCard:    { marginBottom: 12 },
-  heroLabel:   { fontSize: 13, color: '#AEAEB2', marginBottom: 6 },
   heroAmount:  { fontSize: 34, fontWeight: '800', color: '#191919', letterSpacing: -1 },
   heroSubRow:  { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
   heroPnl:     { fontSize: 15, fontWeight: '600' },
@@ -254,7 +249,6 @@ const styles = StyleSheet.create({
 
   statsRow:  { flexDirection: 'row', gap: 10, marginBottom: 12 },
   statCard:  { flex: 1 },
-  statLabel: { fontSize: 12, color: '#AEAEB2', marginBottom: 6 },
   statValue: { fontSize: 16, fontWeight: '700', color: '#191919' },
 
   section: { marginBottom: 12 },
@@ -270,7 +264,6 @@ const styles = StyleSheet.create({
   agentStats:     { flexDirection: 'row', alignItems: 'center', gap: 16 },
   agentStatItem:  { alignItems: 'center' },
   agentStatVal:   { fontSize: 18, fontWeight: '700', color: '#191919' },
-  agentStatLabel: { fontSize: 11, color: '#AEAEB2', marginTop: 2 },
   agentStatDivider: { width: 1, height: 32, backgroundColor: '#F0F0F0' },
 
   posCard:   { marginBottom: 8 },

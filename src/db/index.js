@@ -1,12 +1,9 @@
 const { Pool } = require('pg');
 const dns = require('dns');
 
-// Railway → Supabase IPv6 문제 해결: IPv4 우선 강제
 dns.setDefaultResultOrder('ipv4first');
 
-// 개별 환경변수 우선, 없으면 DATABASE_URL 파싱
 function buildConfig() {
-  // 방법 1: 개별 파라미터 (특수문자 비밀번호에 안전)
   if (process.env.DB_HOST) {
     return {
       host:              process.env.DB_HOST,
@@ -19,11 +16,8 @@ function buildConfig() {
       idleTimeoutMillis: 30000,
     };
   }
-
-  // 방법 2: DATABASE_URL
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error('DB_HOST 또는 DATABASE_URL 환경변수가 필요합니다.');
-
   try {
     const u = new URL(url);
     return {
@@ -42,12 +36,66 @@ function buildConfig() {
 }
 
 const pool = new Pool(buildConfig());
+pool.on('error', (err) => console.error('PostgreSQL pool error:', err.message));
 
-pool.on('error', (err) => {
-  console.error('PostgreSQL pool error:', err.message);
-});
+// 서버 시작 시 자동으로 테이블 생성
+async function initDb() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, password TEXT NOT NULL,
+      name TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT to_char(NOW(), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+    );
+    CREATE TABLE IF NOT EXISTS refresh_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token TEXT UNIQUE NOT NULL, expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT to_char(NOW(), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+    );
+    CREATE TABLE IF NOT EXISTS verification_codes (
+      id TEXT PRIMARY KEY, email TEXT NOT NULL, code TEXT NOT NULL,
+      used INTEGER NOT NULL DEFAULT 0, expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT to_char(NOW(), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+    );
+    CREATE TABLE IF NOT EXISTS fund_transactions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      type TEXT NOT NULL CHECK(type IN ('deposit','withdraw')),
+      amount NUMERIC NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','processing','done','rejected')),
+      sender_name TEXT, bank TEXT, account_number TEXT, account_holder TEXT,
+      requested_at TEXT NOT NULL DEFAULT to_char(NOW(), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+      completed_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS notification_settings (
+      user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      trade INTEGER NOT NULL DEFAULT 1, big_profit INTEGER NOT NULL DEFAULT 1,
+      big_loss INTEGER NOT NULL DEFAULT 1, weekly INTEGER NOT NULL DEFAULT 1,
+      deposit INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE TABLE IF NOT EXISTS agent_settings (
+      user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'running' CHECK(status IN ('running','paused','waiting')),
+      risk_level TEXT NOT NULL DEFAULT 'medium' CHECK(risk_level IN ('low','medium','high'))
+    );
+    CREATE TABLE IF NOT EXISTS chart_snapshots (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      date TEXT NOT NULL, value NUMERIC NOT NULL,
+      UNIQUE(user_id, date)
+    );
+    CREATE TABLE IF NOT EXISTS agent_decisions (
+      id TEXT PRIMARY KEY, contract TEXT NOT NULL, direction TEXT NOT NULL,
+      entry_price NUMERIC NOT NULL, reason TEXT NOT NULL, plan TEXT NOT NULL,
+      signals TEXT,
+      created_at TEXT NOT NULL DEFAULT to_char(NOW(), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+    );
+  `);
+  console.log('DB 테이블 초기화 완료');
+}
 
-// SQLite ? 플레이스홀더 → PostgreSQL $1, $2, ... 변환
+initDb().catch((err) => console.error('DB 초기화 실패:', err.message));
+
 function toPostgresParams(sql) {
   let i = 0;
   return sql.replace(/\?/g, () => `$${++i}`);

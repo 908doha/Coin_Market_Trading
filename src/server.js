@@ -50,11 +50,17 @@ app.get('/debug/db', async (_, res) => {
 
 // ── Gate.io 진단 ──────────────────────────────────────────────────
 app.get('/debug/gateio', async (_, res) => {
+  // process.env 직접 읽기 (config 캐시 무시)
+  const rawKey    = process.env.GATEIO_API_KEY    || '';
+  const rawSecret = process.env.GATEIO_API_SECRET || '';
+  const keyCodes  = Array.from(rawKey.slice(0, 8)).map((c) => c.charCodeAt(0));
   const config = require('./config');
   const result = {
-    keySet:    !!config.apiKey && config.apiKey.length > 0,
-    secretSet: !!config.apiSecret && config.apiSecret.length > 0,
-    keyPrefix: config.apiKey ? config.apiKey.slice(0, 6) + '...' : '(없음)',
+    keySet:    rawKey.length > 0,
+    secretSet: rawSecret.length > 0,
+    keyLength: rawKey.length,
+    keyPrefix: rawKey.slice(0, 8) + '...',
+    keyCodes,   // 앞 8글자의 ASCII 코드 (공백=32, 알파벳/숫자 확인용)
     futures:   null,
     spot:      null,
     error:     null,

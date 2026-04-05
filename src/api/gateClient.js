@@ -74,27 +74,42 @@ const gateClient = {
 
   /**
    * 레버리지 설정
-   * 싱글 모드와 듀얼 모드 모두 대응
+   * 여러 방식으로 시도하여 호환성 확보
    */
   async setLeverage(contract, leverage) {
+    const levStr = leverage.toString();
+
+    // 방법 1: 싱글 모드 (leverage를 문자열로)
     try {
-      // 먼저 듀얼 모드 시도
-      await futuresApi.updateDualModePositionLeverage(SETTLE, contract, leverage, {
-        crossLeverageLimit: leverage.toString(),
-      });
-      logger.info(`레버리지 설정 (듀얼): ${contract} x${leverage}`);
-    } catch (dualErr) {
-      try {
-        // 듀얼 모드 실패 시 싱글 모드 시도
-        await futuresApi.updatePositionLeverage(SETTLE, contract, leverage, {
-          crossLeverageLimit: leverage.toString(),
-        });
-        logger.info(`레버리지 설정 (싱글): ${contract} x${leverage}`);
-      } catch (singleErr) {
-        logger.error(`레버리지 설정 실패: ${singleErr.message}`);
-        throw singleErr;
-      }
+      await futuresApi.updatePositionLeverage(SETTLE, contract, levStr);
+      logger.info(`레버리지 설정 완료: ${contract} x${leverage}`);
+      return;
+    } catch (err) {
+      logger.debug(`싱글 모드 레버리지 실패: ${err.message}`);
     }
+
+    // 방법 2: 듀얼 모드
+    try {
+      await futuresApi.updateDualModePositionLeverage(SETTLE, contract, levStr);
+      logger.info(`레버리지 설정 완료 (듀얼): ${contract} x${leverage}`);
+      return;
+    } catch (err) {
+      logger.debug(`듀얼 모드 레버리지 실패: ${err.message}`);
+    }
+
+    // 방법 3: 크로스 레버리지
+    try {
+      await futuresApi.updatePositionLeverage(SETTLE, contract, '0', {
+        crossLeverageLimit: levStr,
+      });
+      logger.info(`레버리지 설정 완료 (크로스): ${contract} x${leverage}`);
+      return;
+    } catch (err) {
+      logger.debug(`크로스 레버리지 실패: ${err.message}`);
+    }
+
+    // 모든 방법 실패 시 경고만 (주문은 계속 진행)
+    logger.warn(`레버리지 설정 실패 - 거래소 기본 레버리지로 진행: ${contract}`);
   },
 
   /**

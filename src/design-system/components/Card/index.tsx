@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, PressableProps, View, ViewProps, StyleSheet } from 'react-native';
+import { Pressable, PressableProps, View, ViewProps, StyleSheet, ViewStyle } from 'react-native';
 import { colors, spacing, borderRadius, shadows } from '../../tokens';
 
 export type CardVariant = 'elevated' | 'outlined' | 'filled' | 'flat';
@@ -8,6 +8,7 @@ interface BaseCardProps {
   variant?: CardVariant;
   padding?: number;
   radius?: number;
+  style?: ViewStyle | ViewStyle[];
   children: React.ReactNode;
 }
 
@@ -53,6 +54,7 @@ export function Card({
   variant = 'elevated',
   padding = spacing[5],
   radius = borderRadius.xl,
+  style,
   children,
   onPress,
   ...props
@@ -75,6 +77,7 @@ export function Card({
             borderRadius: radius,
             padding,
           },
+          style,
         ]}
         {...props}
       >
@@ -95,6 +98,7 @@ export function Card({
           borderRadius:    radius,
           padding,
         },
+        style,
       ]}
     >
       {children}

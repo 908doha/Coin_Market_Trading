@@ -20,7 +20,7 @@ export function Text({
     <RNText
       style={[
         styles.base,
-        textStyles[variant],
+        textStyles[variant] as any,
         { color: color ?? colors.text.primary },
         align ? { textAlign: align } : undefined,
         style,

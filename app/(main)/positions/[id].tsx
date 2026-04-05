@@ -80,7 +80,7 @@ function PriceBar({
   const min = stopLoss;
   const max = targetPrice;
   const range = max - min;
-  const pct = (v: number) => `${Math.round(((v - min) / range) * 100)}%`;
+  const pct = (v: number): `${number}%` => `${Math.round(((v - min) / range) * 100)}%`;
 
   return (
     <View style={{ marginTop: spacing[2] }}>
@@ -88,13 +88,13 @@ function PriceBar({
         {/* 손절 ~ 진입 구간 (빨간) */}
         <View style={[barStyles.zone, {
           left:  pct(stopLoss),
-          width: pct(entryPrice - stopLoss + stopLoss),
+          width: pct(entryPrice - stopLoss),
           backgroundColor: colors.negative.subtle,
         }]} />
         {/* 진입 ~ 목표 구간 (초록) */}
         <View style={[barStyles.zone, {
           left:  pct(entryPrice),
-          right: '0%',
+          right: '0%' as const,
           backgroundColor: colors.positive.subtle,
         }]} />
         {/* 현재가 마커 */}

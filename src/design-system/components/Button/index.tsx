@@ -21,6 +21,7 @@ export interface ButtonProps extends Omit<PressableProps, 'style'> {
   fullWidth?: boolean;
   leftIcon?: React.ReactNode;
   rightIcon?: React.ReactNode;
+  style?: import('react-native').ViewStyle;
 }
 
 const sizeConfig: Record<ButtonSize, {
@@ -89,6 +90,7 @@ export function Button({
   fullWidth = false,
   leftIcon,
   rightIcon,
+  style,
   ...props
 }: ButtonProps) {
   const sc = sizeConfig[size];
@@ -111,6 +113,7 @@ export function Button({
           borderColor:       vc.borderColor ?? 'transparent',
           alignSelf:         fullWidth ? 'stretch' : 'flex-start',
         },
+        style,
       ]}
       {...props}
     >

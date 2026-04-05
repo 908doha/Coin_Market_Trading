@@ -23,8 +23,8 @@ function PositionCard({ pos }: { pos: Position }) {
       style={{ marginBottom: 10, borderRadius: 20 }}
     >
       <View style={card.wrap}>
-        <View style={[card.icon, { backgroundColor: up ? '#EDFBF3' : '#FFF0F0' }]}>
-          <Text style={{ fontSize: 15, fontWeight: '700', color: up ? '#0D9E45' : '#D93025' }}>
+        <View style={[card.icon, { backgroundColor: up ? '#FFF0F0' : '#EEF5FF' }]}>
+          <Text style={{ fontSize: 15, fontWeight: '700', color: up ? '#D93025' : '#246CF9' }}>
             {pos.coin.slice(0, 2)}
           </Text>
         </View>
@@ -40,8 +40,8 @@ function PositionCard({ pos }: { pos: Position }) {
           <Text style={card.sub}>{formatKRW(pos.amount)} 투자</Text>
         </View>
         <View style={{ alignItems: 'flex-end' }}>
-          <Text style={[card.amount, { color: up ? '#0D9E45' : '#D93025' }]}>{formatKRWSigned(pos.profit)}</Text>
-          <Text style={[card.rate, { color: up ? '#0D9E45' : '#D93025' }]}>{formatRate(pos.profitRate)}</Text>
+          <Text style={[card.amount, { color: up ? '#FF4747' : '#246CF9' }]}>{formatKRWSigned(pos.profit)}</Text>
+          <Text style={[card.rate, { color: up ? '#FF4747' : '#246CF9' }]}>{formatRate(pos.profitRate)}</Text>
         </View>
       </View>
       {pos.agentReason ? (
@@ -78,10 +78,10 @@ function TradeRow({ trade, isLast }: { trade: Trade; isLast: boolean }) {
         <Text style={row.days}>{trade.holdingDays}일 보유</Text>
       </View>
       <View style={{ alignItems: 'flex-end' }}>
-        <Text style={[row.amount, { color: up ? '#0D9E45' : '#D93025' }]}>
+        <Text style={[row.amount, { color: up ? '#FF4747' : '#246CF9' }]}>
           {formatKRWSigned(trade.profit)}
         </Text>
-        <Text style={[row.rate, { color: up ? '#0D9E45' : '#D93025' }]}>
+        <Text style={[row.rate, { color: up ? '#FF4747' : '#246CF9' }]}>
           {formatRate(trade.profitRate)}
         </Text>
       </View>
@@ -113,8 +113,8 @@ function HistoryContent({ trades }: { trades: Trade[] | null }) {
         <View style={hist.summaryRow}>
           {[
             { label: '총 거래',  value: `${trades?.length ?? 0}건` },
-            { label: '승률',     value: `${winRate}%` },
-            { label: '총 손익',  value: formatKRWSigned(total), color: total >= 0 ? '#0D9E45' : '#D93025' },
+            { label: '승률',     value: `${winRate}%`,            color: winRate >= 50 ? '#FF4747' : '#246CF9' },
+            { label: '총 손익',  value: formatKRWSigned(total),   color: total >= 0   ? '#FF4747' : '#246CF9' },
           ].map((item, i) => (
             <React.Fragment key={item.label}>
               {i > 0 && <View style={hist.summaryDivider} />}

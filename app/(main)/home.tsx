@@ -17,7 +17,7 @@ function MiniChart({ data, positive }: { data: { value: number }[]; positive: bo
   const min = Math.min(...values);
   const max = Math.max(...values);
   const range = max - min || 1;
-  const lineColor = positive ? '#1AC24E' : '#FF4747';
+  const lineColor = positive ? '#FF4747' : '#246CF9';
 
   return (
     <View style={{ flexDirection: 'row', alignItems: 'flex-end', height: 52, gap: 2 }}>
@@ -83,11 +83,11 @@ export default function Home() {
                   {formatKRW(balance?.total ?? 0)}
                 </Text>
                 <View style={styles.heroSubRow}>
-                  <Text style={[styles.heroPnl, { color: isProfit ? '#1AC24E' : '#FF4747' }]}>
+                  <Text style={[styles.heroPnl, { color: isProfit ? '#FF4747' : '#246CF9' }]}>
                     {formatKRWSigned(balance?.profitTotal ?? 0)}
                   </Text>
-                  <View style={[styles.pnlBadge, { backgroundColor: isProfit ? '#EDFBF3' : '#FFF0F0' }]}>
-                    <Text style={[styles.pnlBadgeText, { color: isProfit ? '#0D9E45' : '#D93025' }]}>
+                  <View style={[styles.pnlBadge, { backgroundColor: isProfit ? '#FFF0F0' : '#EEF5FF' }]}>
+                    <Text style={[styles.pnlBadgeText, { color: isProfit ? '#D93025' : '#246CF9' }]}>
                       {formatRate(balance?.profitRate ?? 0)}
                     </Text>
                   </View>
@@ -163,8 +163,8 @@ export default function Home() {
                     style={[styles.posItem, idx === 0 && { marginTop: 16 }]}
                   >
                     <View style={styles.posRow}>
-                      <View style={[styles.posIcon, { backgroundColor: up ? '#EDFBF3' : '#FFF0F0' }]}>
-                        <Text style={{ fontSize: 15, fontWeight: '700', color: up ? '#0D9E45' : '#D93025' }}>
+                      <View style={[styles.posIcon, { backgroundColor: up ? '#FFF0F0' : '#EEF5FF' }]}>
+                        <Text style={{ fontSize: 15, fontWeight: '700', color: up ? '#D93025' : '#246CF9' }}>
                           {pos.coin.slice(0, 2)}
                         </Text>
                       </View>
@@ -182,10 +182,10 @@ export default function Home() {
                         <Text variant="meta" color="#AEAEB2">{formatKRW(pos.amount)}</Text>
                       </View>
                       <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={[styles.posProfit, { color: up ? '#0D9E45' : '#D93025' }]}>
+                        <Text style={[styles.posProfit, { color: up ? '#FF4747' : '#246CF9' }]}>
                           {formatKRWSigned(pos.profit)}
                         </Text>
-                        <Text style={[styles.posProfitRate, { color: up ? '#0D9E45' : '#D93025' }]}>
+                        <Text style={[styles.posProfitRate, { color: up ? '#FF4747' : '#246CF9' }]}>
                           {formatRate(pos.profitRate)}
                         </Text>
                       </View>

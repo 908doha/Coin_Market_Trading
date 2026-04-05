@@ -1,6 +1,6 @@
 const router  = require('express').Router();
 const { requireAuth } = require('../middleware/auth');
-const db      = require('../db');
+const { getDb } = require('../db');
 
 function rowToSettings(row) {
   return {
@@ -13,29 +13,25 @@ function rowToSettings(row) {
 }
 
 // GET /notifications/settings
-router.get('/settings', requireAuth, (req, res) => {
-  let row = db.prepare('SELECT * FROM notification_settings WHERE user_id = ?').get(req.user.id);
-  if (!row) {
-    db.prepare(`INSERT OR IGNORE INTO notification_settings (user_id) VALUES (?)`).run(req.user.id);
-    row = db.prepare('SELECT * FROM notification_settings WHERE user_id = ?').get(req.user.id);
-  }
+router.get('/settings', requireAuth, async (req, res) => {
+  const db = await getDb();
+  await db.run(`INSERT OR IGNORE INTO notification_settings (user_id) VALUES (?)`, req.user.id);
+  const row = await db.get('SELECT * FROM notification_settings WHERE user_id = ?', req.user.id);
   res.json(rowToSettings(row));
 });
 
 // PATCH /notifications/settings
-router.patch('/settings', requireAuth, (req, res) => {
-  const fields = ['trade', 'bigProfit', 'bigLoss', 'weekly', 'deposit'];
-  db.prepare(`INSERT OR IGNORE INTO notification_settings (user_id) VALUES (?)`).run(req.user.id);
-
+router.patch('/settings', requireAuth, async (req, res) => {
+  const db     = await getDb();
   const colMap = { trade: 'trade', bigProfit: 'big_profit', bigLoss: 'big_loss', weekly: 'weekly', deposit: 'deposit' };
-  for (const key of fields) {
+  await db.run(`INSERT OR IGNORE INTO notification_settings (user_id) VALUES (?)`, req.user.id);
+  for (const [key, col] of Object.entries(colMap)) {
     if (req.body[key] !== undefined) {
-      db.prepare(`UPDATE notification_settings SET ${colMap[key]} = ? WHERE user_id = ?`)
-        .run(req.body[key] ? 1 : 0, req.user.id);
+      await db.run(`UPDATE notification_settings SET ${col} = ? WHERE user_id = ?`,
+        req.body[key] ? 1 : 0, req.user.id);
     }
   }
-
-  const row = db.prepare('SELECT * FROM notification_settings WHERE user_id = ?').get(req.user.id);
+  const row = await db.get('SELECT * FROM notification_settings WHERE user_id = ?', req.user.id);
   res.json(rowToSettings(row));
 });
 

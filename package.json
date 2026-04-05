@@ -6,14 +6,8 @@
   "scripts": {
     "start":        "node src/server.js",
     "start:bot":    "node src/bot.js",
-    "start:all":    "concurrently \"npm run start\" \"npm run start:bot\"",
     "dev":          "node --watch src/server.js",
-    "dev:bot":      "node --watch src/bot.js",
-    "pm2:start":    "pm2 start ecosystem.config.js",
-    "pm2:stop":     "pm2 stop all",
-    "pm2:restart":  "pm2 restart all",
-    "pm2:logs":     "pm2 logs",
-    "pm2:status":   "pm2 status"
+    "dev:bot":      "node --watch src/bot.js"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -22,8 +16,7 @@
   "dependencies": {
     "bcryptjs":              "^2.4.3",
     "nodemailer":            "^6.9.9",
-    "sqlite3":               "^5.1.7",
-    "sqlite":                "^5.1.1",
+    "pg":                    "^8.11.3",
     "concurrently":          "^8.2.2",
     "cors":                  "^2.8.5",
     "dotenv":                "^16.3.1",

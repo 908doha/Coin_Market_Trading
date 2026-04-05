@@ -23,6 +23,21 @@ app.use(express.json());
 // ── 헬스 체크 ─────────────────────────────────────────────────────
 app.get('/health', (_, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
 
+// ── DB 진단 ───────────────────────────────────────────────────────
+app.get('/debug/db', async (_, res) => {
+  try {
+    const { getDb } = require('./db');
+    const db     = await getDb();
+    await db.get('SELECT 1 AS ok');
+    const tables = await db.all(
+      `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name`
+    );
+    res.json({ status: 'connected', tables: tables.map((t) => t.table_name) });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
 // ── 라우터 ────────────────────────────────────────────────────────
 app.use('/auth',          authRouter);
 app.use('/account',       accountRouter);

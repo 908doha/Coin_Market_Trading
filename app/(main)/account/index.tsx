@@ -152,7 +152,7 @@ const styles = StyleSheet.create({
   root:    { flex: 1, backgroundColor: '#F5F5F5' },
   content: { paddingHorizontal: 20 },
 
-  header: { paddingTop: 8, paddingBottom: 16 },
+  header: { paddingTop: 20, paddingBottom: 20 },
   title:  { fontSize: 28, fontWeight: '800', color: '#191919' },
 
   section:     { marginBottom: 12 },

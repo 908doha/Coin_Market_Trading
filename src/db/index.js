@@ -74,6 +74,16 @@ async function getDb() {
       value      REAL NOT NULL,
       UNIQUE(user_id, date)
     );
+    CREATE TABLE IF NOT EXISTS agent_decisions (
+      id           TEXT PRIMARY KEY,
+      contract     TEXT NOT NULL,
+      direction    TEXT NOT NULL,
+      entry_price  REAL NOT NULL,
+      reason       TEXT NOT NULL,
+      plan         TEXT NOT NULL,
+      signals      TEXT,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
   return _db;
 }

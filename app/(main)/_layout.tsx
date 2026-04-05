@@ -4,33 +4,36 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from '@/design-system';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 
-const TABS = [
-  { name: 'home',      label: '홈' },
-  { name: 'positions', label: '트레이딩' },
-  { name: 'account',   label: '계정' },
-];
+// href: null 인 history 탭을 제외한 순서대로 표시
+const TAB_LABELS: Record<string, string> = {
+  home:      '홈',
+  positions: '트레이딩',
+  account:   '계정',
+};
 
 function TossTabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
 
+  // history(href:null) 제외하고 표시할 탭만 필터링
+  const visibleRoutes = state.routes.filter((r) => TAB_LABELS[r.name]);
+
   return (
     <View style={[styles.barWrap, { paddingBottom: insets.bottom + 8 }]}>
       <View style={styles.pill}>
-        {TABS.map((tab) => {
-          const route  = state.routes.find((r) => r.name === tab.name);
-          if (!route) return null;
+        {visibleRoutes.map((route) => {
           const idx    = state.routes.indexOf(route);
           const active = state.index === idx;
+          const label  = TAB_LABELS[route.name];
 
           return (
             <Pressable
-              key={tab.name}
+              key={route.key}
               style={[styles.tabItem, active && styles.tabItemActive]}
-              onPress={() => navigation.navigate(tab.name)}
+              onPress={() => navigation.navigate(route.name)}
               android_ripple={{ color: 'transparent' }}
             >
               <Text style={[styles.label, { color: active ? '#3182F6' : '#AEAEB2' }]}>
-                {tab.label}
+                {label}
               </Text>
             </Pressable>
           );
@@ -64,28 +67,27 @@ const styles = StyleSheet.create({
     pointerEvents: 'box-none' as any,
   },
   pill: {
-    flexDirection:    'row',
-    backgroundColor:  '#FFFFFF',
-    borderRadius:     36,
-    borderWidth:      1,
-    borderColor:      '#F0F0F0',
+    flexDirection:     'row',
+    backgroundColor:   '#FFFFFF',
+    borderRadius:      36,
+    borderWidth:       1,
+    borderColor:       '#F0F0F0',
     paddingHorizontal: 6,
     paddingVertical:   6,
-    gap:              4,
-    shadowColor:      '#000',
-    shadowOffset:     { width: 0, height: 4 },
-    shadowOpacity:    0.10,
-    shadowRadius:     16,
-    elevation:        8,
+    gap:               4,
+    shadowColor:       '#000',
+    shadowOffset:      { width: 0, height: 4 },
+    shadowOpacity:     0.10,
+    shadowRadius:      16,
+    elevation:         8,
   },
   tabItem: {
-    alignItems:       'center',
-    justifyContent:   'center',
+    alignItems:        'center',
+    justifyContent:    'center',
     paddingHorizontal: 20,
     paddingVertical:   10,
-    borderRadius:     30,
-    gap:              2,
-    minWidth:         80,
+    borderRadius:      30,
+    minWidth:          80,
   },
   tabItemActive: {
     backgroundColor: '#EEF5FF',

@@ -10,7 +10,8 @@ export { Chip }    from './components/Chip';
 export { Badge }   from './components/Badge';
 export { Divider } from './components/Divider';
 export { Avatar }    from './components/Avatar';
-export { GlassView, GlassCard } from './components/Glass';
+export { GlassView, GlassCard }   from './components/Glass';
+export { PeriodSelector }         from './components/PeriodSelector';
 
 // Types
 export type { TextProps }    from './components/Text';

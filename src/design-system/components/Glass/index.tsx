@@ -8,11 +8,11 @@ interface GlassViewProps {
   intensity?: 'low' | 'medium' | 'high';
 }
 
-// Toss-style light cards — intensity maps to elevation level
+// Toss-style light cards — no borders, white background
 const intensityMap = {
-  low:    { bg: '#FFFFFF', border: '#F0F0F0' },
-  medium: { bg: '#FFFFFF', border: '#EBEBEB' },
-  high:   { bg: '#FFFFFF', border: '#E2E2E2' },
+  low:    { bg: '#FFFFFF', border: 'transparent' },
+  medium: { bg: '#FFFFFF', border: 'transparent' },
+  high:   { bg: '#FFFFFF', border: 'transparent' },
 };
 
 export function GlassView({ children, style, intensity = 'medium' }: GlassViewProps) {

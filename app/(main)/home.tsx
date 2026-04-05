@@ -5,14 +5,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Text, GlassCard } from '@/design-system';
+import { Text, GlassCard, PeriodSelector } from '@/design-system';
 import { accountService, agentService, positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAuth } from '@/store/auth';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
-import type { ChartPeriod } from '@/services';
 
-const PERIODS: ChartPeriod[] = ['1W', '1M', '3M', '6M', '1Y'];
+const PERIODS = ['1W', '1M', '3M', '6M', '1Y'] as const;
 
 // ── 미니 차트 ────────────────────────────────────────────────────────────────
 function MiniChart({ data, positive }: { data: { value: number }[]; positive: boolean }) {
@@ -39,16 +38,6 @@ function MiniChart({ data, positive }: { data: { value: number }[]; positive: bo
   );
 }
 
-// ── 기간 탭 ──────────────────────────────────────────────────────────────────
-function PeriodTab({ period, active, onPress }: { period: string; active: boolean; onPress: () => void }) {
-  return (
-    <Pressable onPress={onPress} style={[styles.periodBtn, active && styles.periodBtnActive]}>
-      <Text style={[styles.periodText, { color: active ? '#3182F6' : '#AEAEB2' }]}>
-        {period}
-      </Text>
-    </Pressable>
-  );
-}
 
 const agentStatusMap = {
   running: { label: '운용중',   color: '#1AC24E', bg: '#EDFBF3' },
@@ -57,7 +46,7 @@ const agentStatusMap = {
 };
 
 export default function Home() {
-  const [period, setPeriod] = useState<ChartPeriod>('1M');
+  const [period, setPeriod] = useState<typeof PERIODS[number]>('1M');
   const { user } = useAuth();
 
   const { data: balance,   isLoading: balLoading }   = useApi(() => accountService.getBalance(), []);
@@ -117,9 +106,11 @@ export default function Home() {
 
             {/* 기간 선택 */}
             <View style={styles.periodRow}>
-              {PERIODS.map((p) => (
-                <PeriodTab key={p} period={p} active={period === p} onPress={() => setPeriod(p)} />
-              ))}
+              <PeriodSelector
+                periods={PERIODS}
+                active={period}
+                onChange={setPeriod}
+              />
             </View>
           </GlassCard>
 
@@ -240,12 +231,7 @@ const styles = StyleSheet.create({
   pnlBadge:    { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
   pnlBadgeText: { fontSize: 13, fontWeight: '600' },
   chartArea:   { marginTop: 20, marginBottom: 12 },
-  periodRow:   { flexDirection: 'row', gap: 2 },
-  periodBtn: {
-    paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20,
-  },
-  periodBtnActive: { backgroundColor: '#EEF5FF' },
-  periodText:  { fontSize: 13, fontWeight: '600' },
+  periodRow:   { flexDirection: 'row' },
 
   statsRow:  { flexDirection: 'row', gap: 10, marginBottom: 12 },
   statCard:  { flex: 1 },

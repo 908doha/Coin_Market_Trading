@@ -174,10 +174,11 @@ export const textStyles = {
   },
 
   // Meta — consistent small label used across cards (가용자산, 투자중, 승률 등)
+  // Matches the "대기중" status text style in AI agent section
   meta: {
-    fontSize:      fontSize.xs,        // 12px
-    fontWeight:    fontWeight.medium,
-    lineHeight:    fontSize.xs * lineHeight.normal,
+    fontSize:      fontSize.md,        // 14px
+    fontWeight:    fontWeight.semiBold,
+    lineHeight:    fontSize.md * lineHeight.normal,
     letterSpacing: letterSpacing.normal,
   },
 

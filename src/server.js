@@ -33,6 +33,17 @@ app.use(express.json());
 // ── 헬스 체크 ─────────────────────────────────────────────────────
 app.get('/health', (_, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
 
+// ── 서버 공인 IP 확인 ──────────────────────────────────────────────
+app.get('/debug/ip', async (_, res) => {
+  try {
+    const r = await fetch('https://api.ipify.org?format=json');
+    const data = await r.json();
+    res.json({ ip: data.ip });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── DB 진단 ───────────────────────────────────────────────────────
 app.get('/debug/db', async (_, res) => {
   try {

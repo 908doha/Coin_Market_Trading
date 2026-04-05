@@ -8,6 +8,9 @@ const { sendVerificationCode } = require('../services/email');
 
 const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'osprey-refresh-secret-change-me';
 
+// 현재 ISO 시간 문자열 (expires_at 비교용)
+const nowIso = () => new Date().toISOString();
+
 // POST /auth/send-code
 router.post('/send-code', async (req, res) => {
   const { email } = req.body;
@@ -16,8 +19,10 @@ router.post('/send-code', async (req, res) => {
   await db.run(`UPDATE verification_codes SET used = 1 WHERE email = ? AND used = 0`, email);
   const code      = String(Math.floor(100000 + Math.random() * 900000));
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-  await db.run(`INSERT INTO verification_codes (id, email, code, expires_at) VALUES (?, ?, ?, ?)`,
-    uuid(), email, code, expiresAt);
+  await db.run(
+    `INSERT INTO verification_codes (id, email, code, expires_at) VALUES (?, ?, ?, ?)`,
+    uuid(), email, code, expiresAt
+  );
   await sendVerificationCode(email, code);
   res.json({ message: '인증코드가 발송됐습니다.' });
 });
@@ -28,8 +33,11 @@ router.post('/verify-code', async (req, res) => {
   if (!email || !code) return res.status(400).json({ message: '이메일과 코드를 입력해주세요.' });
   const db = await getDb();
   const record = await db.get(
-    `SELECT * FROM verification_codes WHERE email = ? AND code = ? AND used = 0 AND expires_at > datetime('now') ORDER BY created_at DESC LIMIT 1`,
-    email, code);
+    `SELECT * FROM verification_codes
+     WHERE email = ? AND code = ? AND used = 0 AND expires_at > ?
+     ORDER BY created_at DESC LIMIT 1`,
+    email, code, nowIso()
+  );
   if (!record) return res.status(400).json({ message: '코드가 올바르지 않거나 만료됐습니다.' });
   await db.run(`UPDATE verification_codes SET used = 1 WHERE id = ?`, record.id);
   res.json({ message: '인증 완료' });
@@ -46,14 +54,24 @@ router.post('/signup', async (req, res) => {
   const hash = await bcrypt.hash(password, 10);
   const id   = uuid();
   const name = email.split('@')[0];
-  await db.run(`INSERT INTO users (id, email, password, name) VALUES (?, ?, ?, ?)`, id, email, hash, name);
-  await db.run(`INSERT OR IGNORE INTO notification_settings (user_id) VALUES (?)`, id);
-  await db.run(`INSERT OR IGNORE INTO agent_settings (user_id) VALUES (?)`, id);
+  await db.run(
+    `INSERT INTO users (id, email, password, name) VALUES (?, ?, ?, ?)`,
+    id, email, hash, name
+  );
+  // PostgreSQL: INSERT OR IGNORE → ON CONFLICT DO NOTHING
+  await db.run(
+    `INSERT INTO notification_settings (user_id) VALUES (?) ON CONFLICT DO NOTHING`, id
+  );
+  await db.run(
+    `INSERT INTO agent_settings (user_id) VALUES (?) ON CONFLICT DO NOTHING`, id
+  );
   const user    = { id, email, name, joinedAt: new Date().toISOString() };
   const access  = signAccess({ sub: id });
   const refresh = signRefresh({ sub: id });
-  await db.run(`INSERT INTO refresh_tokens (id, user_id, token, expires_at) VALUES (?, ?, ?, ?)`,
-    uuid(), id, refresh, new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString());
+  await db.run(
+    `INSERT INTO refresh_tokens (id, user_id, token, expires_at) VALUES (?, ?, ?, ?)`,
+    uuid(), id, refresh, new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+  );
   res.status(201).json({ access, refresh, user });
 });
 
@@ -69,8 +87,10 @@ router.post('/login', async (req, res) => {
   const user    = { id: row.id, email: row.email, name: row.name, joinedAt: row.created_at };
   const access  = signAccess({ sub: row.id });
   const refresh = signRefresh({ sub: row.id });
-  await db.run(`INSERT INTO refresh_tokens (id, user_id, token, expires_at) VALUES (?, ?, ?, ?)`,
-    uuid(), row.id, refresh, new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString());
+  await db.run(
+    `INSERT INTO refresh_tokens (id, user_id, token, expires_at) VALUES (?, ?, ?, ?)`,
+    uuid(), row.id, refresh, new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+  );
   res.json({ access, refresh, user });
 });
 
@@ -82,7 +102,9 @@ router.post('/refresh', async (req, res) => {
     const payload = jwt.verify(refresh, REFRESH_SECRET);
     const db      = await getDb();
     const stored  = await db.get(
-      `SELECT * FROM refresh_tokens WHERE token = ? AND expires_at > datetime('now')`, refresh);
+      `SELECT * FROM refresh_tokens WHERE token = ? AND expires_at > ?`,
+      refresh, nowIso()
+    );
     if (!stored) return res.status(401).json({ message: '만료된 refresh token입니다.' });
     res.json({ access: signAccess({ sub: payload.sub }) });
   } catch {

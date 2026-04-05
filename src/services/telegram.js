@@ -1,6 +1,7 @@
 const TelegramBot = require('node-telegram-bot-api');
 const config = require('../config');
 const gateClient = require('../api/gateClient');
+const indicators = require('../utils/indicators');
 const logger = require('../utils/logger');
 
 /**
@@ -167,6 +168,178 @@ class TelegramService {
       await this.bot.sendMessage(chatId, '🟢 봇 재개됨');
     });
 
+    // /analyze - ICT 전략 실시간 분석
+    this.bot.onText(/\/analyze/, async (msg) => {
+      if (!auth(msg)) return;
+      await this.bot.sendMessage(chatId, '🔍 ICT 분석 중...');
+
+      try {
+        // 3개 타임프레임 캔들 조회
+        const [htfCandles, mtfCandles, ltfCandles] = await Promise.all([
+          gateClient.getCandles(config.tradePair, config.timeframes.htf, 200),
+          gateClient.getCandles(config.tradePair, config.timeframes.mtf, 200),
+          gateClient.getCandles(config.tradePair, config.timeframes.ltf, 200),
+        ]);
+
+        const currentPrice = ltfCandles[ltfCandles.length - 1].close;
+        const lines = [];
+        lines.push(`━━━ ICT 분석: ${config.tradePair} ━━━`);
+        lines.push(`💰 현재가: ${currentPrice.toFixed(2)}`);
+        lines.push('');
+
+        // ========== HTF 분석 ==========
+        const htfSwingHighs = indicators.findSwingHighs(htfCandles, config.ict.structureShiftBars);
+        const htfSwingLows = indicators.findSwingLows(htfCandles, config.ict.structureShiftBars);
+        let htfDirection = null;
+
+        lines.push(`📊 HTF (${config.timeframes.htf}) 방향 판단`);
+
+        if (htfSwingHighs.length >= 2 && htfSwingLows.length >= 2) {
+          const lastHigh = htfSwingHighs[htfSwingHighs.length - 1].price;
+          const prevHigh = htfSwingHighs[htfSwingHighs.length - 2].price;
+          const lastLow = htfSwingLows[htfSwingLows.length - 1].price;
+          const prevLow = htfSwingLows[htfSwingLows.length - 2].price;
+
+          const hh = lastHigh > prevHigh;
+          const hl = lastLow > prevLow;
+          const lh = lastHigh < prevHigh;
+          const ll = lastLow < prevLow;
+
+          if (hh && hl) {
+            htfDirection = 'bullish';
+            lines.push(`  ✅ BULLISH (HH + HL)`);
+          } else if (lh && ll) {
+            htfDirection = 'bearish';
+            lines.push(`  ✅ BEARISH (LH + LL)`);
+          } else {
+            const mss = indicators.detectMarketStructureShift(htfCandles, htfSwingHighs, htfSwingLows);
+            if (mss) {
+              htfDirection = mss;
+              lines.push(`  ✅ ${mss.toUpperCase()} (MSS 감지)`);
+            } else {
+              lines.push(`  ⚠️ 방향 불명확 (횡보)`);
+            }
+          }
+
+          lines.push(`  스윙 하이: ${lastHigh.toFixed(2)} (이전: ${prevHigh.toFixed(2)})`);
+          lines.push(`  스윙 로우: ${lastLow.toFixed(2)} (이전: ${prevLow.toFixed(2)})`);
+        } else {
+          lines.push(`  ⚠️ 스윙 포인트 부족`);
+        }
+
+        lines.push('');
+
+        // ========== MTF 분석 ==========
+        lines.push(`📊 MTF (${config.timeframes.mtf}) 구조 확인`);
+
+        const mtfSwingHighs = indicators.findSwingHighs(mtfCandles, config.ict.structureShiftBars);
+        const mtfSwingLows = indicators.findSwingLows(mtfCandles, config.ict.structureShiftBars);
+
+        // MSS
+        const mtfMss = (mtfSwingHighs.length >= 2 && mtfSwingLows.length >= 2)
+          ? indicators.detectMarketStructureShift(mtfCandles, mtfSwingHighs, mtfSwingLows)
+          : null;
+        lines.push(`  MSS: ${mtfMss ? `✅ ${mtfMss.toUpperCase()}` : '❌ 없음'}`);
+
+        // Order Block
+        const mtfOBs = indicators.findOrderBlocks(mtfCandles);
+        lines.push(`  Bullish OB: ${mtfOBs.bullish.length}개`);
+        if (mtfOBs.bullish.length > 0) {
+          const ob = mtfOBs.bullish[mtfOBs.bullish.length - 1];
+          lines.push(`    └ 최근: ${ob.low.toFixed(2)} ~ ${ob.high.toFixed(2)}`);
+        }
+        lines.push(`  Bearish OB: ${mtfOBs.bearish.length}개`);
+        if (mtfOBs.bearish.length > 0) {
+          const ob = mtfOBs.bearish[mtfOBs.bearish.length - 1];
+          lines.push(`    └ 최근: ${ob.low.toFixed(2)} ~ ${ob.high.toFixed(2)}`);
+        }
+
+        // FVG
+        const mtfFVGs = indicators.findFairValueGaps(mtfCandles);
+        lines.push(`  Bullish FVG: ${mtfFVGs.bullish.length}개`);
+        if (mtfFVGs.bullish.length > 0) {
+          const fvg = mtfFVGs.bullish[mtfFVGs.bullish.length - 1];
+          lines.push(`    └ 최근: ${fvg.bottom.toFixed(2)} ~ ${fvg.top.toFixed(2)}`);
+        }
+        lines.push(`  Bearish FVG: ${mtfFVGs.bearish.length}개`);
+        if (mtfFVGs.bearish.length > 0) {
+          const fvg = mtfFVGs.bearish[mtfFVGs.bearish.length - 1];
+          lines.push(`    └ 최근: ${fvg.bottom.toFixed(2)} ~ ${fvg.top.toFixed(2)}`);
+        }
+
+        lines.push('');
+
+        // ========== LTF 분석 ==========
+        lines.push(`📊 LTF (${config.timeframes.ltf}) 진입 조건`);
+
+        // Kill Zone
+        const killZone = indicators.isInKillZone();
+        lines.push(`  Kill Zone: ${killZone.active ? `✅ ${killZone.zone}` : '❌ 비활성'}`);
+
+        // LTF 스윙
+        const ltfSwingHighs = indicators.findSwingHighs(ltfCandles, config.ict.structureShiftBars);
+        const ltfSwingLows = indicators.findSwingLows(ltfCandles, config.ict.structureShiftBars);
+
+        // Liquidity Sweep
+        const sweeps = (ltfSwingHighs.length >= 1 && ltfSwingLows.length >= 1)
+          ? indicators.detectLiquiditySweep(ltfCandles, ltfSwingHighs, ltfSwingLows)
+          : [];
+        lines.push(`  Liquidity Sweep: ${sweeps.length > 0 ? `✅ ${sweeps.map(s => `${s.type} @ ${s.level.toFixed(2)}`).join(', ')}` : '❌ 없음'}`);
+
+        // OTE
+        if (ltfSwingHighs.length >= 1 && ltfSwingLows.length >= 1) {
+          const recentHigh = ltfSwingHighs[ltfSwingHighs.length - 1].price;
+          const recentLow = ltfSwingLows[ltfSwingLows.length - 1].price;
+          const ote = indicators.calculateOTE(recentHigh, recentLow);
+
+          const inBullishOTE = currentPrice >= ote.bullish.lower && currentPrice <= ote.bullish.upper;
+          const inBearishOTE = currentPrice >= ote.bearish.lower && currentPrice <= ote.bearish.upper;
+
+          lines.push(`  Bullish OTE: ${ote.bullish.lower.toFixed(2)} ~ ${ote.bullish.upper.toFixed(2)} ${inBullishOTE ? '✅ 구간 내' : ''}`);
+          lines.push(`  Bearish OTE: ${ote.bearish.lower.toFixed(2)} ~ ${ote.bearish.upper.toFixed(2)} ${inBearishOTE ? '✅ 구간 내' : ''}`);
+        }
+
+        // LTF MSS
+        const ltfMss = (ltfSwingHighs.length >= 2 && ltfSwingLows.length >= 2)
+          ? indicators.detectMarketStructureShift(ltfCandles, ltfSwingHighs, ltfSwingLows)
+          : null;
+        lines.push(`  LTF MSS: ${ltfMss ? `✅ ${ltfMss.toUpperCase()}` : '❌ 없음'}`);
+
+        // LTF FVG
+        const ltfFVGs = indicators.findFairValueGaps(ltfCandles);
+        const inBullishFVG = ltfFVGs.bullish.find(f => currentPrice >= f.bottom && currentPrice <= f.top);
+        const inBearishFVG = ltfFVGs.bearish.find(f => currentPrice >= f.bottom && currentPrice <= f.top);
+        lines.push(`  LTF FVG: Bullish ${ltfFVGs.bullish.length}개${inBullishFVG ? ' ✅ 구간 내' : ''} / Bearish ${ltfFVGs.bearish.length}개${inBearishFVG ? ' ✅ 구간 내' : ''}`);
+
+        lines.push('');
+
+        // ========== 종합 판단 ==========
+        lines.push('📋 종합 판단');
+        const signal = this.tradingBot.strategy.analyze({ htf: htfCandles, mtf: mtfCandles, ltf: ltfCandles });
+
+        if (signal.signal) {
+          const emoji = signal.signal === 'long' ? '📈' : '📉';
+          lines.push(`  ${emoji} ${signal.signal.toUpperCase()} 신호 발생!`);
+          lines.push(`  진입가: ${signal.entry}`);
+          lines.push(`  SL: ${signal.sl} | TP: ${signal.tp}`);
+          lines.push(`  컨플루언스: ${signal.confluence.length}개`);
+          signal.confluence.forEach(c => lines.push(`    • ${c}`));
+        } else {
+          lines.push(`  ⏸️ 신호 없음`);
+          lines.push(`  사유: ${signal.reason}`);
+          if (signal.confluence && signal.confluence.length > 0) {
+            lines.push(`  충족된 조건:`);
+            signal.confluence.forEach(c => lines.push(`    • ${c}`));
+          }
+        }
+
+        await this.bot.sendMessage(chatId, lines.join('\n'));
+      } catch (err) {
+        await this.bot.sendMessage(chatId, `❌ 분석 실패: ${err.message}`);
+        logger.error(`분석 실패: ${err.message}`);
+      }
+    });
+
     // /help - 명령어 목록
     this.bot.onText(/\/help/, async (msg) => {
       if (!auth(msg)) return;
@@ -176,6 +349,7 @@ class TelegramService {
         `/position - 현재 포지션 상세`,
         `/balance  - 잔고 조회`,
         `/pnl      - 오늘 손익 조회`,
+        `/analyze  - ICT 실시간 분석`,
         `/close    - 현재 포지션 청산`,
         `/stop     - 봇 정지`,
         `/start    - 봇 재개`,

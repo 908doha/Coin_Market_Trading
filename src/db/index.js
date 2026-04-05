@@ -4,12 +4,26 @@ if (!process.env.DATABASE_URL) {
   throw new Error('DATABASE_URL environment variable is required');
 }
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
-  max: 10,
-  idleTimeoutMillis: 30000,
-});
+// URL 파싱 → 특수문자 포함 비밀번호도 안전하게 처리
+function buildConfig(url) {
+  try {
+    const u = new URL(url);
+    return {
+      host:              u.hostname,
+      port:              parseInt(u.port) || 5432,
+      database:          u.pathname.replace(/^\//, '') || 'postgres',
+      user:              decodeURIComponent(u.username),
+      password:          decodeURIComponent(u.password),
+      ssl:               { rejectUnauthorized: false },
+      max:               10,
+      idleTimeoutMillis: 30000,
+    };
+  } catch {
+    return { connectionString: url, ssl: { rejectUnauthorized: false } };
+  }
+}
+
+const pool = new Pool(buildConfig(process.env.DATABASE_URL));
 
 pool.on('error', (err) => {
   console.error('PostgreSQL pool error:', err.message);
@@ -21,23 +35,19 @@ function toPostgresParams(sql) {
   return sql.replace(/\?/g, () => `$${++i}`);
 }
 
-// SQLite-호환 DB 인터페이스 (기존 라우트 코드 무수정 유지)
+// SQLite-호환 DB 인터페이스
 const db = {
-  // 단일 행 조회
   async get(sql, ...params) {
     const { rows } = await pool.query(toPostgresParams(sql), params.flat());
     return rows[0];
   },
-  // 전체 행 조회
   async all(sql, ...params) {
     const { rows } = await pool.query(toPostgresParams(sql), params.flat());
     return rows;
   },
-  // INSERT / UPDATE / DELETE
   async run(sql, ...params) {
     await pool.query(toPostgresParams(sql), params.flat());
   },
-  // 스키마 등 raw SQL (테이블은 Supabase에서 이미 생성됨)
   async exec(sql) {
     await pool.query(sql);
   },

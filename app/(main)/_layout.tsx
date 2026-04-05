@@ -1,8 +1,17 @@
 import { Tabs } from 'expo-router';
-import { View, Pressable, StyleSheet } from 'react-native';
+import { View, Pressable, StyleSheet, LayoutChangeEvent } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from '@/design-system';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  interpolateColor,
+  useDerivedValue,
+  withTiming,
+} from 'react-native-reanimated';
+import { useRef } from 'react';
 
 // 표시할 탭 순서와 레이블 — history 제외
 const VISIBLE_TABS = [
@@ -11,37 +20,119 @@ const VISIBLE_TABS = [
   { name: 'account',   label: '계정' },
 ];
 
+const SPRING_CONFIG = {
+  damping:   20,
+  stiffness: 200,
+  mass:      0.6,
+};
+
 function TossTabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
+
+  // Store measured layout for each tab slot
+  const tabLayouts = useRef<{ x: number; width: number }[]>([]);
+
+  // Animated active-pill position & width
+  const pillX     = useSharedValue(0);
+  const pillWidth = useSharedValue(0);
+  // 0–1 progress per tab (1 = active)
+  const activeIdx = useSharedValue(0);
+
+  const pillStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: pillX.value }],
+    width:     pillWidth.value,
+  }));
+
+  // Compute resolved tab list (matching routes)
+  const resolvedTabs = VISIBLE_TABS.map((tab) => {
+    const route = state.routes.find(
+      (r) => r.name === tab.name || r.name.startsWith(tab.name + '/'),
+    );
+    return route ? { ...tab, route } : null;
+  }).filter(Boolean) as { name: string; label: string; route: typeof state.routes[0] }[];
+
+  function handleLayout(tabIndex: number, e: LayoutChangeEvent) {
+    const { x, width } = e.nativeEvent.layout;
+    tabLayouts.current[tabIndex] = { x, width };
+
+    // On first layout, position pill under the current active tab
+    const activeTabIndex = resolvedTabs.findIndex(
+      (t) => state.routes.indexOf(t.route) === state.index,
+    );
+    if (tabIndex === activeTabIndex) {
+      pillX.value     = x;
+      pillWidth.value = width;
+    }
+  }
+
+  function handlePress(tabIndex: number, routeName: string) {
+    const layout = tabLayouts.current[tabIndex];
+    if (layout) {
+      pillX.value     = withSpring(layout.x,     SPRING_CONFIG);
+      pillWidth.value = withSpring(layout.width,  SPRING_CONFIG);
+    }
+    activeIdx.value = withTiming(tabIndex, { duration: 180 });
+    navigation.navigate(routeName);
+  }
 
   return (
     <View style={[styles.barWrap, { paddingBottom: insets.bottom + 8 }]}>
       <View style={styles.pill}>
-        {VISIBLE_TABS.map((tab) => {
-          // 라우트 이름이 "positions/index" 형태일 수도 있어서 startsWith로 매칭
-          const route = state.routes.find(
-            (r) => r.name === tab.name || r.name.startsWith(tab.name + '/'),
-          );
-          if (!route) return null;
+        {/* Sliding active background */}
+        <Animated.View style={[styles.activePill, pillStyle]} />
 
-          const idx    = state.routes.indexOf(route);
-          const active = state.index === idx;
+        {resolvedTabs.map((tab, tabIndex) => {
+          const routeIdx = state.routes.indexOf(tab.route);
+          const isActive = state.index === routeIdx;
 
           return (
-            <Pressable
+            <TabLabel
               key={tab.name}
-              style={[styles.tabItem, active && styles.tabItemActive]}
-              onPress={() => navigation.navigate(route.name)}
-              android_ripple={{ color: 'transparent' }}
-            >
-              <Text style={[styles.label, { color: active ? '#3182F6' : '#AEAEB2' }]}>
-                {tab.label}
-              </Text>
-            </Pressable>
+              label={tab.label}
+              isActive={isActive}
+              tabIndex={tabIndex}
+              activeIdx={activeIdx}
+              totalTabs={resolvedTabs.length}
+              onLayout={(e) => handleLayout(tabIndex, e)}
+              onPress={() => handlePress(tabIndex, tab.route.name)}
+            />
           );
         })}
       </View>
     </View>
+  );
+}
+
+interface TabLabelProps {
+  label:      string;
+  isActive:   boolean;
+  tabIndex:   number;
+  activeIdx:  ReturnType<typeof useSharedValue<number>>;
+  totalTabs:  number;
+  onLayout:   (e: LayoutChangeEvent) => void;
+  onPress:    () => void;
+}
+
+function TabLabel({ label, isActive, tabIndex, activeIdx, onLayout, onPress }: TabLabelProps) {
+  const animatedTextStyle = useAnimatedStyle(() => {
+    // distance from active: 0 = active, >0 = inactive
+    const dist = Math.abs(activeIdx.value - tabIndex);
+    const t    = Math.max(0, Math.min(1, 1 - dist)); // clamp 0–1
+    const color = interpolateColor(t, [0, 1], ['#AEAEB2', '#3182F6']);
+    return { color };
+  });
+
+  return (
+    <Pressable
+      style={styles.tabItem}
+      onLayout={onLayout}
+      onPress={onPress}
+      android_ripple={{ color: 'transparent' }}
+    >
+      <Animated.Text style={[styles.label, animatedTextStyle]}>
+        {label}
+      </Animated.Text>
+    </Pressable>
   );
 }
 
@@ -86,6 +177,14 @@ const styles = StyleSheet.create({
     shadowRadius:      16,
     elevation:         8,
   },
+  activePill: {
+    position:        'absolute',
+    top:             6,
+    left:            0,
+    bottom:          6,
+    backgroundColor: '#EEF5FF',
+    borderRadius:    30,
+  },
   tabItem: {
     alignItems:        'center',
     justifyContent:    'center',
@@ -93,9 +192,7 @@ const styles = StyleSheet.create({
     paddingVertical:   10,
     borderRadius:      30,
     minWidth:          80,
-  },
-  tabItemActive: {
-    backgroundColor: '#EEF5FF',
+    zIndex:            1,
   },
   label: {
     fontSize:      13,

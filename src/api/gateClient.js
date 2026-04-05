@@ -74,16 +74,26 @@ const gateClient = {
 
   /**
    * 레버리지 설정
+   * 싱글 모드와 듀얼 모드 모두 대응
    */
   async setLeverage(contract, leverage) {
     try {
+      // 먼저 듀얼 모드 시도
       await futuresApi.updateDualModePositionLeverage(SETTLE, contract, leverage, {
         crossLeverageLimit: leverage.toString(),
       });
-      logger.info(`레버리지 설정: ${contract} x${leverage}`);
-    } catch (err) {
-      logger.error(`레버리지 설정 실패: ${err.message}`);
-      throw err;
+      logger.info(`레버리지 설정 (듀얼): ${contract} x${leverage}`);
+    } catch (dualErr) {
+      try {
+        // 듀얼 모드 실패 시 싱글 모드 시도
+        await futuresApi.updatePositionLeverage(SETTLE, contract, leverage, {
+          crossLeverageLimit: leverage.toString(),
+        });
+        logger.info(`레버리지 설정 (싱글): ${contract} x${leverage}`);
+      } catch (singleErr) {
+        logger.error(`레버리지 설정 실패: ${singleErr.message}`);
+        throw singleErr;
+      }
     }
   },
 
@@ -129,24 +139,53 @@ const gateClient = {
 
   /**
    * 현재 포지션 조회
+   * 싱글 모드와 듀얼 모드 모두 대응
    */
   async getPosition(contract) {
+    // 싱글 모드 시도
     try {
       const { body } = await futuresApi.getPosition(SETTLE, contract);
       return {
         size: body.size,
-        entryPrice: parseFloat(body.entryPrice),
-        markPrice: parseFloat(body.markPrice),
-        unrealisedPnl: parseFloat(body.unrealisedPnl),
+        entryPrice: parseFloat(body.entryPrice || '0'),
+        markPrice: parseFloat(body.markPrice || '0'),
+        unrealisedPnl: parseFloat(body.unrealisedPnl || '0'),
         leverage: body.leverage,
-        mode: body.mode,
+        mode: body.mode || 'single',
       };
     } catch (err) {
-      if (err.body && err.body.label === 'POSITION_NOT_FOUND') {
+      // 포지션 없음
+      if (err.body && (err.body.label === 'POSITION_NOT_FOUND' || err.body.label === 'POSITION_EMPTY')) {
         return null;
       }
-      logger.error(`포지션 조회 실패: ${err.message}`);
-      throw err;
+    }
+
+    // 듀얼 모드 시도
+    try {
+      const { body } = await futuresApi.getDualModePosition(SETTLE, contract);
+      // 듀얼 모드는 long/short 포지션 배열을 반환
+      if (Array.isArray(body)) {
+        for (const pos of body) {
+          if (pos.size && pos.size !== 0) {
+            return {
+              size: pos.size,
+              entryPrice: parseFloat(pos.entryPrice || '0'),
+              markPrice: parseFloat(pos.markPrice || '0'),
+              unrealisedPnl: parseFloat(pos.unrealisedPnl || '0'),
+              leverage: pos.leverage,
+              mode: pos.mode || 'dual',
+            };
+          }
+        }
+      }
+      return null;
+    } catch (err) {
+      if (err.body && (err.body.label === 'POSITION_NOT_FOUND' || err.body.label === 'POSITION_EMPTY')) {
+        return null;
+      }
+      // 둘 다 실패하면 포지션 없음으로 처리
+      logger.warn(`포지션 조회 실패 (포지션 없는 것으로 처리): ${err.message}`);
+      return null;
     }
   },
 

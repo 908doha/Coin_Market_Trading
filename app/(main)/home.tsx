@@ -217,8 +217,8 @@ const styles = StyleSheet.create({
   agentBadgeText: {},
 
   heroCard:    { marginBottom: 12 },
-  heroAmount:  { fontSize: 34, fontWeight: '800', color: '#191919', letterSpacing: -1 },
-  heroSubRow:  { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
+  heroAmount:  { fontSize: 26, fontWeight: '700', color: '#191919', letterSpacing: -0.5, marginTop: 8, marginBottom: 8 },
+  heroSubRow:  { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
   heroPnl:     { fontSize: 15, fontWeight: '600' },
   pnlBadge:    { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
   pnlBadgeText: { fontSize: 13, fontWeight: '600' },

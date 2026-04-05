@@ -57,7 +57,7 @@ export function AssetCardSkeleton() {
       {/* 레이블 */}
       <Skeleton width={52} height={14} radius={6} style={{ marginBottom: 12 }} />
       {/* 금액 */}
-      <Skeleton width={180} height={36} radius={10} style={{ marginBottom: 8 }} />
+      <Skeleton width={160} height={28} radius={8} style={{ marginTop: 8, marginBottom: 8 }} />
       {/* 수익 행 */}
       <View style={s.row}>
         <Skeleton width={90} height={18} radius={6} />

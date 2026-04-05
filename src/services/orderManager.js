@@ -102,14 +102,26 @@ class OrderManager {
     // 1. 시장가 진입 주문
     const order = await gateClient.createOrder(contract, size, side);
 
-    // 2. SL/TP 지정가 주문을 거래소에 등록
-    try {
-      const sltpResult = await gateClient.placeSLTP(contract, size, direction, sl, tp);
-      this.slOrderId = sltpResult.slOrder ? sltpResult.slOrder.id : null;
-      this.tpOrderId = sltpResult.tpOrder ? sltpResult.tpOrder.id : null;
-      logger.info(`SL 주문 ID: ${this.slOrderId} | TP 주문 ID: ${this.tpOrderId}`);
-    } catch (err) {
-      logger.error(`SL/TP 등록 실패: ${err.message} - 수동 모니터링으로 전환`);
+    // 2. SL/TP 지정가 주문을 거래소에 등록 (최대 3회 재시도)
+    let sltpSuccess = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const sltpResult = await gateClient.placeSLTP(contract, size, direction, sl, tp);
+        this.slOrderId = sltpResult.slOrder ? sltpResult.slOrder.id : null;
+        this.tpOrderId = sltpResult.tpOrder ? sltpResult.tpOrder.id : null;
+        logger.info(`SL 주문 ID: ${this.slOrderId} | TP 주문 ID: ${this.tpOrderId}`);
+        sltpSuccess = true;
+        break;
+      } catch (err) {
+        logger.error(`SL/TP 등록 실패 (${attempt}/3): ${err.message}`);
+        if (attempt < 3) {
+          await new Promise(r => setTimeout(r, 2000));
+        }
+      }
+    }
+
+    if (!sltpSuccess) {
+      logger.error('SL/TP 등록 3회 실패 - 수동으로 SL/TP 설정 필요!');
       this.slOrderId = null;
       this.tpOrderId = null;
     }

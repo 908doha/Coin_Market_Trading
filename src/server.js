@@ -13,7 +13,7 @@ const notificationsRouter = require('./routes/notifications');
 const app  = express();
 const PORT = process.env.PORT || 4000;
 
-// ── CORS ──────────────────────────────────────────────────────────
+// ── CORS ───────────────────────────────────────────────────────
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
@@ -54,7 +54,7 @@ app.get('/debug/gateio', async (_, res) => {
   const result = {
     keySet:    !!config.apiKey && config.apiKey.length > 0,
     secretSet: !!config.apiSecret && config.apiSecret.length > 0,
-    keyPrefix: config.apiKey   ? config.apiKey.slice(0, 6)   + '...' : '(없음)',
+    keyPrefix: config.apiKey ? config.apiKey.slice(0, 6) + '...' : '(없음)',
     futures:   null,
     spot:      null,
     error:     null,
@@ -82,7 +82,9 @@ app.get('/debug/gateio', async (_, res) => {
     if (spotRes.status === 'fulfilled') {
       const accounts = spotRes.value.body;
       const usdt = Array.isArray(accounts) ? accounts.find((a) => a.currency === 'USDT') : null;
-      result.spot = usdt ? { available: usdt.available, locked: usdt.locked } : { note: 'USDT 계좌 없음', raw: accounts?.slice(0, 3) };
+      result.spot = usdt
+        ? { available: usdt.available, locked: usdt.locked }
+        : { note: 'USDT 계좌 없음', raw: accounts?.slice(0, 3) };
     } else {
       result.spot = { error: spotRes.reason?.message };
     }

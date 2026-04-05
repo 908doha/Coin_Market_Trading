@@ -72,8 +72,8 @@ export function Input({
             paddingHorizontal: sc.paddingH,
             backgroundColor:   getBgColor(),
             borderRadius:      variant === 'underline' ? 0 : borderRadius.md,
-            borderWidth:       variant === 'underline' ? 0 : 1.5,
-            borderBottomWidth: variant === 'underline' ? 1.5 : 1.5,
+            borderWidth:       variant === 'underline' ? 0 : (focused ? 2.5 : 1.5),
+            borderBottomWidth: variant === 'underline' ? (focused ? 2.5 : 1.5) : (focused ? 2.5 : 1.5),
             borderColor:       getBorderColor(),
           },
         ]}

@@ -6,6 +6,11 @@ import {
   ActivityIndicator,
   View,
 } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+} from 'react-native-reanimated';
 import { Text } from '../Text';
 import { colors, spacing, borderRadius, textStyles } from '../../tokens';
 
@@ -24,15 +29,18 @@ export interface ButtonProps extends Omit<PressableProps, 'style'> {
   style?: import('react-native').ViewStyle;
 }
 
+const SPRING = { damping: 18, stiffness: 280, mass: 0.7 };
+
 const sizeConfig: Record<ButtonSize, {
   height: number;
   paddingHorizontal: number;
   radius: number;
-  textVariant: keyof typeof textStyles;
+  fontSize: number;
+  fontWeight: '400' | '500' | '600' | '700' | '800';
 }> = {
-  sm: { height: 36, paddingHorizontal: spacing[3], radius: borderRadius.md,  textVariant: 'label2' },
-  md: { height: 48, paddingHorizontal: spacing[5], radius: borderRadius.lg,  textVariant: 'label1Bold' },
-  lg: { height: 56, paddingHorizontal: spacing[5], radius: borderRadius.xl,  textVariant: 'body1Medium' },
+  sm: { height: 36, paddingHorizontal: spacing[3], radius: borderRadius.md,  fontSize: 13, fontWeight: '600' },
+  md: { height: 48, paddingHorizontal: spacing[5], radius: borderRadius.lg,  fontSize: 15, fontWeight: '600' },
+  lg: { height: 56, paddingHorizontal: spacing[5], radius: borderRadius.xl,  fontSize: 16, fontWeight: '700' },
 };
 
 const variantConfig: Record<ButtonVariant, {
@@ -97,44 +105,59 @@ export function Button({
   const vc = variantConfig[variant];
   const isDisabled = disabled || loading;
 
+  const scale = useSharedValue(1);
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+    alignSelf: fullWidth ? 'stretch' as const : 'flex-start' as const,
+  }));
+
   return (
-    <Pressable
-      disabled={isDisabled}
-      style={({ pressed }) => [
-        styles.base,
-        {
-          height:            sc.height,
-          paddingHorizontal: sc.paddingHorizontal,
-          borderRadius:      sc.radius,
-          backgroundColor:   isDisabled
-            ? vc.bgDisabled
-            : pressed ? vc.bgPressed : vc.bg,
-          borderWidth:       vc.borderColor ? StyleSheet.hairlineWidth * 2 : 0,
-          borderColor:       vc.borderColor ?? 'transparent',
-          alignSelf:         fullWidth ? 'stretch' : 'flex-start',
-        },
-        style,
-      ]}
-      {...props}
-    >
-      {loading ? (
-        <ActivityIndicator
-          size="small"
-          color={isDisabled ? colors.text.disabled : vc.textColor}
-        />
-      ) : (
-        <View style={styles.content}>
-          {leftIcon && <View style={styles.iconLeft}>{leftIcon}</View>}
-          <Text
-            variant={sc.textVariant}
-            color={isDisabled ? vc.textDisabled : vc.textColor}
-          >
-            {label}
-          </Text>
-          {rightIcon && <View style={styles.iconRight}>{rightIcon}</View>}
-        </View>
-      )}
-    </Pressable>
+    <Animated.View style={[animStyle, style]}>
+      <Pressable
+        disabled={isDisabled}
+        onPressIn={() => {
+          if (!isDisabled) scale.value = withSpring(0.95, SPRING);
+        }}
+        onPressOut={() => {
+          scale.value = withSpring(1, SPRING);
+        }}
+        style={({ pressed }) => [
+          styles.base,
+          {
+            height:            sc.height,
+            paddingHorizontal: sc.paddingHorizontal,
+            borderRadius:      sc.radius,
+            backgroundColor:   isDisabled
+              ? vc.bgDisabled
+              : pressed ? vc.bgPressed : vc.bg,
+            borderWidth:       vc.borderColor ? 1.5 : 0,
+            borderColor:       vc.borderColor ?? 'transparent',
+          },
+        ]}
+        {...props}
+      >
+        {loading ? (
+          <ActivityIndicator
+            size="small"
+            color={isDisabled ? colors.text.disabled : vc.textColor}
+          />
+        ) : (
+          <View style={styles.content}>
+            {leftIcon && <View style={styles.iconLeft}>{leftIcon}</View>}
+            <Text
+              style={{
+                fontSize:   sc.fontSize,
+                fontWeight: isDisabled ? '400' : sc.fontWeight,
+                color:      isDisabled ? vc.textDisabled : vc.textColor,
+              }}
+            >
+              {label}
+            </Text>
+            {rightIcon && <View style={styles.iconRight}>{rightIcon}</View>}
+          </View>
+        )}
+      </Pressable>
+    </Animated.View>
   );
 }
 
@@ -147,10 +170,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems:    'center',
   },
-  iconLeft: {
-    marginRight: spacing[1.5],
-  },
-  iconRight: {
-    marginLeft: spacing[1.5],
-  },
+  iconLeft:  { marginRight: spacing[1.5] },
+  iconRight: { marginLeft:  spacing[1.5] },
 });

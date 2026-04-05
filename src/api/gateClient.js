@@ -184,7 +184,7 @@ const gateClient = {
         return null;
       }
       // 둘 다 실패하면 포지션 없음으로 처리
-      logger.warn(`포지션 조회 실패 (포지션 없는 것으로 처리): ${err.message}`);
+      logger.debug(`포지션 없음 (${err.message})`);
       return null;
     }
   },

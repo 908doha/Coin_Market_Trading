@@ -6,7 +6,7 @@ import { Text, GlassCard, PressableScale, FadeTabView, AccountSkeleton, PageHead
 import { accountService, agentService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAuth } from '@/store/auth';
-import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
+import { formatKRW, formatKRWSigned } from '@/utils/format';
 import { RISK_LABELS } from '@/constants';
 
 const agentStatusMap = {
@@ -58,22 +58,12 @@ export default function Account() {
               <>
                 <Text variant="meta" color="#AEAEB2" style={{ marginBottom: 6 }}>총 자산</Text>
                 <Text style={styles.heroAmount}>{formatKRW(balance?.total ?? 0)}</Text>
-                <View style={styles.heroSubRow}>
-                  <Text style={[styles.heroPnl, {
-                    color: (balance?.profitTotal ?? 0) >= 0 ? '#FF4747' : '#246CF9',
-                  }]}>
-                    {formatKRWSigned(balance?.profitTotal ?? 0)}
-                  </Text>
-                  <View style={[styles.pnlBadge, {
-                    backgroundColor: (balance?.profitTotal ?? 0) >= 0 ? '#FFF0F0' : '#F0F0F0',
-                  }]}>
-                    <Text style={[styles.pnlBadgeText, {
-                      color: (balance?.profitTotal ?? 0) >= 0 ? '#D93025' : '#246CF9',
-                    }]}>
-                      {formatRate(balance?.profitRate ?? 0)}
-                    </Text>
-                  </View>
-                </View>
+                <Text style={[styles.heroPnl, {
+                  color: (balance?.profitTotal ?? 0) >= 0 ? '#FF4747' : '#246CF9',
+                  marginBottom: 4,
+                }]}>
+                  {formatKRWSigned(balance?.profitTotal ?? 0)}
+                </Text>
                 {balance?.totalUsdt != null && (
                   <Text variant="meta" color="#AEAEB2" style={{ marginTop: 4 }}>
                     ≈ {balance.totalUsdt.toFixed(2)} USDT

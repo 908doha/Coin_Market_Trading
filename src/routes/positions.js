@@ -15,7 +15,6 @@ async function getKrwRate() {
   return krwRate;
 }
 
-// DB에서 이 계약의 가장 최근 에이전트 판단 조회
 async function getAgentDecision(contract) {
   try {
     const db  = await getDb();
@@ -27,44 +26,43 @@ async function getAgentDecision(contract) {
   } catch { return null; }
 }
 
-// 기본 판단 근거 (DB에 기록이 없을 때 포지션 방향/가격으로 추론)
 function fallbackReason(contract, isLong, entryPrice, markPrice) {
-  const coin    = contract.replace('_USDT', '');
-  const dir     = isLong ? '롱(매수)' : '숏(매도)';
-  const pnlDir  = isLong
+  const coin   = contract.replace('_USDT', '');
+  const dir    = isLong ? '롱(매수)' : '숏(매도)';
+  const pnlDir = isLong
     ? (markPrice >= entryPrice ? '현재 수익 구간' : '현재 손실 구간')
     : (markPrice <= entryPrice ? '현재 수익 구간' : '현재 손실 구간');
   return {
-    reason: `AI 에이전트가 ${coin} ${dir} 포지션을 진입했습니다. ICT 멀티 타임프레임(HTF/MTF/LTF) 분석으로 추세 방향을 확인 후 진입한 포지션이며 ${pnlDir}입니다.`,
+    reason: `AI 에이전트가 ${coin} ${dir} 포지션을 진입했습니다. ICT 멀티 타임프레임 분석으로 추세 방향을 확인 후 진입한 포지션이며 ${pnlDir}입니다.`,
     plan:   `진입가 대비 +4% 도달 시 익절, -2% 이탈 시 손절로 운용 중입니다.`,
   };
 }
 
-// Gate.io 포지션 → 프론트 형태로 변환
 async function buildPosition(pos, rate) {
-  const contract    = pos.contract;              // e.g. "BTC_USDT"
-  const coin        = contract.replace('_USDT', '');
-  const symbol      = `${coin}/USDT`;
-  const isLong      = pos.size > 0;
-  const entryPrice  = parseFloat(pos.entryPrice);
-  const markPrice   = parseFloat(pos.markPrice);
-  const slPct       = 0.02;
-  const tpPct       = 0.04;
-  const stopLoss    = isLong
+  const contract   = pos.contract;
+  const coin       = contract.replace('_USDT', '');
+  const symbol     = `${coin}/USDT`;
+  // size can be number or string from Gate.io SDK
+  const sizeNum    = Number(pos.size);
+  const isLong     = sizeNum > 0;
+  const entryPrice = parseFloat(pos.entryPrice)  || 0;
+  const markPrice  = parseFloat(pos.markPrice)   || 0;
+  const slPct      = 0.02;
+  const tpPct      = 0.04;
+  const stopLoss   = isLong
     ? parseFloat((entryPrice * (1 - slPct)).toFixed(2))
     : parseFloat((entryPrice * (1 + slPct)).toFixed(2));
   const targetPrice = isLong
     ? parseFloat((entryPrice * (1 + tpPct)).toFixed(2))
     : parseFloat((entryPrice * (1 - tpPct)).toFixed(2));
 
-  const absSize     = Math.abs(pos.size);
-  const amount      = Math.round(entryPrice * absSize * rate / 1000) * 1000;
-  const currentVal  = Math.round(markPrice  * absSize * rate / 1000) * 1000;
-  const profit      = Math.round(parseFloat(pos.unrealisedPnl) * rate);
-  const profitRate  = amount > 0 ? parseFloat(((profit / amount) * 100).toFixed(2)) : 0;
+  const absSize    = Math.abs(sizeNum);
+  const amount     = Math.round(entryPrice * absSize * rate / 1000) * 1000;
+  const currentVal = Math.round(markPrice  * absSize * rate / 1000) * 1000;
+  const profit     = Math.round((parseFloat(pos.unrealisedPnl) || 0) * rate);
+  const profitRate = amount > 0 ? parseFloat(((profit / amount) * 100).toFixed(2)) : 0;
 
-  // DB에서 판단 근거 조회, 없으면 자동 생성
-  const decision = await getAgentDecision(contract);
+  const decision    = await getAgentDecision(contract);
   const agentReason = decision?.reason ?? fallbackReason(contract, isLong, entryPrice, markPrice).reason;
   const agentPlan   = decision?.plan   ?? fallbackReason(contract, isLong, entryPrice, markPrice).plan;
 
@@ -91,21 +89,18 @@ async function buildPosition(pos, rate) {
   };
 }
 
-// GET /positions  — Gate.io 전체 선물 포지션 조회
+// GET /positions
 router.get('/', requireAuth, async (req, res) => {
   try {
     const rate = await getKrwRate();
-
-    // 모든 열린 선물 포지션 조회 (계약별 필터 없음)
-    const { body: rawPositions } = await require('../api/gateClient')._futuresApi.listFuturesPositions('usdt');
-
-    // size === 0 이면 포지션 없음
-    const open = (rawPositions || []).filter((p) => p.size !== 0);
+    const { body: rawPositions } = await gateClient._futuresApi.listFuturesPositions('usdt');
+    // Number() handles both string "0" and number 0
+    const open = (rawPositions || []).filter((p) => Number(p.size) !== 0);
     if (!open.length) return res.json([]);
-
     const positions = await Promise.all(open.map((p) => buildPosition(p, rate)));
     res.json(positions);
   } catch (err) {
+    console.error('[positions] Gate.io 오류:', err.message, err.body || '');
     res.status(502).json({ message: `거래소 연결 오류: ${err.message}` });
   }
 });
@@ -114,16 +109,15 @@ router.get('/', requireAuth, async (req, res) => {
 router.get('/:id', requireAuth, async (req, res) => {
   try {
     const rate = await getKrwRate();
-    const { body: rawPositions } = await require('../api/gateClient')._futuresApi.listFuturesPositions('usdt');
-    const open = (rawPositions || []).filter((p) => p.size !== 0);
+    const { body: rawPositions } = await gateClient._futuresApi.listFuturesPositions('usdt');
+    const open = (rawPositions || []).filter((p) => Number(p.size) !== 0);
     if (!open.length) return res.status(404).json({ message: '포지션을 찾을 수 없어요.' });
-
-    // id 앞부분 코인명으로 매칭 (BTC-long-xxx → BTC)
     const coin = req.params.id.split('-')[0].toUpperCase();
     const raw  = open.find((p) => p.contract.startsWith(coin)) || open[0];
     const pos  = await buildPosition(raw, rate);
     res.json(pos);
   } catch (err) {
+    console.error('[positions/:id] Gate.io 오류:', err.message, err.body || '');
     res.status(502).json({ message: `거래소 연결 오류: ${err.message}` });
   }
 });

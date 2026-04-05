@@ -20,49 +20,51 @@ function getClient() {
   return new GateApi.FuturesApi(client);
 }
 
-// GET /trades — USDT 영구 선물 계좌 PnL 내역
+function parseEntry(e, i, rate) {
+  const profit       = Math.round((parseFloat(e.change) || 0) * rate);
+  const text         = e.text || '';
+  // Match contract name anywhere in text: "BTC_USDT", "BTC_USDT:close-long", etc.
+  const contractMatch = text.match(/([A-Z]+)_USDT/);
+  const coin         = contractMatch ? contractMatch[1] : 'UNKNOWN';
+  const symbol       = `${coin}/USDT`;
+  const isLong       = !text.toLowerCase().includes('short');
+  const ts           = (e.time || 0) * 1000;
+  return {
+    id:               String(e.id || i),
+    coin,
+    symbol,
+    direction:        isLong ? 'Long' : 'Short',
+    type:             profit >= 0 ? 'close' : 'stop_loss',
+    entryPrice:       0,
+    exitPrice:        0,
+    amount:           0,
+    profit,
+    profitRate:       0,
+    entryAt:          new Date(ts).toISOString().slice(0, 16).replace('T', ' '),
+    exitAt:           new Date(ts).toISOString().slice(0, 16).replace('T', ' '),
+    holdingDays:      1,
+    agentEntryReason: 'ICT 전략 신호 — HTF 추세 방향 + OTE 피보나치 구간 + FVG 진입.',
+    agentExitReason:  profit >= 0 ? 'TP(익절) 지정가 주문 자동 체결' : 'SL(손절) 지정가 주문 자동 체결',
+  };
+}
+
+// GET /trades
 router.get('/', requireAuth, async (req, res) => {
   try {
     const futuresApi = getClient();
-    const rate = await getKrwRate();
+    const rate       = await getKrwRate();
 
-    // 계좌 장부에서 PnL 항목 조회 (포지션 청산 시 기록됨)
     const { body: entries } = await futuresApi.listFuturesAccountBook('usdt', {
       type:  'pnl',
-      limit: 50,
-    }).catch(() => ({ body: [] }));
-
-    const trades = (entries || []).map((e, i) => {
-      const profit     = Math.round((parseFloat(e.change) || 0) * rate);
-      const text       = e.text || '';
-      const coinMatch  = text.match(/^([A-Z]+)_USDT/);
-      const coin       = coinMatch ? coinMatch[1] : 'BTC';
-      const symbol     = `${coin}/USDT`;
-      const isLong     = text.includes('long') || !text.includes('short');
-      const ts         = (e.time || 0) * 1000;
-
-      return {
-        id:               String(e.id || i),
-        coin,
-        symbol,
-        direction:        isLong ? 'Long' : 'Short',
-        type:             profit >= 0 ? 'close' : 'stop_loss',
-        entryPrice:       0,
-        exitPrice:        0,
-        amount:           0,
-        profit,
-        profitRate:       0,
-        entryAt:          new Date(ts).toISOString().slice(0, 16).replace('T', ' '),
-        exitAt:           new Date(ts).toISOString().slice(0, 16).replace('T', ' '),
-        holdingDays:      1,
-        agentEntryReason: 'ICT 전략 신호 — HTF 추세 방향 + OTE 피보나치 구간 + FVG 진입.',
-        agentExitReason:  profit >= 0 ? 'TP(익절) 지정가 주문 자동 체결' : 'SL(손절) 지정가 주문 자동 체결',
-      };
+      limit: 100,
     });
 
+    const trades = (entries || []).map((e, i) => parseEntry(e, i, rate));
+    console.info(`[trades] Gate.io PnL 항목 ${trades.length}건 조회`);
     res.json(trades);
   } catch (err) {
-    res.json([]); // 거래 내역 없으면 빈 배열
+    console.error('[trades] Gate.io 오류:', err.message, err.body || '');
+    res.status(502).json({ message: `거래소 연결 오류: ${err.message}` });
   }
 });
 
@@ -70,42 +72,19 @@ router.get('/', requireAuth, async (req, res) => {
 router.get('/:id', requireAuth, async (req, res) => {
   try {
     const futuresApi = getClient();
-    const rate = await getKrwRate();
+    const rate       = await getKrwRate();
 
     const { body: entries } = await futuresApi.listFuturesAccountBook('usdt', {
       type:  'pnl',
-      limit: 100,
-    }).catch(() => ({ body: [] }));
-
-    const trades = (entries || []).map((e, i) => {
-      const profit    = Math.round((parseFloat(e.change) || 0) * rate);
-      const text      = e.text || '';
-      const coinMatch = text.match(/^([A-Z]+)_USDT/);
-      const coin      = coinMatch ? coinMatch[1] : 'BTC';
-      const ts        = (e.time || 0) * 1000;
-      return {
-        id:               String(e.id || i),
-        coin,
-        symbol:           `${coin}/USDT`,
-        direction:        text.includes('short') ? 'Short' : 'Long',
-        type:             profit >= 0 ? 'close' : 'stop_loss',
-        entryPrice:       0,
-        exitPrice:        0,
-        amount:           0,
-        profit,
-        profitRate:       0,
-        entryAt:          new Date(ts).toISOString().slice(0, 16).replace('T', ' '),
-        exitAt:           new Date(ts).toISOString().slice(0, 16).replace('T', ' '),
-        holdingDays:      1,
-        agentEntryReason: 'ICT 전략 신호 — HTF 추세 방향 + OTE 피보나치 구간 + FVG 진입.',
-        agentExitReason:  profit >= 0 ? 'TP(익절) 자동 체결' : 'SL(손절) 자동 체결',
-      };
+      limit: 200,
     });
 
-    const trade = trades.find((t) => t.id === req.params.id);
+    const trades = (entries || []).map((e, i) => parseEntry(e, i, rate));
+    const trade  = trades.find((t) => t.id === req.params.id);
     if (!trade) return res.status(404).json({ message: '거래 내역을 찾을 수 없어요.' });
     res.json(trade);
   } catch (err) {
+    console.error('[trades/:id] Gate.io 오류:', err.message, err.body || '');
     res.status(502).json({ message: `거래소 연결 오류: ${err.message}` });
   }
 });

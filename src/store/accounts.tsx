@@ -7,7 +7,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
-import { accountService } from '../services/account.service';
+import { exchangeService } from '../services/exchange.service';
 import type { Balance } from '../services/account.service';
 
 export type ExchangeType = 'binance' | 'upbit' | 'bybit' | 'okx' | 'custom';
@@ -106,7 +106,11 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     const results = await Promise.all(
       list.map(async (acc) => {
         try {
-          const bal = await accountService.getBalanceByAccountId(acc.id);
+          const bal = await exchangeService.getBalance({
+            exchange:  acc.exchange,
+            apiKey:    acc.apiKey,
+            apiSecret: acc.apiSecret,
+          });
           return { id: acc.id, bal };
         } catch {
           return { id: acc.id, bal: null };

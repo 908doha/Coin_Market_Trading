@@ -1,24 +1,13 @@
 {
   "name": "coin-market-trading",
   "version": "1.0.0",
-  "description": "Gate.io Futures Trading Bot with ICT Strategy",
-  "main": "src/bot.js",
+  "description": "Gate.io ICT Trading Bot + Frontend App (Monorepo)",
+  "private": true,
+  "workspaces": ["bot", "frontend"],
   "scripts": {
-    "start": "node src/bot.js",
-    "dev": "node --watch src/bot.js",
-    "pm2:start": "pm2 start ecosystem.config.js",
-    "pm2:stop": "pm2 stop ict-trading-bot",
-    "pm2:restart": "pm2 restart ict-trading-bot",
-    "pm2:logs": "pm2 logs ict-trading-bot",
-    "pm2:status": "pm2 status"
-  },
-  "keywords": ["gateio", "trading", "bot", "ict", "futures"],
-  "license": "MIT",
-  "dependencies": {
-    "dotenv": "^16.3.1",
-    "gate-api": "^6.63.0",
-    "node-cron": "^3.0.3",
-    "node-telegram-bot-api": "^0.67.0",
-    "winston": "^3.11.0"
+    "bot:start": "cd bot && npm start",
+    "bot:dev": "cd bot && npm run dev",
+    "frontend:start": "cd frontend && npm start",
+    "frontend:web": "cd frontend && npm run web"
   }
 }

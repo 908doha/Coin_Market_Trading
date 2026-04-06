@@ -243,45 +243,48 @@ function AccountSelector({
   if (!accounts.length) return null;
 
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      style={styles.accountScroll}
-      contentContainerStyle={styles.accountScrollContent}
-    >
-      {/* 전체 chip */}
-      <Pressable
-        style={[styles.accountChip, selectedId === null && styles.accountChipActive]}
-        onPress={() => onSelect(null)}
+    <View style={styles.accountSelectorWrap}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.accountScrollContent}
       >
-        <Text style={[styles.accountChipText, selectedId === null && styles.accountChipTextActive]}>
-          전체
-        </Text>
-      </Pressable>
+        {/* 모든 계좌 */}
+        <Pressable
+          style={[styles.accountChip, selectedId === null && styles.accountChipActive]}
+          onPress={() => onSelect(null)}
+        >
+          <Text style={[styles.accountChipText, selectedId === null && styles.accountChipTextActive]}>
+            모든 계좌
+          </Text>
+        </Pressable>
 
-      {accounts.map((acc) => {
-        const selected = selectedId === acc.id;
-        const color    = EXCHANGE_COLORS[acc.exchange];
-        return (
-          <Pressable
-            key={acc.id}
-            style={[
-              styles.accountChip,
-              selected && { backgroundColor: color + '18', borderColor: color },
-            ]}
-            onPress={() => onSelect(acc.id)}
-          >
-            <View style={[styles.accountDot, { backgroundColor: color }]} />
-            <Text style={[
-              styles.accountChipText,
-              selected && { color },
-            ]} numberOfLines={1}>
-              {acc.name || EXCHANGE_LABELS[acc.exchange]}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </ScrollView>
+        {accounts.map((acc) => {
+          const selected = selectedId === acc.id;
+          const color    = EXCHANGE_COLORS[acc.exchange];
+          return (
+            <Pressable
+              key={acc.id}
+              style={[
+                styles.accountChip,
+                selected
+                  ? { backgroundColor: color + '18', borderColor: color }
+                  : {},
+              ]}
+              onPress={() => onSelect(acc.id)}
+            >
+              <View style={[styles.accountDot, { backgroundColor: color }]} />
+              <Text
+                style={[styles.accountChipText, selected && { color }]}
+                numberOfLines={1}
+              >
+                {acc.name || EXCHANGE_LABELS[acc.exchange]}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+    </View>
   );
 }
 
@@ -391,18 +394,26 @@ export default function Trading() {
 const styles = StyleSheet.create({
   root:    { flex: 1, backgroundColor: '#F5F5F5' },
 
-  accountScroll:        { marginBottom: 12 },
-  accountScrollContent: { paddingHorizontal: 20, gap: 8 },
+  accountSelectorWrap: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#EBEBEB',
+    marginBottom: 16,
+  },
+  accountScrollContent: {
+    paddingHorizontal: 20,
+    paddingVertical:   12,
+    gap:               8,
+  },
   accountChip: {
-    flexDirection:    'row',
-    alignItems:       'center',
-    gap:              6,
+    flexDirection:     'row',
+    alignItems:        'center',
+    gap:               6,
     paddingHorizontal: 14,
     paddingVertical:   8,
-    borderRadius:     999,
-    borderWidth:      1.5,
-    borderColor:      '#E2E2E2',
-    backgroundColor:  '#FFFFFF',
+    borderRadius:      999,
+    borderWidth:       1.5,
+    borderColor:       '#E2E2E2',
+    backgroundColor:   '#FFFFFF',
   },
   accountChipActive: {
     backgroundColor: '#191919',
@@ -412,7 +423,7 @@ const styles = StyleSheet.create({
     width: 7, height: 7, borderRadius: 4,
   },
   accountChipText: {
-    fontSize: 13, fontWeight: '600', color: '#AEAEB2', maxWidth: 110,
+    fontSize: 13, fontWeight: '600', color: '#AEAEB2', maxWidth: 120,
   },
   accountChipTextActive: {
     color: '#FFFFFF',

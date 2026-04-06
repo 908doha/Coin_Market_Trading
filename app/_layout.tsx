@@ -6,6 +6,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useFonts } from 'expo-font';
 import { colors } from '@/design-system/tokens';
 import { AuthProvider } from '@/store/auth';
+import { AccountsProvider } from '@/store/accounts';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -26,8 +27,10 @@ export default function RootLayout() {
 
   return (
     <AuthProvider>
-      <StatusBar style="dark" backgroundColor="#F5F5F5" />
-      <Stack screenOptions={{ headerShown: false }} />
+      <AccountsProvider>
+        <StatusBar style="dark" backgroundColor="#F5F5F5" />
+        <Stack screenOptions={{ headerShown: false }} />
+      </AccountsProvider>
     </AuthProvider>
   );
 }

@@ -7,7 +7,6 @@ import { accountService, agentService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAuth } from '@/store/auth';
 import { formatKRW } from '@/utils/format';
-import { RISK_LABELS } from '@/constants';
 
 const agentStatusMap = {
   running: { label: '운용중',   color: '#1AC24E', bg: '#EDFBF3' },
@@ -102,6 +101,17 @@ export default function Account() {
 
           {/* 메뉴 */}
           <GlassCard intensity="low" radius={24} padding={0} style={styles.section}>
+            <PressableScale onPress={() => router.push('/(main)/account/api-accounts')} scaleTo={0.98}>
+              <View style={styles.menuRow}>
+                <View style={styles.menuIcon}><Text style={{ fontSize: 18 }}>🔌</Text></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.menuLabel}>API 연결 관리</Text>
+                  <Text variant="meta" color="#AEAEB2">거래소 API 키 등록·관리</Text>
+                </View>
+                <Text style={styles.menuArrow}>›</Text>
+              </View>
+            </PressableScale>
+            <View style={styles.menuDivider} />
             <PressableScale onPress={() => router.push('/(main)/account/agent-settings')} scaleTo={0.98}>
               <View style={styles.menuRow}>
                 <View style={styles.menuIcon}><Text style={{ fontSize: 18 }}>🤖</Text></View>
@@ -109,7 +119,6 @@ export default function Account() {
                   <Text style={styles.menuLabel}>AI 에이전트 설정</Text>
                   <Text variant="meta" color="#AEAEB2">
                     {agentStats?.status === 'running' ? '운용 중' : agentStatus.label}
-                    {agentStats?.riskLevel ? ` · ${RISK_LABELS[agentStats.riskLevel]}` : ''}
                   </Text>
                 </View>
                 <Text style={styles.menuArrow}>›</Text>

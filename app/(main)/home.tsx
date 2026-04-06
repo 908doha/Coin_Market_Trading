@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import Svg, { Polyline, Defs, LinearGradient, Stop, Polygon } from 'react-native-svg';
 import { Text, GlassCard, PeriodSelector, PressableScale, FadeTabView, AssetCardSkeleton, PageHeader } from '@/design-system';
 import { accountService, agentService, positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
@@ -17,25 +18,60 @@ const agentStatusMap = {
   waiting: { label: '대기중',   color: '#AEAEB2', bg: '#F5F5F5' },
 };
 
-// ── 미니 차트 ─────────────────────────────────────────────────────────────────
+// ── 라인 차트 ──────────────────────────────────────────────────────────────────
+const CHART_H = 64;
+const CHART_W = 600; // viewBox width — scales with container
+
 function MiniChart({ data, positive }: { data: { value: number }[]; positive: boolean }) {
-  if (!data?.length) return <View style={{ height: 52 }} />;
+  if (!data?.length) return <View style={{ height: CHART_H }} />;
+
   const values = data.map((d) => d.value);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-  const lineColor = positive ? '#FF4747' : '#246CF9';
+  const min    = Math.min(...values);
+  const max    = Math.max(...values);
+  const range  = max - min || 1;
+  const color  = positive ? '#FF4747' : '#246CF9';
+
+  const n = values.length;
+  // Map to SVG coordinates; leave 2px padding top/bottom so stroke isn't clipped
+  const pts = values.map((v, i) => {
+    const x = (i / (n - 1)) * CHART_W;
+    const y = 2 + (1 - (v - min) / range) * (CHART_H - 4);
+    return `${x},${y}`;
+  });
+
+  // Closed polygon for the fill area (line points + bottom-right + bottom-left)
+  const fillPts = [
+    ...pts,
+    `${CHART_W},${CHART_H}`,
+    `0,${CHART_H}`,
+  ].join(' ');
+
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'flex-end', height: 52, gap: 2 }}>
-      {values.map((v, i) => {
-        const h = Math.max(3, ((v - min) / range) * 52);
-        return (
-          <View key={i} style={{
-            flex: 1, height: h, borderRadius: 2,
-            backgroundColor: i === values.length - 1 ? lineColor : lineColor + '40',
-          }} />
-        );
-      })}
+    <View style={{ height: CHART_H }}>
+      <Svg
+        width="100%"
+        height={CHART_H}
+        viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+        preserveAspectRatio="none"
+      >
+        <Defs>
+          <LinearGradient id="chartFill" x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0"   stopColor={color} stopOpacity="0.18" />
+            <Stop offset="1"   stopColor={color} stopOpacity="0"    />
+          </LinearGradient>
+        </Defs>
+        {/* Fill area */}
+        <Polygon points={fillPts} fill="url(#chartFill)" />
+        {/* Line */}
+        <Polyline
+          points={pts.join(' ')}
+          fill="none"
+          stroke={color}
+          strokeWidth="2.5"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+      </Svg>
     </View>
   );
 }

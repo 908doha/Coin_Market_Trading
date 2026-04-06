@@ -10,7 +10,7 @@ import { Platform } from 'react-native';
 import { exchangeService } from '../services/exchange.service';
 import type { Balance } from '../services/account.service';
 
-export type ExchangeType = 'binance' | 'upbit' | 'bybit' | 'okx' | 'custom';
+export type ExchangeType = 'binance' | 'upbit' | 'bybit' | 'okx' | 'gate' | 'custom';
 
 export interface ExchangeAccount {
   id:         string;
@@ -184,6 +184,7 @@ export const EXCHANGE_LABELS: Record<ExchangeType, string> = {
   upbit:   'Upbit',
   bybit:   'Bybit',
   okx:     'OKX',
+  gate:    'Gate.io',
   custom:  'Custom',
 };
 
@@ -192,5 +193,6 @@ export const EXCHANGE_COLORS: Record<ExchangeType, string> = {
   upbit:   '#0062FF',
   bybit:   '#F7A600',
   okx:     '#000000',
+  gate:    '#2354E6',
   custom:  '#888888',
 };

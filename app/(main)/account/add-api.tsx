@@ -6,7 +6,7 @@ import { Text, Input, Button, SubPageHeader, ScreenTransition, GlassCard } from 
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { useAccounts, ExchangeType, EXCHANGE_LABELS, EXCHANGE_COLORS } from '@/store/accounts';
 
-const EXCHANGES: ExchangeType[] = ['binance', 'upbit', 'bybit', 'okx', 'custom'];
+const EXCHANGES: ExchangeType[] = ['binance', 'upbit', 'bybit', 'okx', 'gate', 'custom'];
 
 export default function AddApi() {
   const { addAccount } = useAccounts();

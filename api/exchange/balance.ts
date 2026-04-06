@@ -265,6 +265,66 @@ async function fetchOkxBalance(apiKey: string, apiSecret: string, passphrase: st
   };
 }
 
+// ── Gate.io ───────────────────────────────────────────────────────────────────
+async function fetchGateBalance(apiKey: string, apiSecret: string): Promise<Balance> {
+  const usdtKrw   = await getUsdtKrwRate();
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const method    = 'GET';
+  const path      = '/api/v4/spot/accounts';
+  const queryStr  = '';
+  const bodyHash  = crypto.createHash('sha512').update('').digest('hex');
+  const toSign    = `${method}\n${path}\n${queryStr}\n${bodyHash}\n${timestamp}`;
+  const signature = crypto.createHmac('sha512', apiSecret).update(toSign).digest('hex');
+
+  const res = await fetch(`https://api.gateio.ws${path}`, {
+    headers: {
+      'KEY':       apiKey,
+      'SIGN':      signature,
+      'Timestamp': timestamp,
+    },
+  });
+  if (!res.ok) throw new Error(`Gate.io API error: ${res.status}`);
+  const accounts: any[] = await res.json();
+
+  let totalUsdt = 0;
+  let availUsdt = 0;
+
+  const usdtAcct = accounts.find((a) => a.currency === 'USDT');
+  if (usdtAcct) {
+    availUsdt += parseFloat(usdtAcct.available ?? '0');
+    totalUsdt += parseFloat(usdtAcct.available ?? '0') + parseFloat(usdtAcct.locked ?? '0');
+  }
+
+  const others = accounts.filter(
+    (a) => a.currency !== 'USDT' &&
+           (parseFloat(a.available ?? '0') + parseFloat(a.locked ?? '0')) > 0,
+  );
+  if (others.length) {
+    const pairs = others.map((a) => `${a.currency}_USDT`).join(',');
+    try {
+      const pr = await fetch(`https://api.gateio.ws/api/v4/spot/tickers?currency_pair=${pairs}`);
+      const tickers: any[] = await pr.json();
+      const priceMap: Record<string, number> = {};
+      tickers.forEach((t) => { priceMap[t.currency_pair] = parseFloat(t.last ?? '0'); });
+      others.forEach((a) => {
+        const price  = priceMap[`${a.currency}_USDT`] ?? 0;
+        const amount = parseFloat(a.available ?? '0') + parseFloat(a.locked ?? '0');
+        totalUsdt += amount * price;
+      });
+    } catch {}
+  }
+
+  return {
+    total:           Math.round(totalUsdt                 * usdtKrw),
+    available:       Math.round(availUsdt                 * usdtKrw),
+    invested:        Math.round((totalUsdt - availUsdt)   * usdtKrw),
+    profitTotal:     0,
+    profitRate:      0,
+    profitToday:     0,
+    profitTodayRate: 0,
+  };
+}
+
 // ── Handler ───────────────────────────────────────────────────────────────────
 export default async function handler(req: any, res: any) {
   // CORS preflight
@@ -294,6 +354,9 @@ export default async function handler(req: any, res: any) {
         break;
       case 'okx':
         balance = await fetchOkxBalance(apiKey, apiSecret, passphrase ?? '');
+        break;
+      case 'gate':
+        balance = await fetchGateBalance(apiKey, apiSecret);
         break;
       default:
         return res.status(400).set(CORS).json({ error: `Unsupported exchange: ${exchange}` });

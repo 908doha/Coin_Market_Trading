@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
+import { View, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Animated, {
@@ -11,6 +11,7 @@ import {
 import { positionsService, tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
+import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS } from '@/store/accounts';
 import type { Trade, Position } from '@/services';
 
 type MainTab      = 'positions' | 'history';
@@ -229,10 +230,67 @@ function HistoryContent({ trades }: { trades: Trade[] | null }) {
 }
 
 // ─────────────────────────────────────────────
+//  Account Selector
+// ─────────────────────────────────────────────
+function AccountSelector({
+  selectedId,
+  onSelect,
+}: {
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+}) {
+  const { accounts } = useAccounts();
+  if (!accounts.length) return null;
+
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={styles.accountScroll}
+      contentContainerStyle={styles.accountScrollContent}
+    >
+      {/* 전체 chip */}
+      <Pressable
+        style={[styles.accountChip, selectedId === null && styles.accountChipActive]}
+        onPress={() => onSelect(null)}
+      >
+        <Text style={[styles.accountChipText, selectedId === null && styles.accountChipTextActive]}>
+          전체
+        </Text>
+      </Pressable>
+
+      {accounts.map((acc) => {
+        const selected = selectedId === acc.id;
+        const color    = EXCHANGE_COLORS[acc.exchange];
+        return (
+          <Pressable
+            key={acc.id}
+            style={[
+              styles.accountChip,
+              selected && { backgroundColor: color + '18', borderColor: color },
+            ]}
+            onPress={() => onSelect(acc.id)}
+          >
+            <View style={[styles.accountDot, { backgroundColor: color }]} />
+            <Text style={[
+              styles.accountChipText,
+              selected && { color },
+            ]} numberOfLines={1}>
+              {acc.name || EXCHANGE_LABELS[acc.exchange]}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </ScrollView>
+  );
+}
+
+// ─────────────────────────────────────────────
 //  Main Screen
 // ─────────────────────────────────────────────
 export default function Trading() {
-  const [tab, setTab] = useState<MainTab>('positions');
+  const [tab, setTab]               = useState<MainTab>('positions');
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
 
   const { data: positions, isLoading: posLoading }  = useApi(() => positionsService.getAll(), []);
   const { data: trades,    isLoading: tradeLoading } = useApi(() => tradesService.getAll(), []);
@@ -261,11 +319,17 @@ export default function Trading() {
 
   const isLoading = tab === 'positions' ? posLoading : tradeLoading;
 
+  const filteredPositions = positions ?? [];
+  const filteredTrades    = trades    ?? [];
+
   return (
     <FadeTabView style={styles.root}>
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
 
         <PageHeader title="트레이딩" />
+
+        {/* ── Account Selector ── */}
+        <AccountSelector selectedId={selectedAccountId} onSelect={setSelectedAccountId} />
 
         {/* ── Segment Control ── */}
         <View style={styles.segWrap}>
@@ -296,22 +360,22 @@ export default function Trading() {
             {isLoading ? (
               <TradingListSkeleton />
             ) : tab === 'positions' ? (
-              !positions?.length ? (
+              !filteredPositions.length ? (
                 <GlassCard intensity="low" radius={20} padding={48} style={{ alignItems: 'center' }}>
                   <Text variant="body2" color="#AEAEB2">활성 포지션이 없어요</Text>
                 </GlassCard>
               ) : (
                 <>
-                  <PortfolioSummary positions={positions} />
+                  <PortfolioSummary positions={filteredPositions} />
                   <GlassCard intensity="medium" radius={20} padding={0} style={{ overflow: 'hidden' }}>
-                    {positions.map((pos, i) => (
-                      <PositionCard key={pos.id} pos={pos} isLast={i === positions.length - 1} />
+                    {filteredPositions.map((pos, i) => (
+                      <PositionCard key={pos.id} pos={pos} isLast={i === filteredPositions.length - 1} />
                     ))}
                   </GlassCard>
                 </>
               )
             ) : (
-              <HistoryContent trades={trades ?? null} />
+              <HistoryContent trades={filteredTrades} />
             )}
           </Animated.View>
           <View style={{ height: 120 }} />
@@ -326,6 +390,33 @@ export default function Trading() {
 // ─────────────────────────────────────────────
 const styles = StyleSheet.create({
   root:    { flex: 1, backgroundColor: '#F5F5F5' },
+
+  accountScroll:        { marginBottom: 12 },
+  accountScrollContent: { paddingHorizontal: 20, gap: 8 },
+  accountChip: {
+    flexDirection:    'row',
+    alignItems:       'center',
+    gap:              6,
+    paddingHorizontal: 14,
+    paddingVertical:   8,
+    borderRadius:     999,
+    borderWidth:      1.5,
+    borderColor:      '#E2E2E2',
+    backgroundColor:  '#FFFFFF',
+  },
+  accountChipActive: {
+    backgroundColor: '#191919',
+    borderColor:     '#191919',
+  },
+  accountDot: {
+    width: 7, height: 7, borderRadius: 4,
+  },
+  accountChipText: {
+    fontSize: 13, fontWeight: '600', color: '#AEAEB2', maxWidth: 110,
+  },
+  accountChipTextActive: {
+    color: '#FFFFFF',
+  },
 
   segWrap: { paddingHorizontal: 20, paddingBottom: 20 },
   seg:     { flexDirection: 'row' },

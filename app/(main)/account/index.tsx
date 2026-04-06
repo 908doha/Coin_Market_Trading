@@ -105,8 +105,8 @@ export default function Account() {
               <View style={styles.menuRow}>
                 <View style={styles.menuIcon}><Text style={{ fontSize: 18 }}>🔌</Text></View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.menuLabel}>API 연결 관리</Text>
-                  <Text variant="meta" color="#AEAEB2">거래소 API 키 등록·관리</Text>
+                  <Text style={styles.menuLabel}>계좌 연결</Text>
+                  <Text variant="meta" color="#AEAEB2">거래소 계좌 등록·관리</Text>
                 </View>
                 <Text style={styles.menuArrow}>›</Text>
               </View>

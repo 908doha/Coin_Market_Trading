@@ -4,9 +4,11 @@
  * - SecureStore on mobile, localStorage on web (same pattern as tokenStorage)
  */
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+import { accountService } from '../services/account.service';
+import type { Balance } from '../services/account.service';
 
 export type ExchangeType = 'binance' | 'upbit' | 'bybit' | 'okx' | 'custom';
 
@@ -52,18 +54,43 @@ function makeId(): string {
 // ── Context ───────────────────────────────────────────────────────────────────
 
 interface AccountsContextValue {
-  accounts:      ExchangeAccount[];
-  isLoading:     boolean;
-  addAccount:    (input: Omit<ExchangeAccount, 'id' | 'createdAt'>) => Promise<ExchangeAccount>;
-  updateAccount: (id: string, updates: Partial<Omit<ExchangeAccount, 'id' | 'createdAt'>>) => Promise<void>;
-  removeAccount: (id: string) => Promise<void>;
+  accounts:       ExchangeAccount[];
+  balances:       Record<string, Balance | null>;  // keyed by account.id
+  totalBalance:   Balance | null;                   // sum of all balances
+  balancesLoading: boolean;
+  isLoading:      boolean;
+  addAccount:     (input: Omit<ExchangeAccount, 'id' | 'createdAt'>) => Promise<ExchangeAccount>;
+  updateAccount:  (id: string, updates: Partial<Omit<ExchangeAccount, 'id' | 'createdAt'>>) => Promise<void>;
+  removeAccount:  (id: string) => Promise<void>;
+  refreshBalances: () => Promise<void>;
 }
 
 const AccountsContext = createContext<AccountsContextValue | null>(null);
 
+function sumBalances(bals: (Balance | null)[]): Balance | null {
+  const valid = bals.filter((b): b is Balance => b !== null);
+  if (!valid.length) return null;
+  return valid.reduce<Balance>(
+    (acc, b) => ({
+      total:          acc.total          + b.total,
+      invested:       acc.invested       + b.invested,
+      available:      acc.available      + b.available,
+      profitTotal:    acc.profitTotal    + b.profitTotal,
+      profitRate:     acc.profitRate     + b.profitRate,   // 단순 합산 (평균은 별도 계산)
+      profitToday:    acc.profitToday    + b.profitToday,
+      profitTodayRate: acc.profitTodayRate + b.profitTodayRate,
+    }),
+    { total: 0, invested: 0, available: 0, profitTotal: 0, profitRate: 0, profitToday: 0, profitTodayRate: 0 },
+  );
+}
+
 export function AccountsProvider({ children }: { children: React.ReactNode }) {
-  const [accounts, setAccounts]   = useState<ExchangeAccount[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [accounts, setAccounts]           = useState<ExchangeAccount[]>([]);
+  const [isLoading, setIsLoading]         = useState(true);
+  const [balances, setBalances]           = useState<Record<string, Balance | null>>({});
+  const [balancesLoading, setBalLoading]  = useState(false);
+  const accountsRef = useRef(accounts);
+  accountsRef.current = accounts;
 
   useEffect(() => {
     loadAccounts().then((data) => {
@@ -71,6 +98,35 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
       setIsLoading(false);
     });
   }, []);
+
+  const refreshBalances = useCallback(async () => {
+    const list = accountsRef.current;
+    if (!list.length) return;
+    setBalLoading(true);
+    const results = await Promise.all(
+      list.map(async (acc) => {
+        try {
+          const bal = await accountService.getBalanceByAccountId(acc.id);
+          return { id: acc.id, bal };
+        } catch {
+          return { id: acc.id, bal: null };
+        }
+      }),
+    );
+    const map: Record<string, Balance | null> = {};
+    results.forEach(({ id, bal }) => { map[id] = bal; });
+    setBalances(map);
+    setBalLoading(false);
+  }, []);
+
+  // 계정 목록 로드되면 잔고 자동 fetch
+  useEffect(() => {
+    if (!isLoading && accounts.length > 0) refreshBalances();
+  }, [isLoading, accounts.length]);
+
+  const totalBalance = accounts.length
+    ? sumBalances(accounts.map((a) => balances[a.id] ?? null))
+    : null;
 
   const addAccount = useCallback(async (
     input: Omit<ExchangeAccount, 'id' | 'createdAt'>,
@@ -80,29 +136,34 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
       id:        makeId(),
       createdAt: new Date().toISOString(),
     };
-    const next = [...accounts, account];
+    const next = [...accountsRef.current, account];
     await saveAccounts(next);
     setAccounts(next);
     return account;
-  }, [accounts]);
+  }, []);
 
   const updateAccount = useCallback(async (
     id: string,
     updates: Partial<Omit<ExchangeAccount, 'id' | 'createdAt'>>,
   ): Promise<void> => {
-    const next = accounts.map((a) => a.id === id ? { ...a, ...updates } : a);
+    const next = accountsRef.current.map((a) => a.id === id ? { ...a, ...updates } : a);
     await saveAccounts(next);
     setAccounts(next);
-  }, [accounts]);
+  }, []);
 
   const removeAccount = useCallback(async (id: string): Promise<void> => {
-    const next = accounts.filter((a) => a.id !== id);
+    const next = accountsRef.current.filter((a) => a.id !== id);
     await saveAccounts(next);
     setAccounts(next);
-  }, [accounts]);
+    setBalances((prev) => { const n = { ...prev }; delete n[id]; return n; });
+  }, []);
 
   return (
-    <AccountsContext.Provider value={{ accounts, isLoading, addAccount, updateAccount, removeAccount }}>
+    <AccountsContext.Provider value={{
+      accounts, isLoading,
+      balances, totalBalance, balancesLoading,
+      addAccount, updateAccount, removeAccount, refreshBalances,
+    }}>
       {children}
     </AccountsContext.Provider>
   );

@@ -42,6 +42,10 @@ export const accountService = {
   getBalance: () =>
     client.get<Balance>('/account/balance'),
 
+  /** 특정 거래소 계정의 잔고 (백엔드: GET /account/balance?exchange_account_id=xxx) */
+  getBalanceByAccountId: (exchangeAccountId: string) =>
+    client.get<Balance>(`/account/balance?exchange_account_id=${exchangeAccountId}`),
+
   getChart: (period: ChartPeriod) =>
     client.get<ChartPoint[]>(`/account/chart?period=${period}`),
 

@@ -5,7 +5,8 @@ import { router } from 'expo-router';
 import { Text, GlassCard, PeriodSelector, PressableScale, FadeTabView, AssetCardSkeleton, PageHeader } from '@/design-system';
 import { accountService, agentService, positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
-import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS } from '@/store/accounts';
+import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeAccount } from '@/store/accounts';
+import type { Balance } from '@/services';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 
 const PERIODS = ['1W', '1M', '3M', '6M', '1Y'] as const;
@@ -40,9 +41,10 @@ function MiniChart({ data, positive }: { data: { value: number }[]; positive: bo
 }
 
 // ── 연결된 API 계정 카드 ──────────────────────────────────────────────────────
-function AccountCard({ account }: { account: ReturnType<typeof useAccounts>['accounts'][0] }) {
-  const color = EXCHANGE_COLORS[account.exchange];
+function AccountCard({ account, balance }: { account: ExchangeAccount; balance: Balance | null }) {
+  const color  = EXCHANGE_COLORS[account.exchange];
   const status = agentStatusMap[account.agentId ? 'running' : 'waiting'];
+  const isProfit = (balance?.profitTotal ?? 0) >= 0;
   return (
     <GlassCard style={styles.accountCard} intensity="low" radius={20} padding={16}>
       <View style={styles.accountCardHeader}>
@@ -52,26 +54,40 @@ function AccountCard({ account }: { account: ReturnType<typeof useAccounts>['acc
           <Text style={[styles.statusPillText, { color: status.color }]}>{status.label}</Text>
         </View>
       </View>
-      <Text style={styles.accountName} numberOfLines={1}>
-        {account.name}
-      </Text>
-      {account.agentId ? (
-        <Text style={styles.agentIdText}>🤖 {account.agentId}</Text>
+      <Text style={styles.accountName} numberOfLines={1}>{account.name}</Text>
+      {balance ? (
+        <>
+          <Text style={styles.accountBalance}>{formatKRW(balance.total)}</Text>
+          <Text style={[styles.accountPnl, { color: isProfit ? '#FF4747' : '#246CF9' }]}>
+            {formatKRWSigned(balance.profitTotal)}
+          </Text>
+        </>
       ) : (
-        <Text style={styles.noAgentText}>에이전트 미설정</Text>
+        <Text style={styles.noAgentText}>잔고 로딩 중...</Text>
       )}
+      {account.agentId
+        ? <Text style={styles.agentIdText}>🤖 {account.agentId}</Text>
+        : <Text style={styles.noAgentText}>에이전트 미설정</Text>
+      }
     </GlassCard>
   );
 }
 
 export default function Home() {
   const [period, setPeriod] = useState<typeof PERIODS[number]>('1M');
-  const { accounts } = useAccounts();
+  const { accounts, balances, totalBalance, balancesLoading } = useAccounts();
 
-  const { data: balance,    isLoading: balLoading } = useApi(() => accountService.getBalance(), []);
-  const { data: chart }                              = useApi(() => accountService.getChart(period), [period]);
-  const { data: agentStats }                         = useApi(() => agentService.getStats(), []);
-  const { data: positions }                          = useApi(() => positionsService.getAll(), []);
+  // 연결된 계정 있으면 그 합산 잔고, 없으면 기존 단일 API 잔고
+  const { data: singleBalance, isLoading: singleLoading } = useApi(
+    () => accounts.length === 0 ? accountService.getBalance() : Promise.resolve(null),
+    [accounts.length],
+  );
+  const { data: chart }      = useApi(() => accountService.getChart(period), [period]);
+  const { data: agentStats } = useApi(() => agentService.getStats(), []);
+  const { data: positions }  = useApi(() => positionsService.getAll(), []);
+
+  const balance   = accounts.length > 0 ? totalBalance : singleBalance;
+  const balLoading = accounts.length > 0 ? balancesLoading : singleLoading;
 
   const isProfit    = (balance?.profitTotal ?? 0) >= 0;
   const agentStatus = agentStatusMap[agentStats?.status ?? 'waiting'];
@@ -159,7 +175,7 @@ export default function Home() {
               style={styles.section}
             >
               {accounts.map((acc) => (
-                <AccountCard key={acc.id} account={acc} />
+                <AccountCard key={acc.id} account={acc} balance={balances[acc.id] ?? null} />
               ))}
             </ScrollView>
           )}
@@ -282,9 +298,11 @@ const styles = StyleSheet.create({
   exchangeName: { fontSize: 13, fontWeight: '700', flex: 1 },
   statusPill:   { borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2 },
   statusPillText: { fontSize: 10, fontWeight: '600' },
-  accountName:  { fontSize: 14, fontWeight: '600', color: '#191919', marginBottom: 4 },
-  agentIdText:  { fontSize: 12, color: '#555555' },
-  noAgentText:  { fontSize: 12, color: '#AEAEB2' },
+  accountName:    { fontSize: 14, fontWeight: '600', color: '#191919', marginBottom: 4 },
+  accountBalance: { fontSize: 15, fontWeight: '700', color: '#191919', marginBottom: 2 },
+  accountPnl:     { fontSize: 12, fontWeight: '600', marginBottom: 4 },
+  agentIdText:    { fontSize: 12, color: '#555555' },
+  noAgentText:    { fontSize: 12, color: '#AEAEB2' },
 
   emptyAccounts:     { alignItems: 'center', gap: 8 },
   emptyAccountsText: { fontSize: 13, color: '#AEAEB2' },

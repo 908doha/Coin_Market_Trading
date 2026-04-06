@@ -76,36 +76,50 @@ function MiniChart({ data, positive }: { data: { value: number }[]; positive: bo
   );
 }
 
-// ── 연결된 API 계정 카드 ──────────────────────────────────────────────────────
-function AccountCard({ account, balance }: { account: ExchangeAccount; balance: Balance | null }) {
-  const color  = EXCHANGE_COLORS[account.exchange];
-  const status = agentStatusMap[account.agentId ? 'running' : 'waiting'];
+// ── 연결된 계정 행 ────────────────────────────────────────────────────────────
+function AccountRow({
+  account,
+  balance,
+  isLast,
+}: {
+  account:  ExchangeAccount;
+  balance:  Balance | null;
+  isLast:   boolean;
+}) {
+  const color    = EXCHANGE_COLORS[account.exchange];
   const isProfit = (balance?.profitTotal ?? 0) >= 0;
   return (
-    <GlassCard style={styles.accountCard} intensity="low" radius={20} padding={16}>
-      <View style={styles.accountCardHeader}>
-        <View style={[styles.exchangeDot, { backgroundColor: color }]} />
-        <Text style={[styles.exchangeName, { color }]}>{EXCHANGE_LABELS[account.exchange]}</Text>
-        <View style={[styles.statusPill, { backgroundColor: status.bg }]}>
-          <Text style={[styles.statusPillText, { color: status.color }]}>{status.label}</Text>
+    <PressableScale
+      onPress={() => router.push('/(main)/account/api-accounts')}
+      scaleTo={0.99}
+    >
+      <View style={[accRow.wrap, !isLast && accRow.border]}>
+        {/* 왼쪽: 거래소 뱃지 + 이름 */}
+        <View style={[accRow.badge, { backgroundColor: color + '18' }]}>
+          <View style={[accRow.dot, { backgroundColor: color }]} />
+          <Text style={[accRow.exchange, { color }]} numberOfLines={1}>
+            {EXCHANGE_LABELS[account.exchange]}
+          </Text>
+        </View>
+        <Text style={accRow.name} numberOfLines={1}>
+          {account.name || EXCHANGE_LABELS[account.exchange]}
+        </Text>
+
+        {/* 오른쪽: 잔고 + 손익 */}
+        <View style={accRow.right}>
+          {balance ? (
+            <>
+              <Text style={accRow.balance}>{formatKRW(balance.total)}</Text>
+              <Text style={[accRow.pnl, { color: isProfit ? '#FF4747' : '#246CF9' }]}>
+                {formatKRWSigned(balance.profitTotal)}
+              </Text>
+            </>
+          ) : (
+            <Text style={accRow.loading}>로딩 중…</Text>
+          )}
         </View>
       </View>
-      <Text style={styles.accountName} numberOfLines={1}>{account.name}</Text>
-      {balance ? (
-        <>
-          <Text style={styles.accountBalance}>{formatKRW(balance.total)}</Text>
-          <Text style={[styles.accountPnl, { color: isProfit ? '#FF4747' : '#246CF9' }]}>
-            {formatKRWSigned(balance.profitTotal)}
-          </Text>
-        </>
-      ) : (
-        <Text style={styles.noAgentText}>잔고 로딩 중...</Text>
-      )}
-      {account.agentId
-        ? <Text style={styles.agentIdText}>🤖 {account.agentId}</Text>
-        : <Text style={styles.noAgentText}>에이전트 미설정</Text>
-      }
-    </GlassCard>
+    </PressableScale>
   );
 }
 
@@ -204,16 +218,16 @@ export default function Home() {
               </GlassCard>
             </PressableScale>
           ) : (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ gap: 10, paddingBottom: 4 }}
-              style={styles.section}
-            >
-              {accounts.map((acc) => (
-                <AccountCard key={acc.id} account={acc} balance={balances[acc.id] ?? null} />
+            <GlassCard intensity="medium" radius={20} padding={0} style={[styles.section, { overflow: 'hidden' }]}>
+              {accounts.map((acc, i) => (
+                <AccountRow
+                  key={acc.id}
+                  account={acc}
+                  balance={balances[acc.id] ?? null}
+                  isLast={i === accounts.length - 1}
+                />
               ))}
-            </ScrollView>
+            </GlassCard>
           )}
 
           {/* ── 에이전트 상태 ── */}
@@ -327,18 +341,6 @@ const styles = StyleSheet.create({
 
   section: { marginBottom: 12 },
 
-  // 연결된 계정 카드
-  accountCard: { width: 160 },
-  accountCardHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
-  exchangeDot:  { width: 8, height: 8, borderRadius: 4 },
-  exchangeName: { fontSize: 13, fontWeight: '700', flex: 1 },
-  statusPill:   { borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2 },
-  statusPillText: { fontSize: 10, fontWeight: '600' },
-  accountName:    { fontSize: 14, fontWeight: '600', color: '#191919', marginBottom: 4 },
-  accountBalance: { fontSize: 15, fontWeight: '700', color: '#191919', marginBottom: 2 },
-  accountPnl:     { fontSize: 12, fontWeight: '600', marginBottom: 4 },
-  agentIdText:    { fontSize: 12, color: '#555555' },
-  noAgentText:    { fontSize: 12, color: '#AEAEB2' },
 
   emptyAccounts:     { alignItems: 'center', gap: 8 },
   emptyAccountsText: { fontSize: 13, color: '#AEAEB2' },
@@ -363,4 +365,27 @@ const styles = StyleSheet.create({
   dirBadge:     { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   dirText:      { fontSize: 11, fontWeight: '600' },
   emptyText:    { fontSize: 14, color: '#AEAEB2' },
+});
+
+const accRow = StyleSheet.create({
+  wrap: {
+    flexDirection:  'row',
+    alignItems:     'center',
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+    gap: 10,
+  },
+  border: { borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
+  badge: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4,
+    flexShrink: 0,
+  },
+  dot:      { width: 6, height: 6, borderRadius: 3 },
+  exchange: { fontSize: 11, fontWeight: '700' },
+  name:     { flex: 1, fontSize: 14, fontWeight: '600', color: '#191919' },
+  right:    { alignItems: 'flex-end', flexShrink: 0 },
+  balance:  { fontSize: 14, fontWeight: '700', color: '#191919' },
+  pnl:      { fontSize: 12, fontWeight: '600', marginTop: 2 },
+  loading:  { fontSize: 12, color: '#AEAEB2' },
 });

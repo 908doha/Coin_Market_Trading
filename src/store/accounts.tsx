@@ -29,21 +29,34 @@ const STORAGE_KEY = 'exchange_accounts_v1';
 
 async function loadAccounts(): Promise<ExchangeAccount[]> {
   try {
-    const raw = Platform.OS === 'web'
-      ? localStorage.getItem(STORAGE_KEY)
-      : await SecureStore.getItemAsync(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
+    let raw: string | null = null;
+    if (Platform.OS === 'web') {
+      raw = localStorage.getItem(STORAGE_KEY);
+    } else {
+      raw = await SecureStore.getItemAsync(STORAGE_KEY);
+    }
+    if (!raw) return [];
+    return JSON.parse(raw) as ExchangeAccount[];
+  } catch (e) {
+    console.error('[accounts] loadAccounts failed:', e);
     return [];
   }
 }
 
 async function saveAccounts(accounts: ExchangeAccount[]): Promise<void> {
   const raw = JSON.stringify(accounts);
-  if (Platform.OS === 'web') {
-    localStorage.setItem(STORAGE_KEY, raw);
-  } else {
-    await SecureStore.setItemAsync(STORAGE_KEY, raw);
+  try {
+    if (Platform.OS === 'web') {
+      localStorage.setItem(STORAGE_KEY, raw);
+      // 저장 확인
+      const check = localStorage.getItem(STORAGE_KEY);
+      if (check !== raw) throw new Error('localStorage 저장 검증 실패');
+    } else {
+      await SecureStore.setItemAsync(STORAGE_KEY, raw);
+    }
+  } catch (e) {
+    console.error('[accounts] saveAccounts failed:', e);
+    throw e;
   }
 }
 

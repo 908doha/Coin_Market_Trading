@@ -1,10 +1,26 @@
 import React, { useState, useRef } from 'react';
-import { View, StyleSheet, ScrollView, Alert, Pressable, TextInput } from 'react-native';
+import { View, StyleSheet, ScrollView, Alert, Pressable, TextInput, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Text, SubPageHeader, ScreenTransition, GlassCard } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeAccount } from '@/store/accounts';
+
+function confirmDelete(name: string, onConfirm: () => void) {
+  if (Platform.OS === 'web') {
+    // Alert.alert 웹 콜백 버그 우회
+    if (window.confirm(`"${name}" 계좌를 삭제할까요?`)) onConfirm();
+    return;
+  }
+  Alert.alert(
+    '계좌 삭제',
+    `"${name}" 계좌를 삭제할까요?`,
+    [
+      { text: '취소', style: 'cancel' },
+      { text: '삭제', style: 'destructive', onPress: onConfirm },
+    ],
+  );
+}
 
 function maskKey(key: string): string {
   if (key.length <= 8) return '••••••••';
@@ -106,14 +122,7 @@ export default function ApiAccounts() {
   const { accounts, removeAccount, updateAccount } = useAccounts();
 
   const handleDelete = (id: string, name: string) => {
-    Alert.alert(
-      '계좌 삭제',
-      `"${name}" 계좌를 삭제할까요?`,
-      [
-        { text: '취소', style: 'cancel' },
-        { text: '삭제', style: 'destructive', onPress: () => removeAccount(id) },
-      ],
-    );
+    confirmDelete(name, () => removeAccount(id));
   };
 
   return (

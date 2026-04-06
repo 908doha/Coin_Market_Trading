@@ -12,13 +12,7 @@
     "pm2:logs": "pm2 logs ict-trading-bot",
     "pm2:status": "pm2 status"
   },
-  "keywords": [
-    "gateio",
-    "trading",
-    "bot",
-    "ict",
-    "futures"
-  ],
+  "keywords": ["gateio", "trading", "bot", "ict", "futures"],
   "license": "MIT",
   "dependencies": {
     "dotenv": "^16.3.1",

@@ -94,10 +94,14 @@ class TelegramService {
         const pnlEmoji = pos.unrealisedPnl >= 0 ? '🟢' : '🔴';
         const lev = pos.leverage || '-';
 
+        const contractInfo = await gateClient.getContract(config.tradePair);
+        const baseCoin = config.tradePair.split('_')[0];
+        const coinAmount = Math.abs(pos.size) * Math.abs(contractInfo.quantoMultiplier);
+
         await this.bot.sendMessage(chatId, [
           `━━━ 포지션 정보 ━━━`,
           `방향: ${direction}`,
-          `수량: ${Math.abs(pos.size)} 계약`,
+          `수량: ${coinAmount.toFixed(4)} ${baseCoin}`,
           `진입가: ${pos.entryPrice > 0 ? pos.entryPrice.toFixed(2) : '조회 중...'}`,
           `현재가: ${pos.markPrice > 0 ? pos.markPrice.toFixed(2) : '조회 중...'}`,
           `${pnlEmoji} 미실현 PnL: ${pos.unrealisedPnl.toFixed(2)} USDT`,
@@ -323,13 +327,22 @@ class TelegramService {
    */
   async notifyEntry(signal, result) {
     const emoji = signal.signal === 'long' ? '📈' : '📉';
+    let qtyText = `${result.size} 계약`;
+    try {
+      const contractInfo = await gateClient.getContract(config.tradePair);
+      const baseCoin = config.tradePair.split('_')[0];
+      const coinAmount = Math.abs(result.size) * Math.abs(contractInfo.quantoMultiplier);
+      qtyText = `${coinAmount.toFixed(4)} ${baseCoin}`;
+    } catch (err) {
+      logger.error(`수량 변환 실패: ${err.message}`);
+    }
     await this.send([
       `${emoji} ━━━ 포지션 진입 ━━━`,
       `방향: ${signal.signal.toUpperCase()}`,
       `진입가: ${signal.entry}`,
       `손절(SL): ${signal.sl}`,
       `익절(TP): ${signal.tp}`,
-      `수량: ${result.size} 계약`,
+      `수량: ${qtyText}`,
       ``,
       `📋 컨플루언스:`,
       ...signal.confluence.map((c) => `  • ${c}`),

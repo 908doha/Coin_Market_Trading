@@ -4,10 +4,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Text, Card, Button, Badge, SubPageHeader, ScreenTransition, AgentSettingsSkeleton } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
-import { githubService } from '@/services';
-import { useApi } from '@/hooks/useApi';
-import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeAccount } from '@/store/accounts';
-import type { AgentDefinition } from '@/services';
+import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS } from '@/store/accounts';
+import type { ExchangeAccount } from '@/store/accounts';
+
+interface AgentDefinition {
+  id:          string;
+  name:        string;
+  description: string;
+  version?:    string;
+}
 
 const DATA_ONLY_ID = '__data_only__';
 
@@ -113,9 +118,21 @@ function BotStatusBadge({ running }: { running: boolean | null }) {
 // ── Main screen ───────────────────────────────────────────────────────────────
 export default function AgentSettings() {
   const { accounts, updateAccount } = useAccounts();
-  const { data: agentDefs, isLoading: defsLoading, error: defsError, refetch: refetchDefs } = useApi(
-    () => githubService.getAgentDefinitions(), [],
-  );
+
+  const [agentDefs, setAgentDefs]     = useState<AgentDefinition[] | null>(null);
+  const [defsLoading, setDefsLoading] = useState(true);
+  const [defsError, setDefsError]     = useState<string | null>(null);
+
+  const fetchAgentDefs = () => {
+    setDefsLoading(true);
+    setDefsError(null);
+    fetch('/api/bot/agents')
+      .then((r) => r.json())
+      .then((data) => { setAgentDefs(Array.isArray(data) ? data : []); setDefsLoading(false); })
+      .catch((e) => { setDefsError(e?.message ?? '에이전트 목록 로드 실패'); setDefsLoading(false); });
+  };
+
+  useEffect(() => { fetchAgentDefs(); }, []);
 
   // Selected account (default to first)
   const [accountId, setAccountId] = useState<string>(accounts[0]?.id ?? '');
@@ -250,7 +267,7 @@ export default function AgentSettings() {
                     <Text variant="caption1" color={colors.text.tertiary} align="center" style={{ marginBottom: 12 }}>
                       {defsError}
                     </Text>
-                    <Pressable style={styles.retryBtn} onPress={refetchDefs}>
+                    <Pressable style={styles.retryBtn} onPress={fetchAgentDefs}>
                       <Text style={styles.retryBtnText}>다시 시도</Text>
                     </Pressable>
                   </View>

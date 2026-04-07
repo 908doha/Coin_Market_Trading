@@ -100,7 +100,7 @@ function AgentOption({
 // ── Main screen ───────────────────────────────────────────────────────────────
 export default function AgentSettings() {
   const { accounts, updateAccount } = useAccounts();
-  const { data: agentDefs, isLoading: defsLoading } = useApi(
+  const { data: agentDefs, isLoading: defsLoading, error: defsError, refetch: refetchDefs } = useApi(
     () => githubService.getAgentDefinitions(), [],
   );
 
@@ -132,29 +132,6 @@ export default function AgentSettings() {
     }
   };
 
-  if (!accounts.length) {
-    return (
-      <ScreenTransition>
-        <SafeAreaView style={styles.safe} edges={['top']}>
-          <SubPageHeader title="에이전트 설정" />
-          <View style={styles.emptyWrap}>
-            <Text style={styles.emptyIcon}>🔌</Text>
-            <Text style={styles.emptyTitle}>연결된 API 계좌가 없어요</Text>
-            <Text style={styles.emptyDesc}>
-              먼저 API 연결 관리에서{'\n'}거래소 계좌를 추가해 주세요
-            </Text>
-            <Pressable
-              style={styles.emptyBtn}
-              onPress={() => router.replace('/(main)/account/api-accounts')}
-            >
-              <Text style={styles.emptyBtnText}>API 연결하러 가기</Text>
-            </Pressable>
-          </View>
-        </SafeAreaView>
-      </ScreenTransition>
-    );
-  }
-
   return (
     <ScreenTransition>
       <SafeAreaView style={styles.safe} edges={['top']}>
@@ -162,13 +139,17 @@ export default function AgentSettings() {
 
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
-          {/* ── 계좌 선택 ── */}
-          <Text style={styles.sectionLabel}>계좌 선택</Text>
-          <AccountChips
-            accounts={accounts}
-            selectedId={accountId}
-            onSelect={setAccountId}
-          />
+          {/* ── 계좌 선택 (계좌 있을 때만) ── */}
+          {accounts.length > 0 && (
+            <>
+              <Text style={styles.sectionLabel}>계좌 선택</Text>
+              <AccountChips
+                accounts={accounts}
+                selectedId={accountId}
+                onSelect={setAccountId}
+              />
+            </>
+          )}
 
           {/* ── 에이전트 선택 ── */}
           <Card variant="outlined" style={styles.section}>
@@ -205,7 +186,21 @@ export default function AgentSettings() {
                   />
                 ))}
 
-                {!agentDefs?.length && !defsLoading && (
+                {defsError && !defsLoading && (
+                  <View style={styles.emptyDefs}>
+                    <Text variant="body2" color="#FF4747" align="center" style={{ marginBottom: 4 }}>
+                      에이전트 목록 로드 실패
+                    </Text>
+                    <Text variant="caption1" color={colors.text.tertiary} align="center" style={{ marginBottom: 12 }}>
+                      {defsError}
+                    </Text>
+                    <Pressable style={styles.retryBtn} onPress={refetchDefs}>
+                      <Text style={styles.retryBtnText}>다시 시도</Text>
+                    </Pressable>
+                  </View>
+                )}
+
+                {!defsError && !agentDefs?.length && !defsLoading && (
                   <View style={styles.emptyDefs}>
                     <Text variant="body2" color={colors.text.tertiary} align="center">
                       등록된 에이전트가 없어요{'\n'}
@@ -230,12 +225,21 @@ export default function AgentSettings() {
             </Card>
           )}
 
-          <Button
-            variant="primary" size="lg" label="저장" fullWidth
-            loading={saving}
-            onPress={handleSave}
-            style={{ marginBottom: spacing[10] }}
-          />
+          {accounts.length > 0 ? (
+            <Button
+              variant="primary" size="lg" label="저장" fullWidth
+              loading={saving}
+              onPress={handleSave}
+              style={{ marginBottom: spacing[10] }}
+            />
+          ) : (
+            <Pressable
+              style={[styles.emptyBtn, { marginBottom: spacing[10] }]}
+              onPress={() => router.push('/(main)/account/api-accounts')}
+            >
+              <Text style={styles.emptyBtnText}>API 계좌 연결하러 가기</Text>
+            </Pressable>
+          )}
         </ScrollView>
       </SafeAreaView>
     </ScreenTransition>
@@ -296,12 +300,8 @@ const styles = StyleSheet.create({
   },
 
   emptyDefs: { paddingVertical: spacing[6], alignItems: 'center' },
-
-  // 계좌 없을 때
-  emptyWrap:  { flex: 1, alignItems: 'center', paddingTop: 80, paddingHorizontal: 40 },
-  emptyIcon:  { fontSize: 48, marginBottom: spacing[4] },
-  emptyTitle: { fontSize: 17, fontWeight: '700', color: '#191919', marginBottom: spacing[2] },
-  emptyDesc:  { fontSize: 14, color: '#AEAEB2', textAlign: 'center', lineHeight: 22, marginBottom: spacing[6] },
-  emptyBtn:   { paddingHorizontal: 24, paddingVertical: 12, borderRadius: 14, backgroundColor: '#191919' },
+  retryBtn:  { paddingHorizontal: 20, paddingVertical: 8, borderRadius: 10, backgroundColor: '#191919' },
+  retryBtnText: { fontSize: 13, fontWeight: '600', color: '#FFFFFF' },
+  emptyBtn:     { paddingHorizontal: 24, paddingVertical: 14, borderRadius: 14, backgroundColor: '#191919', alignItems: 'center' },
   emptyBtnText: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
 });

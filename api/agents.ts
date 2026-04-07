@@ -8,7 +8,8 @@
 
 const REPO   = 'openclaw4286-code/Coin_Market_Trading';
 const BRANCH = 'claude/gateio-trading-bot-SDKao';
-const REF    = `refs/heads/${BRANCH}`;   // full ref — no encodeURIComponent needed
+// GitHub contents API accepts branch name directly in ?ref= (no refs/heads/ prefix needed)
+const REF    = BRANCH;
 
 const CORS = {
   'Access-Control-Allow-Origin':  '*',

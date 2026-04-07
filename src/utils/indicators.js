@@ -52,27 +52,52 @@ const indicators = {
     return swings;
   },
 
-  // ========== Market Structure Shift ==========
+  // ========== Market Structure Shift (BOS / CHoCH 분리) ==========
 
+  /**
+   * 구조 전환 감지
+   *  - BOS  (Break of Structure)        : 기존 추세 방향으로의 구조 돌파 (추세 지속)
+   *  - CHoCH (Change of Character)      : 기존 추세 반대 방향으로의 구조 돌파 (추세 전환)
+   *
+   * 직전 swing 패턴(HH/HL vs LH/LL)으로 기존 추세를 추정한 뒤,
+   * 돌파 방향과 비교하여 BOS/CHoCH를 라벨링한다.
+   *
+   * @returns {null | { direction: 'bullish'|'bearish', kind: 'BOS'|'CHoCH', label: string }}
+   */
   detectMarketStructureShift(candles, swingHighs, swingLows) {
     if (swingHighs.length < 2 || swingLows.length < 2) return null;
 
     const lastCandle = candles[candles.length - 1];
     const prevCandle = candles[candles.length - 2];
+
+    // 직전 추세 추정
+    const lh = swingHighs[swingHighs.length - 1].price;
+    const ph = swingHighs[swingHighs.length - 2].price;
+    const ll = swingLows[swingLows.length - 1].price;
+    const pl = swingLows[swingLows.length - 2].price;
+
+    let priorTrend = null;
+    if (lh > ph && ll > pl) priorTrend = 'bullish';
+    else if (lh < ph && ll < pl) priorTrend = 'bearish';
+
     const recentHigh = swingHighs[swingHighs.length - 1];
     const recentLow = swingLows[swingLows.length - 1];
 
+    // Bullish 돌파 (직전 swing high 종가 돌파)
     if (recentLow.index > recentHigh.index) {
       const prevHigh = swingHighs[swingHighs.length - 1];
       if (lastCandle.close > prevHigh.price && prevCandle.close <= prevHigh.price) {
-        return 'bullish';
+        const kind = priorTrend === 'bearish' ? 'CHoCH' : 'BOS';
+        return { direction: 'bullish', kind, label: `${kind} bullish` };
       }
     }
 
+    // Bearish 돌파 (직전 swing low 종가 돌파)
     if (recentHigh.index > recentLow.index) {
       const prevLow = swingLows[swingLows.length - 1];
       if (lastCandle.close < prevLow.price && prevCandle.close >= prevLow.price) {
-        return 'bearish';
+        const kind = priorTrend === 'bullish' ? 'CHoCH' : 'BOS';
+        return { direction: 'bearish', kind, label: `${kind} bearish` };
       }
     }
 
@@ -412,6 +437,11 @@ const indicators = {
 
   // ========== Liquidity Sweep ==========
 
+  /**
+   * 유동성 스윕 감지 (BSL / SSL 라벨링)
+   *  - BSL (Buy-Side Liquidity)  : swing high 위 stop을 쓸어가는 상승 wick → 하락 반전 신호
+   *  - SSL (Sell-Side Liquidity) : swing low 아래 stop을 쓸어가는 하락 wick → 상승 반전 신호
+   */
   detectLiquiditySweep(candles, swingHighs, swingLows) {
     const sweeps = [];
     const last = candles[candles.length - 1];
@@ -419,13 +449,25 @@ const indicators = {
 
     for (const sh of swingHighs.slice(-3)) {
       if (last.high > sh.price && last.close < sh.price && prev.close < sh.price) {
-        sweeps.push({ type: 'bearish', level: sh.price, wick: last.high });
+        sweeps.push({
+          type: 'bearish',
+          liquidity: 'BSL',
+          label: 'BSL sweep',
+          level: sh.price,
+          wick: last.high,
+        });
       }
     }
 
     for (const sl of swingLows.slice(-3)) {
       if (last.low < sl.price && last.close > sl.price && prev.close > sl.price) {
-        sweeps.push({ type: 'bullish', level: sl.price, wick: last.low });
+        sweeps.push({
+          type: 'bullish',
+          liquidity: 'SSL',
+          label: 'SSL sweep',
+          level: sl.price,
+          wick: last.low,
+        });
       }
     }
 

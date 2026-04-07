@@ -223,7 +223,7 @@ class TelegramService {
           const sl = indicators.findSwingLows(mtfCandles, config.ict.structureShiftBars);
           return (sh.length >= 2 && sl.length >= 2) ? indicators.detectMarketStructureShift(mtfCandles, sh, sl) : null;
         })();
-        lines.push(`  MSS: ${mtfMss ? `✅ ${mtfMss.toUpperCase()}` : '❌ 없음'}`);
+        lines.push(`  MSS: ${mtfMss ? `✅ ${mtfMss.label.toUpperCase()}` : '❌ 없음'}`);
 
         const mtfOBs = indicators.findOrderBlocks(mtfCandles);
         lines.push(`  OB: Bull ${mtfOBs.bullish.length}개 / Bear ${mtfOBs.bearish.length}개`);

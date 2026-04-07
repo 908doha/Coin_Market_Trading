@@ -129,8 +129,8 @@ class IctStrategy {
     } else {
       const mss = indicators.detectMarketStructureShift(candles, swingHighs, swingLows);
       if (mss) {
-        direction = mss;
-        reason = `HTF ${mss} MSS`;
+        direction = mss.direction;
+        reason = `HTF ${mss.label}`;
       }
     }
 
@@ -162,10 +162,10 @@ class IctStrategy {
     }
 
     const mss = indicators.detectMarketStructureShift(candles, swingHighs, swingLows);
-    const mssAligned = mss === htfDirection;
+    const mssAligned = mss && mss.direction === htfDirection;
 
     if (mssAligned) {
-      confluence.push(`MTF(${config.timeframes.mtf}) ${htfDirection} MSS`);
+      confluence.push(`MTF(${config.timeframes.mtf}) ${mss.label}`);
     }
 
     const orderBlocks = indicators.findOrderBlocks(candles);
@@ -269,17 +269,17 @@ class IctStrategy {
     const sweeps = indicators.detectLiquiditySweep(candles, swingHighs, swingLows);
     const relevantSweep = sweeps.find(s => s.type === htfDirection);
     if (relevantSweep) {
-      confluence.push(`LTF Sweep @ ${relevantSweep.level.toFixed(2)}`);
+      confluence.push(`LTF ${relevantSweep.label} @ ${relevantSweep.level.toFixed(2)}`);
       if (!entryConfirmed) {
         entryConfirmed = true;
-        entryType = 'SWEEP';
+        entryType = relevantSweep.liquidity; // 'BSL' | 'SSL'
       }
     }
 
-    // LTF MSS 추가 컨플루언스
+    // LTF MSS 추가 컨플루언스 (BOS/CHoCH 라벨링)
     const ltfMss = indicators.detectMarketStructureShift(candles, swingHighs, swingLows);
-    if (ltfMss === htfDirection) {
-      confluence.push(`LTF ${htfDirection} MSS`);
+    if (ltfMss && ltfMss.direction === htfDirection) {
+      confluence.push(`LTF ${ltfMss.label}`);
     }
 
     return {

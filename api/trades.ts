@@ -28,12 +28,15 @@ interface Trade {
   exitAt:      string;
 }
 
-// ── Gate.io 청산 내역 조회 ────────────────────────────────────────────────────
+// ── Gate.io 포지션 청산 내역 조회 ────────────────────────────────────────────
+// /my_trades 대신 /position_close 사용:
+//   - 포지션 단위 실현 PnL (음수 = 손실 정확히 반영)
+//   - text 필드로 청산 이유 확인 (take_profit / stop_loss / liq_long / liq_short / close manually)
 
 async function fetchGateTrades(apiKey: string, apiSecret: string): Promise<Trade[]> {
   const method = 'GET';
   const query  = 'limit=100';
-  const path   = '/api/v4/futures/usdt/my_trades';
+  const path   = '/api/v4/futures/usdt/position_close';
   const ts     = Math.floor(Date.now() / 1000).toString();
   const sig    = gateSign(apiSecret, method, path, query, ts);
 
@@ -62,36 +65,43 @@ async function fetchGateTrades(apiKey: string, apiSecret: string): Promise<Trade
     usdtKrw = t.trade_price;
   } catch { /* fallback */ }
 
-  // close_position이 true이거나 close_pnl이 있는 청산 거래
-  const closingTrades = data.filter((t: any) =>
-    t.close_position === true || (t.close_pnl != null && t.close_pnl !== '' && t.close_pnl !== '0'),
-  );
+  return data.map((t: any): Trade => {
+    const pnl       = parseFloat(t.pnl || '0');            // 실현 손익 (USDT, 음수 = 손실)
+    const profitKrw = pnl * usdtKrw;
+    const contract  = t.contract as string;
+    const side      = (t.side as string) ?? '';             // 'long' | 'short'
+    const text      = (t.text as string) ?? '';             // 청산 이유
+    const exitAt    = t.time ? new Date(t.time * 1000).toISOString() : new Date().toISOString();
 
-  // 청산 거래가 없으면 전체 반환 (거래 내역 표시용)
-  const trades = closingTrades.length > 0 ? closingTrades : data;
+    // 청산 이유 분류
+    // liq_long / liq_short = 강제청산 → 항상 손실
+    const isLiquidation = text.includes('liq_');
+    let type: Trade['type'];
+    if (isLiquidation)              type = 'stop_loss';
+    else if (text === 'take_profit') type = 'take_profit';
+    else if (text === 'stop_loss')   type = 'stop_loss';
+    else if (pnl < 0)               type = 'stop_loss';
+    else if (pnl > 0)               type = 'take_profit';
+    else                             type = 'manual';
 
-  return trades.map((t: any): Trade => {
-    const pnl        = parseFloat(t.close_pnl || '0');
-    const profitKrw  = pnl * usdtKrw;
-    const contract   = t.contract as string;
-    const size       = Number(t.size);
-    const price      = parseFloat(t.price || '0');
-    const createTime = t.create_time ? new Date(t.create_time * 1000) : new Date();
-    const exitAt     = createTime.toISOString();
-
-    // 진입 시각은 직접 추적이 어려워 임시로 동일하게
-    const entryAt    = exitAt;
-    const holdingDays = 0;
+    // 수익률: entry_price 기준
+    const entryPrice = parseFloat(t.entry_price || '0');
+    const fillPrice  = parseFloat(t.fill_price  || '0');
+    let profitRate = 0;
+    if (entryPrice > 0 && fillPrice > 0) {
+      const diff = side === 'long' ? fillPrice - entryPrice : entryPrice - fillPrice;
+      profitRate = parseFloat(((diff / entryPrice) * 100).toFixed(2));
+    }
 
     return {
-      id:          t.id?.toString() ?? String(Date.now()),
+      id:          `${t.time}_${contract}`,
       symbol:      contract.replace('_', '/'),
-      direction:   size < 0 ? 'Long' : 'Short', // closing: sell = 롱 청산
-      type:        pnl >= 0 ? 'take_profit' : 'stop_loss',
+      direction:   side === 'long' ? 'Long' : 'Short',
+      type,
       profit:      profitKrw,
-      profitRate:  price > 0 ? parseFloat(((pnl / (price * Math.abs(size))) * 100).toFixed(2)) : 0,
-      holdingDays,
-      entryAt,
+      profitRate,
+      holdingDays: 0,
+      entryAt:     exitAt,   // position_close 엔드포인트는 진입 시각 미제공
       exitAt,
     };
   });

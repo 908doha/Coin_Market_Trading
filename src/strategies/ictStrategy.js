@@ -332,4 +332,11 @@ class IctStrategy {
   }
 }
 
+IctStrategy.AGENT_INFO = {
+  id: 'ict-strategy',
+  name: 'ICT 전략 v2',
+  description: '멀티 타임프레임(4h/15m/5m) FVG · OB · IOFED 기반 ICT 자동매매',
+  version: '2.0',
+};
+
 module.exports = IctStrategy;

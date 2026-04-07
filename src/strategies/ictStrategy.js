@@ -298,3 +298,10 @@ class IctStrategy {
 }
 
 module.exports = IctStrategy;
+
+// 앱에서 이 전략에 매핑되는 agentId 목록
+IctStrategy.AGENT_IDS = [
+  'ict-strategy-1-indicators',
+  'ict-strategy-2-sessions-liquidity',
+  'ict-strategy-3-entry-sltp',
+];

@@ -9,6 +9,7 @@ const positionsRouter     = require('./routes/positions');
 const tradesRouter        = require('./routes/trades');
 const agentRouter         = require('./routes/agent');
 const notificationsRouter = require('./routes/notifications');
+const botRouter           = require('./routes/bot');
 
 const app  = express();
 const PORT = process.env.PORT || 4000;
@@ -119,6 +120,7 @@ app.use('/positions',     positionsRouter);
 app.use('/trades',        tradesRouter);
 app.use('/agent',         agentRouter);
 app.use('/notifications', notificationsRouter);
+app.use('/bot',           botRouter);
 
 // ── 에러 핸들러 ───────────────────────────────────────────────────
 app.use((err, req, res, _next) => {

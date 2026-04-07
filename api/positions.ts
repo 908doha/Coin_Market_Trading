@@ -25,12 +25,18 @@ interface Position {
 
 // ── Gate.io 선물 포지션 조회 ───────────────────────────────────────────────────
 
+function gateSign(apiSecret: string, method: string, path: string, query: string, ts: string): string {
+  const bodyHash = crypto.createHash('sha512').update('').digest('hex');
+  return crypto.createHmac('sha512', apiSecret)
+    .update(`${method}\n${path}\n${query}\n${bodyHash}\n${ts}`)
+    .digest('hex');
+}
+
 async function fetchGatePositions(apiKey: string, apiSecret: string): Promise<Position[]> {
   const method = 'GET';
   const path   = '/api/v4/futures/usdt/positions';
   const ts     = Math.floor(Date.now() / 1000).toString();
-  const msg    = `${method}\n${path}\n\n\n${ts}`;
-  const sig    = crypto.createHmac('sha512', apiSecret).update(msg).digest('hex');
+  const sig    = gateSign(apiSecret, method, path, '', ts);
 
   const res = await fetch(`https://api.gateio.ws${path}`, {
     method,
@@ -38,7 +44,7 @@ async function fetchGatePositions(apiKey: string, apiSecret: string): Promise<Po
       KEY:       apiKey,
       Timestamp: ts,
       SIGN:      sig,
-      'Accept':  'application/json',
+      Accept:    'application/json',
     },
   });
 

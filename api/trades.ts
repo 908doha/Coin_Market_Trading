@@ -9,6 +9,13 @@
 
 import crypto from 'crypto';
 
+function gateSign(apiSecret: string, method: string, path: string, query: string, ts: string): string {
+  const bodyHash = crypto.createHash('sha512').update('').digest('hex');
+  return crypto.createHmac('sha512', apiSecret)
+    .update(`${method}\n${path}\n${query}\n${bodyHash}\n${ts}`)
+    .digest('hex');
+}
+
 interface Trade {
   id:          string;
   symbol:      string;
@@ -28,8 +35,7 @@ async function fetchGateTrades(apiKey: string, apiSecret: string): Promise<Trade
   const query  = 'limit=100';
   const path   = '/api/v4/futures/usdt/my_trades';
   const ts     = Math.floor(Date.now() / 1000).toString();
-  const msg    = `${method}\n${path}\n${query}\n\n${ts}`;
-  const sig    = crypto.createHmac('sha512', apiSecret).update(msg).digest('hex');
+  const sig    = gateSign(apiSecret, method, path, query, ts);
 
   const res = await fetch(`https://api.gateio.ws${path}?${query}`, {
     method,

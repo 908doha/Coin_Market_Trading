@@ -590,7 +590,7 @@ const accRow = StyleSheet.create({
   border: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border.default },
 
   amount: { fontSize: 18, fontWeight: '700', color: colors.text.primary, letterSpacing: -0.3 },
-  name:   { fontSize: 12, color: colors.text.disabled, fontWeight: '500', marginTop: 2 },
+  name:   { fontSize: 14, color: colors.text.tertiary, fontWeight: '600', marginTop: 2 },
   error:  { fontSize: 11, color: colors.negative.default, marginTop: 3, lineHeight: 15 },
 
   pnlCol:  { alignItems: 'flex-end', flexShrink: 0 },

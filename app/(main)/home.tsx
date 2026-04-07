@@ -6,11 +6,10 @@ import Svg, { Polyline, Defs, LinearGradient, Stop, Polygon, Path, Rect, Text as
 import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { Text, GlassCard, PressableScale, FadeTabView, AssetCardSkeleton, PageHeader, CurrencyToggle } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
-import { accountService, positionsService, tradesService, githubService } from '@/services';
+import { accountService, positionsService, tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeAccount, ExchangeType } from '@/store/accounts';
 import type { Balance } from '@/services';
-import type { AgentDefinition } from '@/services';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 
 const PERIODS = [
@@ -28,7 +27,7 @@ const AGENT_COLORS = ['#3182F6', '#1AC24E', '#FF8A00', '#9B59B6', '#E74C3C', '#1
 function AgentRow({
   agent, color, isActive, winRate, tradeCount, isLast,
 }: {
-  agent: AgentDefinition; color: string; isActive: boolean;
+  agent: { id: string; name: string; description: string; version: string }; color: string; isActive: boolean;
   winRate: number; tradeCount: number; isLast: boolean;
 }) {
   const abbr = agent.name.replace(/[^가-힣A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || 'AI';
@@ -524,7 +523,6 @@ export default function Home() {
     [accounts.length],
   );
   const { data: chart }   = useApi(() => accountService.getChart(period), [period]);
-  const { data: agents }  = useApi(() => githubService.getAgentDefinitions(), []);
   const { data: positions } = useApi(
     () => positionsService.getAllByAccounts(accounts), [accounts],
   );
@@ -536,20 +534,50 @@ export default function Home() {
   const balLoading = accounts.length > 0 ? balancesLoading : singleLoading;
   const isProfit   = (balance?.profitTotal ?? 0) >= 0;
 
-  // 에이전트별 통계 계산
-  const agentStatsMap = useMemo(() => {
-    const map: Record<string, { winRate: number; tradeCount: number; isActive: boolean }> = {};
-    if (!agents) return map;
-    for (const agent of agents) {
-      const agentAccounts = accounts.filter((a) => a.agentId === agent.id);
-      const isActive = agentAccounts.length > 0;
-      const trades = agentAccounts.flatMap((a) => groupedTrades?.[a.id] ?? []);
-      const wins   = trades.filter((t) => t.profit > 0).length;
-      const winRate = trades.length > 0 ? Math.round((wins / trades.length) * 100) : 0;
-      map[agent.id] = { winRate, tradeCount: trades.length, isActive };
+  // 계좌에 실제 할당된 agentId 기반으로 에이전트 목록 구성
+  const activeAgents = useMemo(() => {
+    const seen = new Map<string, { id: string; name: string; winRate: number; tradeCount: number }>();
+    for (const acc of accounts) {
+      if (!acc.agentId) continue;
+      const trades   = groupedTrades?.[acc.id] ?? [];
+      const wins     = trades.filter((t) => t.profit > 0).length;
+      const winRate  = trades.length > 0 ? Math.round((wins / trades.length) * 100) : 0;
+      const existing = seen.get(acc.agentId);
+      if (existing) {
+        // 같은 agentId가 여러 계좌에 할당된 경우 합산
+        seen.set(acc.agentId, {
+          ...existing,
+          tradeCount: existing.tradeCount + trades.length,
+          winRate:    existing.tradeCount + trades.length > 0
+            ? Math.round(((existing.winRate * existing.tradeCount / 100 + wins) / (existing.tradeCount + trades.length)) * 100)
+            : 0,
+        });
+      } else {
+        seen.set(acc.agentId, {
+          id:         acc.agentId,
+          name:       acc.agentId,   // 이름은 아래 botAgents 로드 후 대체
+          winRate,
+          tradeCount: trades.length,
+        });
+      }
+    }
+    return Array.from(seen.values());
+  }, [accounts, groupedTrades]);
+
+  // /api/bot/agents 에서 실제 이름/설명 로드
+  const { data: botAgents } = useApi(
+    () => fetch('/api/bot/agents').then((r) => r.json()).catch(() => []),
+    [],
+  );
+
+  // agentId → 표시 이름 매핑
+  const agentNameMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    if (Array.isArray(botAgents)) {
+      for (const a of botAgents) map[a.id] = a.name;
     }
     return map;
-  }, [agents, accounts, groupedTrades]);
+  }, [botAgents]);
 
   return (
     <FadeTabView style={styles.root}>
@@ -666,22 +694,24 @@ export default function Home() {
             </PressableScale>
           </View>
           <GlassCard intensity="medium" radius={20} padding={0} style={[styles.section, { overflow: 'hidden' }]}>
-            {!agents?.length ? (
+            {!activeAgents.length ? (
               <View style={{ paddingVertical: 24, alignItems: 'center' }}>
-                <Text variant="body2" color={colors.text.tertiary}>에이전트 로딩 중...</Text>
+                <Text variant="body2" color={colors.text.tertiary}>
+                  {accounts.length ? '에이전트가 설정되지 않았어요' : '계좌를 연결하면 에이전트를 설정할 수 있어요'}
+                </Text>
               </View>
             ) : (
-              agents.map((agent, i) => {
-                const stats = agentStatsMap[agent.id] ?? { winRate: 0, tradeCount: 0, isActive: false };
+              activeAgents.map((agent, i) => {
+                const displayName = agentNameMap[agent.id] ?? agent.id;
                 return (
                   <AgentRow
                     key={agent.id}
-                    agent={agent}
+                    agent={{ id: agent.id, name: displayName, description: '', version: '' }}
                     color={AGENT_COLORS[i % AGENT_COLORS.length]}
-                    isActive={stats.isActive}
-                    winRate={stats.winRate}
-                    tradeCount={stats.tradeCount}
-                    isLast={i === agents.length - 1}
+                    isActive={true}
+                    winRate={agent.winRate}
+                    tradeCount={agent.tradeCount}
+                    isLast={i === activeAgents.length - 1}
                   />
                 );
               })

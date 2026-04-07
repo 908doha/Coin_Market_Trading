@@ -17,7 +17,7 @@ export interface ChartPoint {
   value: number;
 }
 
-export type ChartPeriod = '1W' | '1M' | '3M' | '6M' | '1Y';
+export type ChartPeriod = '1W' | '1M' | '3M' | '6M' | '1Y' | 'ALL';
 
 export interface FundTransaction {
   id:           string;

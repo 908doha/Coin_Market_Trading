@@ -84,13 +84,20 @@ async function fetchGateTrades(apiKey: string, apiSecret: string): Promise<Trade
     else if (pnl > 0)               type = 'take_profit';
     else                             type = 'manual';
 
-    // 수익률: entry_price 기준
+    // 수익률: margin 기준 (실제 투자금 대비 수익률, 레버리지 반영됨)
+    // position_close가 margin 필드를 제공하면 pnl/margin, 없으면 가격차 * leverage
+    const margin     = parseFloat(t.margin     || '0');
+    const leverage   = parseFloat(t.leverage   || '1');
     const entryPrice = parseFloat(t.entry_price || '0');
     const fillPrice  = parseFloat(t.fill_price  || '0');
     let profitRate = 0;
-    if (entryPrice > 0 && fillPrice > 0) {
+    if (margin > 0) {
+      // 가장 정확: 실제 증거금 대비 실현 손익
+      profitRate = parseFloat(((pnl / margin) * 100).toFixed(2));
+    } else if (entryPrice > 0 && fillPrice > 0) {
+      // fallback: 가격 변화율 * 레버리지
       const diff = side === 'long' ? fillPrice - entryPrice : entryPrice - fillPrice;
-      profitRate = parseFloat(((diff / entryPrice) * 100).toFixed(2));
+      profitRate = parseFloat(((diff / entryPrice) * leverage * 100).toFixed(2));
     }
 
     return {

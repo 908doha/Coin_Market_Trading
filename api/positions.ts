@@ -78,8 +78,9 @@ async function fetchGatePositions(apiKey: string, apiSecret: string): Promise<Po
 
       const profitKrw    = unrealisedPnl * usdtKrw;
       const amountKrw    = notional * usdtKrw;
+      // 레버리지 반영: 실제 투자금(증거금) 대비 수익률
       const profitRate   = entryPrice > 0
-        ? ((markPrice - entryPrice) / entryPrice) * 100 * (size > 0 ? 1 : -1)
+        ? ((markPrice - entryPrice) / entryPrice) * 100 * (size > 0 ? 1 : -1) * leverage
         : 0;
 
       return {

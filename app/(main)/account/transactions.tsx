@@ -69,7 +69,7 @@ export default function Transactions() {
   return (
     <ScreenTransition>
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <SubPageHeader title="입출금 내역" />
+      <SubPageHeader title="입출금 내역" onBack={() => router.navigate('/(main)/account')} />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
         {isLoading ? (

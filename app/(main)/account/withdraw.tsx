@@ -92,7 +92,7 @@ export default function Withdraw() {
   return (
     <ScreenTransition>
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <SubPageHeader title="출금하기" />
+      <SubPageHeader title="출금하기" onBack={() => router.navigate('/(main)/account')} />
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">

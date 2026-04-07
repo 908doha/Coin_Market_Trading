@@ -88,7 +88,7 @@ export default function Notifications() {
   return (
     <ScreenTransition>
     <SafeAreaView style={styles.root} edges={['top']}>
-      <SubPageHeader title="알림 설정" />
+      <SubPageHeader title="알림 설정" onBack={() => router.navigate('/(main)/account')} />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* 섹션 헤더 */}

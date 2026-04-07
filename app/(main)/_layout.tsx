@@ -1,4 +1,5 @@
 import { Tabs } from 'expo-router';
+import { router } from 'expo-router';
 import { View, Pressable, StyleSheet, LayoutChangeEvent } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from '@/design-system';
@@ -72,7 +73,8 @@ function TossTabBar({ state, navigation }: BottomTabBarProps) {
       pillWidth.value = withSpring(layout.width,  SPRING_CONFIG);
     }
     activeIdx.value = withTiming(tabIndex, { duration: 180 });
-    navigation.navigate(routeName);
+    // expo-router의 navigate로 경로 직접 지정 → 중첩 스택을 항상 index로 리셋
+    router.navigate(`/(main)/${routeName}` as any);
   }
 
   return (

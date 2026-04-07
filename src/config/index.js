@@ -16,6 +16,17 @@ const config = {
   takeProfitPercent: parseFloat(process.env.TAKE_PROFIT_PERCENT) || 4,
   maxDailyLossUsdt: parseFloat(process.env.MAX_DAILY_LOSS_USDT) || 300,
 
+  // Kelly Criterion (포지션 사이징)
+  //   f* = p - (1 - p) / R   (p: 승률, R: 평균손익비)
+  //   실제 사용 시 fractional Kelly 적용 + 상한 캡으로 변동성/추정오차 완충
+  kelly: {
+    enabled: (process.env.KELLY_ENABLED || 'true') === 'true',
+    fraction: parseFloat(process.env.KELLY_FRACTION) || 0.5,        // Half-Kelly
+    maxFraction: parseFloat(process.env.KELLY_MAX_FRACTION) || 0.25, // 잔고 대비 최대 25%
+    minTrades: parseInt(process.env.KELLY_MIN_TRADES, 10) || 20,    // 학습 필요 최소 표본
+    defaultFraction: parseFloat(process.env.KELLY_DEFAULT_FRACTION) || 0.02, // 표본 부족 시 폴백 (2%)
+  },
+
   // Multi-Timeframe (HTF → MTF → LTF)
   timeframes: {
     htf: process.env.HTF_INTERVAL || '4h',   // 상위: 방향 판단

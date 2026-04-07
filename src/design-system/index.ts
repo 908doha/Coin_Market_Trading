@@ -33,3 +33,5 @@ export type { ChipProps, ChipVariant, ChipSize }        from './components/Chip'
 export type { BadgeProps, BadgeVariant, BadgeSize }     from './components/Badge';
 export type { DividerProps }  from './components/Divider';
 export type { AvatarProps, AvatarSize } from './components/Avatar';
+
+export { ToastProvider, useToast } from './components/Toast';

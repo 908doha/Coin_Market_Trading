@@ -69,21 +69,35 @@ export default function PositionDetail() {
     [id],
   );
 
-  // 봇 서버에서 ICT 분석 시그널 조회
-  const [botSignal, setBotSignal] = useState<BotSignal | null>(null);
+  // 봇 ICT 분석 조회 — 실시간 analyze 우선, entrySignals 폴백
+  const [botSignal, setBotSignal]     = useState<BotSignal | null>(null);
+  const [signalLoading, setSignalLoading] = useState(false);
   useEffect(() => {
     if (!position) return;
     const accountId = (position as any).accountId;
     if (!accountId) return;
-    fetch(`/api/bot/status?accountId=${encodeURIComponent(accountId)}`)
+
+    const contract = (position.symbol ?? '').replace('/', '_');
+    setSignalLoading(true);
+
+    fetch(`/api/bot/analyze?accountId=${encodeURIComponent(accountId)}&contract=${encodeURIComponent(contract)}`)
       .then((r) => r.json())
       .then((data) => {
-        // entrySignals: { 'BTC_USDT': { signal, reason, confluence, ... } }
-        const contract = (position.symbol ?? '').replace('/', '_'); // BTC/USDT → BTC_USDT
-        const sig = data?.entrySignals?.[contract];
-        if (sig) setBotSignal(sig);
+        // analyze가 실제 분석 결과를 주면 사용
+        if (data?.reason && data.reason !== '봇이 실행 중이지 않습니다' && !data.error) {
+          setBotSignal(data);
+          return;
+        }
+        // 봇 미실행 → 저장된 entrySignal 폴백
+        return fetch(`/api/bot/status?accountId=${encodeURIComponent(accountId)}`)
+          .then((r) => r.json())
+          .then((status) => {
+            const sig = status?.entrySignals?.[contract];
+            if (sig) setBotSignal(sig);
+          });
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setSignalLoading(false));
   }, [position]);
 
   const isProfit  = (position?.profit ?? 0) >= 0;
@@ -150,28 +164,36 @@ export default function PositionDetail() {
                 </View>
               </GlassCard>
 
-              {/* ── 포지션 요약 / ICT 분석 설명 ────────── */}
-              {(positionSummary || botSignal) && (
-                <GlassCard intensity="low" radius={20} padding={16} style={st.section}>
-                  {botSignal ? (
-                    <>
-                      <Text style={st.summaryText}>{botSignal.reason}</Text>
-                      {botSignal.confluence?.length > 0 && (
-                        <View style={{ marginTop: 12, gap: 6 }}>
-                          {botSignal.confluence.map((c, i) => (
-                            <View key={i} style={st.confluenceRow}>
-                              <Text style={st.confluenceDot}>•</Text>
-                              <Text style={st.confluenceText}>{c}</Text>
-                            </View>
+              {/* ── ICT 분석 설명 ───────────────────────── */}
+              <GlassCard intensity="low" radius={20} padding={16} style={st.section}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text.tertiary, letterSpacing: 0.2 }}>
+                    ICT 분석
+                  </Text>
+                  {signalLoading && (
+                    <Text style={{ fontSize: 12, color: colors.text.disabled }}>분석 중...</Text>
+                  )}
+                </View>
+                {botSignal ? (
+                  <>
+                    <Text style={st.summaryText}>{botSignal.reason}</Text>
+                    {botSignal.confluence?.length > 0 && (
+                      <View style={{ marginTop: 12, gap: 6 }}>
+                        {botSignal.confluence.map((c, i) => (
+                          <View key={i} style={st.confluenceRow}>
+                            <Text style={st.confluenceDot}>•</Text>
+                            <Text style={st.confluenceText}>{c}</Text>
+                          </View>
                           ))}
                         </View>
                       )}
                     </>
-                  ) : (
-                    <Text style={st.summaryText}>{positionSummary}</Text>
-                  )}
-                </GlassCard>
-              )}
+                  ) : !signalLoading ? (
+                    <Text style={[st.summaryText, { color: colors.text.disabled }]}>
+                      봇이 실행 중이지 않거나 아직 분석 데이터가 없어요
+                    </Text>
+                  ) : null}
+              </GlassCard>
 
               {/* ── 손익 히어로 카드 ────────────────────── */}
               <GlassCard intensity="medium" radius={24} padding={24} style={st.section}>

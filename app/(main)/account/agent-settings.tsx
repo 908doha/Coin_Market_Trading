@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Alert, Pressable } from 'react-native';
+import { View, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Text, Card, Button, Badge, SubPageHeader, ScreenTransition, AgentSettingsSkeleton } from '@/design-system';
+import { Text, Card, Button, Badge, SubPageHeader, ScreenTransition, AgentSettingsSkeleton, useToast } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS } from '@/store/accounts';
 import type { ExchangeAccount } from '@/store/accounts';
@@ -118,6 +118,7 @@ function BotStatusBadge({ running }: { running: boolean | null }) {
 // ── Main screen ───────────────────────────────────────────────────────────────
 export default function AgentSettings() {
   const { accounts, updateAccount } = useAccounts();
+  const toast = useToast();
 
   const [agentDefs, setAgentDefs]     = useState<AgentDefinition[] | null>(null);
   const [defsLoading, setDefsLoading] = useState(true);
@@ -147,7 +148,6 @@ export default function AgentSettings() {
     const acc = accounts.find((a) => a.id === accountId);
     setDraftAgentId(acc?.agentId ?? null);
     setBotRunning(null);
-    // Fetch bot status for this account
     if (acc) {
       fetch(`/api/bot/status?accountId=${encodeURIComponent(acc.id)}`)
         .then((r) => r.json())
@@ -155,6 +155,18 @@ export default function AgentSettings() {
         .catch(() => setBotRunning(false));
     }
   }, [accountId, accounts]);
+
+  // 에이전트 목록 로드 후, 저장된 agentId가 목록에 없으면 첫 번째 에이전트로 마이그레이션
+  useEffect(() => {
+    if (!agentDefs || agentDefs.length === 0) return;
+    const acc = accounts.find((a) => a.id === accountId);
+    if (!acc?.agentId) return;
+    const found = agentDefs.find((d) => d.id === acc.agentId);
+    if (!found) {
+      // 이전 형식의 agentId → 첫 번째 에이전트로 자동 매핑
+      setDraftAgentId(agentDefs[0].id);
+    }
+  }, [agentDefs, accountId]);
 
   const selected = draftAgentId ?? DATA_ONLY_ID;
 
@@ -165,9 +177,13 @@ export default function AgentSettings() {
       const acc = accounts.find((a) => a.id === accountId);
       if (!acc) throw new Error('계좌를 찾을 수 없어요.');
 
+      // 1. 로컬 저장 먼저 (반드시 성공해야 함)
+      await updateAccount(accountId, { agentId: draftAgentId });
+      toast.show({ type: 'success', message: '에이전트 설정이 저장됐어요' });
+
+      // 2. 봇 서버 시작/정지는 best-effort (실패해도 저장은 완료)
       if (draftAgentId) {
-        // Start bot for this account
-        const res = await fetch('/api/bot/start', {
+        fetch('/api/bot/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -177,26 +193,22 @@ export default function AgentSettings() {
             exchange:  acc.exchange,
             agentId:   draftAgentId,
           }),
-        });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err?.error ?? `봇 시작 실패 (${res.status})`);
-        }
-        setBotRunning(true);
+        })
+          .then((r) => r.ok && setBotRunning(true))
+          .catch(() => {});
       } else {
-        // Stop bot for this account
-        await fetch('/api/bot/stop', {
+        fetch('/api/bot/stop', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ accountId: acc.id }),
-        }).catch(() => {}); // ignore stop errors (bot may not be running)
-        setBotRunning(false);
+        })
+          .then(() => setBotRunning(false))
+          .catch(() => {});
       }
 
-      await updateAccount(accountId, { agentId: draftAgentId });
       router.back();
     } catch (err: any) {
-      Alert.alert('오류', err?.message ?? '저장에 실패했어요.');
+      toast.show({ type: 'error', message: err?.message ?? '저장에 실패했어요' });
     } finally {
       setSaving(false);
     }
@@ -252,7 +264,6 @@ export default function AgentSettings() {
                     id={def.id}
                     name={def.name}
                     description={def.description}
-                    badge={def.isDashboardOnly ? '대시보드 전용' : undefined}
                     version={def.version}
                     selected={selected === def.id}
                     onPress={() => setDraftAgentId(def.id)}

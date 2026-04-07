@@ -7,6 +7,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useFonts } from 'expo-font';
 import { AuthProvider } from '@/store/auth';
 import { AccountsProvider } from '@/store/accounts';
+import { ToastProvider } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 
 SplashScreen.preventAutoHideAsync();
@@ -31,12 +32,14 @@ export default function RootLayout() {
     return (
       <AuthProvider>
         <AccountsProvider>
-          <StatusBar style="dark" backgroundColor="#F5F5F5" />
-          <View style={styles.webOuter}>
-            <View style={styles.webInner}>
-              <Stack screenOptions={{ headerShown: false }} />
+          <ToastProvider>
+            <StatusBar style="dark" backgroundColor="#F5F5F5" />
+            <View style={styles.webOuter}>
+              <View style={styles.webInner}>
+                <Stack screenOptions={{ headerShown: false }} />
+              </View>
             </View>
-          </View>
+          </ToastProvider>
         </AccountsProvider>
       </AuthProvider>
     );
@@ -45,8 +48,10 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <AccountsProvider>
-        <StatusBar style="dark" backgroundColor="#F5F5F5" />
-        <Stack screenOptions={{ headerShown: false }} />
+        <ToastProvider>
+          <StatusBar style="dark" backgroundColor="#F5F5F5" />
+          <Stack screenOptions={{ headerShown: false }} />
+        </ToastProvider>
       </AccountsProvider>
     </AuthProvider>
   );

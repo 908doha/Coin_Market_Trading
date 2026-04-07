@@ -88,7 +88,7 @@ function AgentRow({
   );
 }
 
-// ── 기간 선택 바텀시트 ────────────────────────────────────────────────────────
+// ── 기간 선택 바텀시트 (Toss 스타일) ─────────────────────────────────────────
 function PeriodBottomSheet({
   visible, period, onChange, onClose,
 }: {
@@ -99,67 +99,74 @@ function PeriodBottomSheet({
 }) {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={sheet.backdrop} onPress={onClose}>
-        <Pressable style={sheet.container} onPress={() => {}}>
-          {/* 핸들 */}
+      <Pressable style={sheet.overlay} onPress={onClose}>
+        {/* stopPropagation 대신 빈 onPress로 버블 차단 */}
+        <View style={sheet.sheet}>
           <View style={sheet.handle} />
-          <Text style={sheet.title}>기간 선택</Text>
+
           {PERIODS.map((p) => {
             const active = p.key === period;
             return (
               <Pressable
                 key={p.key}
-                style={[sheet.item, active && sheet.itemActive]}
+                style={({ pressed }) => [sheet.row, pressed && sheet.rowPressed]}
                 onPress={() => { onChange(p.key); onClose(); }}
               >
-                <Text style={[sheet.itemText, active && sheet.itemTextActive]}>
+                <Text style={[sheet.rowText, active && sheet.rowTextActive]}>
                   {p.label}
                 </Text>
-                {active && <Text style={sheet.check}>✓</Text>}
+                {active && (
+                  <Svg width={24} height={24} viewBox="0 0 24 24">
+                    <Circle cx="12" cy="12" r="12" fill={colors.primary.default} />
+                    <Path
+                      d="M7 12.5l3.5 3.5 6.5-7"
+                      stroke="#fff"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      fill="none"
+                    />
+                  </Svg>
+                )}
               </Pressable>
             );
           })}
-          <View style={{ height: 20 }} />
-        </Pressable>
+
+          <View style={{ height: 34 }} />
+        </View>
       </Pressable>
     </Modal>
   );
 }
 
 const sheet = StyleSheet.create({
-  backdrop: {
-    flex:            1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent:  'flex-end',
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'flex-end',
   },
-  container: {
-    backgroundColor: colors.bg.default,
-    borderTopLeftRadius:  24,
-    borderTopRightRadius: 24,
-    paddingTop:    12,
-    paddingHorizontal: 0,
+  sheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius:  20,
+    borderTopRightRadius: 20,
+    paddingTop: 10,
   },
   handle: {
-    width: 36, height: 4, borderRadius: 2,
-    backgroundColor: colors.border.strong,
+    width: 32, height: 4, borderRadius: 2,
+    backgroundColor: '#E5E5EA',
     alignSelf: 'center',
-    marginBottom: 20,
+    marginBottom: 8,
   },
-  title: {
-    fontSize: 16, fontWeight: '700', color: colors.text.primary,
-    paddingHorizontal: 20, marginBottom: 8,
-  },
-  item: {
+  row: {
     flexDirection:  'row',
     alignItems:     'center',
     justifyContent: 'space-between',
-    paddingVertical:   16,
-    paddingHorizontal: 20,
+    paddingVertical:   18,
+    paddingHorizontal: 24,
   },
-  itemActive:     { backgroundColor: colors.bg.subtle },
-  itemText:       { fontSize: 15, fontWeight: '500', color: colors.text.primary },
-  itemTextActive: { fontWeight: '700', color: colors.text.primary },
-  check:          { fontSize: 15, color: colors.primary.default, fontWeight: '700' },
+  rowPressed:      { backgroundColor: '#F5F5F7' },
+  rowText:         { fontSize: 17, fontWeight: '400', color: '#191919' },
+  rowTextActive:   { fontWeight: '600', color: colors.primary.default },
 });
 
 // ── 자산 통계 카드 ────────────────────────────────────────────────────────────
@@ -214,9 +221,24 @@ function AssetChart({ data, positive, showUsd, rate, period, onPeriodPress }: As
   const values = data
     .map((d) => (typeof d.value === 'number' && isFinite(d.value) ? d.value : null))
     .filter((v): v is number => v !== null);
+
+  if (values.length < 2) {
+    return (
+      <View>
+        <Pressable style={chartSt.periodRow} onPress={onPeriodPress}>
+          <Text style={chartSt.periodLabel}>{periodLabel}</Text>
+          <Text style={chartSt.periodChevron}>▾</Text>
+        </Pressable>
+        <View style={{ height: CHART_H, alignItems: 'center', justifyContent: 'center' }}>
+          <Text variant="caption1" color={colors.text.disabled}>데이터 없음</Text>
+        </View>
+      </View>
+    );
+  }
+
   const min    = Math.min(...values);
   const max    = Math.max(...values);
-  const range  = max - min || max * 0.02 || 1;
+  const range  = max - min || Math.abs(max) * 0.02 || 1;
   const color  = positive ? colors.market.rise : colors.market.fall;
   const n      = values.length;
 
@@ -354,16 +376,13 @@ function AssetChart({ data, positive, showUsd, rate, period, onPeriodPress }: As
         </View>
       </TouchableWithoutFeedback>
 
-      {/* Y축 레이블 */}
-      <View style={chartSt.yLabels}>
-        {gridValues.map((gv, gi) => (
-          <Text key={gi} variant="caption1" color={colors.text.disabled}>
-            {showUsd && rate > 0
-              ? `$${Math.round(gv / rate).toLocaleString('en-US')}`
-              : `${Math.round(gv / 10000).toLocaleString('ko-KR')}만`}
-          </Text>
-        ))}
-      </View>
+      {/* 날짜 범위 */}
+      {(data[0]?.date || data[data.length - 1]?.date) && (
+        <View style={chartSt.dateRow}>
+          <Text variant="caption1" color={colors.text.disabled}>{data[0]?.date ?? ''}</Text>
+          <Text variant="caption1" color={colors.text.disabled}>{data[data.length - 1]?.date ?? ''}</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -378,7 +397,7 @@ const chartSt = StyleSheet.create({
   changePill:    { flexDirection: 'row', alignItems: 'baseline', marginLeft: 8 },
   changePct:     { fontSize: 14, fontWeight: '700' },
   changeLabel:   { fontSize: 13, color: colors.text.disabled },
-  yLabels:   {
+  dateRow: {
     flexDirection: 'row', justifyContent: 'space-between',
     marginTop: 4, paddingHorizontal: 2,
   },

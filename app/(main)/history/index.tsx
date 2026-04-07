@@ -2,11 +2,12 @@ import React, { useState } from 'react';
 import { View, StyleSheet, ScrollView, Pressable, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Text, Card, Badge, Chip, Divider } from '@/design-system';
+import { Text, Card, Badge, Chip } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
-import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
+import { useAccounts } from '@/store/accounts';
+import { formatKRWSigned, formatRate } from '@/utils/format';
 import type { Trade } from '@/services';
 
 type Filter = '전체' | '수익' | '손실';
@@ -83,7 +84,11 @@ function SummaryStats({ trades }: { trades: Trade[] }) {
 
 export default function History() {
   const [filter, setFilter] = useState<Filter>('전체');
-  const { data: trades, isLoading, error, refetch } = useApi(() => tradesService.getAll(), []);
+  const { accounts } = useAccounts();
+  const { data: trades, isLoading, error, refetch } = useApi(
+    () => tradesService.getAllByAccounts(accounts),
+    [accounts],
+  );
 
   const filtered = (trades ?? []).filter((t) => {
     if (filter === '수익') return t.profit >= 0;

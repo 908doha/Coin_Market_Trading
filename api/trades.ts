@@ -62,10 +62,15 @@ async function fetchGateTrades(apiKey: string, apiSecret: string): Promise<Trade
     usdtKrw = t.trade_price;
   } catch { /* fallback */ }
 
-  // 청산 거래만 (size가 0인 closing trade)
-  const closingTrades = data.filter((t: any) => t.close_position === true);
+  // close_position이 true이거나 close_pnl이 있는 청산 거래
+  const closingTrades = data.filter((t: any) =>
+    t.close_position === true || (t.close_pnl != null && t.close_pnl !== '' && t.close_pnl !== '0'),
+  );
 
-  return closingTrades.map((t: any): Trade => {
+  // 청산 거래가 없으면 전체 반환 (거래 내역 표시용)
+  const trades = closingTrades.length > 0 ? closingTrades : data;
+
+  return trades.map((t: any): Trade => {
     const pnl        = parseFloat(t.close_pnl || '0');
     const profitKrw  = pnl * usdtKrw;
     const contract   = t.contract as string;

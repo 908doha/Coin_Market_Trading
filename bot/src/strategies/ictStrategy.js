@@ -151,9 +151,13 @@ class IctStrategy {
 
   /**
    * MTF (15m): 구조 확인
+   * HTF 방향에 맞고 현재가 기준 올바른 위치에 있는 OB/FVG만 사용
+   *   - Bullish: 진입가보다 아래 (지지 역할)
+   *   - Bearish: 진입가보다 위 (저항 역할)
    */
   _analyzeMTF(candles, htfDirection) {
     const confluence = [];
+    const currentPrice = candles[candles.length - 1].close;
     const swingHighs = indicators.findSwingHighs(candles, config.ict.structureShiftBars);
     const swingLows = indicators.findSwingLows(candles, config.ict.structureShiftBars);
 
@@ -168,17 +172,34 @@ class IctStrategy {
       confluence.push(`MTF(${config.timeframes.mtf}) ${htfDirection} MSS`);
     }
 
+    // Order Block - 위치 검증
     const orderBlocks = indicators.findOrderBlocks(candles);
-    const relevantOBs = htfDirection === 'bullish' ? orderBlocks.bullish : orderBlocks.bearish;
+    const rawOBs = htfDirection === 'bullish' ? orderBlocks.bullish : orderBlocks.bearish;
+    const relevantOBs = rawOBs.filter((ob) => {
+      if (htfDirection === 'bullish') {
+        // Bullish OB는 현재가보다 아래 (지지)
+        return ob.high < currentPrice;
+      } else {
+        // Bearish OB는 현재가보다 위 (저항)
+        return ob.low > currentPrice;
+      }
+    });
     if (relevantOBs.length > 0) {
       const ob = relevantOBs[relevantOBs.length - 1];
       confluence.push(`MTF OB [${ob.low.toFixed(2)}-${ob.high.toFixed(2)}]`);
     }
 
+    // FVG - 위치 검증
     const fvgs = indicators.findFairValueGaps(candles);
-    const relevantFVGs = htfDirection === 'bullish' ? fvgs.bullish : fvgs.bearish;
-    // 미메움 FVG만 필터
-    const unfilled = relevantFVGs.filter(f => !f.isFilled);
+    const rawFVGs = htfDirection === 'bullish' ? fvgs.bullish : fvgs.bearish;
+    const unfilled = rawFVGs.filter((f) => {
+      if (f.isFilled) return false;
+      if (htfDirection === 'bullish') {
+        return f.top <= currentPrice; // 현재가 아래의 Bullish FVG
+      } else {
+        return f.bottom >= currentPrice; // 현재가 위의 Bearish FVG
+      }
+    });
     if (unfilled.length > 0) {
       const fvg = unfilled[unfilled.length - 1];
       confluence.push(`MTF FVG [${fvg.bottom.toFixed(2)}-${fvg.top.toFixed(2)}] CE:${fvg.ce.toFixed(2)}`);
@@ -189,7 +210,7 @@ class IctStrategy {
 
     return {
       confirmed: hasStructure && hasPOI,
-      reason: hasStructure && hasPOI ? '구조 확인됨' : 'MSS 또는 POI 부족',
+      reason: hasStructure && hasPOI ? '구조 확인됨' : 'MSS 또는 POI 부족 (위치 검증 후)',
       confluence,
       orderBlocks: relevantOBs,
       fvgs: unfilled,
@@ -223,21 +244,32 @@ class IctStrategy {
       }
     }
 
-    // ===== 진입 근거 1: FVG CE (Consequent Encroachment) =====
+    // LTF FVG - 위치 검증 (방향에 맞는 FVG만)
     const fvgs = indicators.findFairValueGaps(candles);
-    const relevantFVGs = htfDirection === 'bullish' ? fvgs.bullish : fvgs.bearish;
-    const unfilledFVGs = relevantFVGs.filter(f => !f.isFilled);
+    const rawFVGs = htfDirection === 'bullish' ? fvgs.bullish : fvgs.bearish;
+    const unfilledFVGs = rawFVGs.filter((f) => {
+      if (f.isFilled) return false;
+      if (htfDirection === 'bullish') {
+        // Bullish FVG는 현재가가 FVG 위 또는 FVG 내부여야 함 (되돌림 매수)
+        return f.bottom <= currentPrice;
+      } else {
+        // Bearish FVG는 현재가가 FVG 아래 또는 FVG 내부여야 함 (되돌림 매도)
+        return f.top >= currentPrice;
+      }
+    });
 
+    // ===== 진입 근거 1: FVG CE (정확히 CE 근처) =====
+    // CE = FVG 중간값. 현재가가 CE에서 fvgCeThreshold(0.15%) 이내일 때만
     for (const fvg of unfilledFVGs) {
       if (fvg.atCE) {
-        confluence.push(`LTF FVG CE @ ${fvg.ce.toFixed(2)} (${fvg.fillPercent}% filled)`);
+        confluence.push(`LTF FVG CE @ ${fvg.ce.toFixed(2)} (진입가 ${currentPrice.toFixed(2)})`);
         entryConfirmed = true;
         entryType = 'FVG_CE';
         break;
       }
     }
 
-    // ===== 진입 근거 2: FVG Fill =====
+    // ===== 진입 근거 2: FVG Fill (50% 이상 채워졌을 때) =====
     if (!entryConfirmed) {
       for (const fvg of unfilledFVGs) {
         if (fvg.inRange && fvg.fillPercent >= 50 && fvg.fillPercent < 100) {

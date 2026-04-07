@@ -97,6 +97,19 @@ function AgentOption({
   );
 }
 
+// ── Bot status badge ──────────────────────────────────────────────────────────
+function BotStatusBadge({ running }: { running: boolean | null }) {
+  if (running === null) return null;
+  return (
+    <View style={[styles.botBadge, { backgroundColor: running ? '#0A2' + '18' : colors.bg.elevated }]}>
+      <View style={[styles.botDot, { backgroundColor: running ? '#00C853' : '#888' }]} />
+      <Text style={[styles.botBadgeText, { color: running ? '#00C853' : colors.text.tertiary }]}>
+        {running ? '봇 실행 중' : '봇 중지됨'}
+      </Text>
+    </View>
+  );
+}
+
 // ── Main screen ───────────────────────────────────────────────────────────────
 export default function AgentSettings() {
   const { accounts, updateAccount } = useAccounts();
@@ -110,11 +123,20 @@ export default function AgentSettings() {
   // Per-account draft agentId (null = data-only)
   const [draftAgentId, setDraftAgentId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [botRunning, setBotRunning] = useState<boolean | null>(null);
 
   // Sync draft when switching accounts
   useEffect(() => {
     const acc = accounts.find((a) => a.id === accountId);
     setDraftAgentId(acc?.agentId ?? null);
+    setBotRunning(null);
+    // Fetch bot status for this account
+    if (acc) {
+      fetch(`/api/bot/status?accountId=${encodeURIComponent(acc.id)}`)
+        .then((r) => r.json())
+        .then((data) => setBotRunning(data?.running ?? false))
+        .catch(() => setBotRunning(false));
+    }
   }, [accountId, accounts]);
 
   const selected = draftAgentId ?? DATA_ONLY_ID;
@@ -123,10 +145,41 @@ export default function AgentSettings() {
     if (!accountId) return;
     setSaving(true);
     try {
+      const acc = accounts.find((a) => a.id === accountId);
+      if (!acc) throw new Error('계좌를 찾을 수 없어요.');
+
+      if (draftAgentId) {
+        // Start bot for this account
+        const res = await fetch('/api/bot/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            accountId: acc.id,
+            apiKey:    acc.apiKey,
+            apiSecret: acc.apiSecret,
+            exchange:  acc.exchange,
+            agentId:   draftAgentId,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err?.error ?? `봇 시작 실패 (${res.status})`);
+        }
+        setBotRunning(true);
+      } else {
+        // Stop bot for this account
+        await fetch('/api/bot/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ accountId: acc.id }),
+        }).catch(() => {}); // ignore stop errors (bot may not be running)
+        setBotRunning(false);
+      }
+
       await updateAccount(accountId, { agentId: draftAgentId });
       router.back();
-    } catch {
-      Alert.alert('오류', '저장에 실패했어요.');
+    } catch (err: any) {
+      Alert.alert('오류', err?.message ?? '저장에 실패했어요.');
     } finally {
       setSaving(false);
     }
@@ -150,6 +203,9 @@ export default function AgentSettings() {
               />
             </>
           )}
+
+          {/* ── 봇 상태 ── */}
+          {accounts.length > 0 && <BotStatusBadge running={botRunning} />}
 
           {/* ── 에이전트 선택 ── */}
           <Card variant="outlined" style={styles.section}>
@@ -298,6 +354,16 @@ const styles = StyleSheet.create({
     width: 10, height: 10, borderRadius: 5,
     backgroundColor: colors.primary.default,
   },
+
+  botBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12, paddingVertical: 6,
+    borderRadius: 99, marginBottom: spacing[4],
+    borderWidth: 1, borderColor: colors.border.default,
+  },
+  botDot:      { width: 7, height: 7, borderRadius: 4 },
+  botBadgeText: { fontSize: 12, fontWeight: '600' },
 
   emptyDefs: { paddingVertical: spacing[6], alignItems: 'center' },
   retryBtn:  { paddingHorizontal: 20, paddingVertical: 8, borderRadius: 10, backgroundColor: '#191919' },

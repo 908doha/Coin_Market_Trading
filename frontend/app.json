@@ -1,32 +1,41 @@
 {
   "expo": {
-    "name": "Coin Market Trading",
-    "slug": "coin-market-trading",
+    "name": "Osprey",
+    "slug": "osprey",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "coinmarkettrading",
+    "scheme": "osprey",
     "userInterfaceStyle": "automatic",
     "splash": {
       "image": "./assets/images/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#000000"
+      "backgroundColor": "#FFFFFF"
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.coinmarkettrading.app"
+      "bundleIdentifier": "com.osprey.app"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#000000"
       },
-      "package": "com.coinmarkettrading.app"
+      "package": "com.osprey.app"
     },
     "web": {
       "bundler": "metro",
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "name": "Osprey",
+      "shortName": "Osprey",
+      "description": "AI 에이전트 기반 암호화폐 자동 트레이딩",
+      "themeColor": "#3182F6",
+      "backgroundColor": "#F5F5F5",
+      "display": "standalone",
+      "orientation": "portrait",
+      "scope": "/",
+      "startUrl": "/"
     },
     "plugins": [
       "expo-router",

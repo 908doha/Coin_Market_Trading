@@ -5,6 +5,9 @@ export { positionsService }     from './positions.service';
 export { tradesService }        from './trades.service';
 export { agentService }         from './agent.service';
 export { notificationsService } from './notifications.service';
+export { githubService }        from './github.service';
+export { exchangeService }          from './exchange.service';
+export { exchangeAccountsService }  from './exchange-accounts.service';
 
 export type { LoginRequest, SignupRequest, AuthResponse }             from './auth.service';
 export type { Balance, ChartPoint, ChartPeriod, FundTransaction,
@@ -13,3 +16,4 @@ export type { Position }                                              from './po
 export type { Trade }                                                 from './trades.service';
 export type { AgentStats, AgentSettings, AgentStatus, RiskLevel }    from './agent.service';
 export type { NotificationSettings }                                  from './notifications.service';
+export type { AgentDefinition }                                       from './github.service';

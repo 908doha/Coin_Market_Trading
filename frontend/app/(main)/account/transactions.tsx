@@ -1,8 +1,7 @@
 import React from 'react';
-import { View, StyleSheet, ScrollView, Pressable, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
-import { Text, Card, Badge } from '@/design-system';
+import { Text, Card, Badge, SubPageHeader, ScreenTransition, TransactionListSkeleton } from '@/design-system';
 import { colors, spacing } from '@/design-system/tokens';
 import { accountService } from '@/services';
 import { useApi } from '@/hooks/useApi';
@@ -68,25 +67,18 @@ export default function Transactions() {
   );
 
   return (
+    <ScreenTransition>
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <View style={styles.navBar}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
-          <Text variant="body1">←</Text>
-        </Pressable>
-        <Text variant="heading3">충전·출금 내역</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <SubPageHeader title="입출금 내역" onBack={() => router.navigate('/(main)/account')} />
 
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20, paddingBottom: 120 }}>
         {isLoading ? (
-          <View style={styles.center}>
-            <ActivityIndicator color={colors.primary.default} />
-          </View>
+          <TransactionListSkeleton />
         ) : error ? (
           <View style={styles.center}>
             <Text variant="body1" color={colors.text.tertiary} align="center">{error}</Text>
             <Pressable onPress={refetch} style={{ marginTop: spacing[4] }}>
-              <Text variant="label1Bold" color={colors.primary.default}>다시 시도</Text>
+              <Text variant="label1Bold" color={colors.text.primary}>다시 시도</Text>
             </Pressable>
           </View>
         ) : !transactions?.length ? (
@@ -104,17 +96,12 @@ export default function Transactions() {
         )}
       </ScrollView>
     </SafeAreaView>
+    </ScreenTransition>
   );
 }
 
 const styles = StyleSheet.create({
   safe:   { flex: 1, backgroundColor: colors.bg.default },
-  navBar: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: spacing[5], paddingVertical: spacing[3],
-    borderBottomWidth: 1, borderBottomColor: colors.border.default,
-  },
-  backBtn: { width: 40, paddingVertical: spacing[1] },
   center:  { marginTop: spacing[16], alignItems: 'center' },
   empty:   { marginTop: spacing[16], alignItems: 'center' },
 });

@@ -33,7 +33,9 @@ async function localLoad(): Promise<ExchangeAccount[]> {
     const raw = Platform.OS === 'web'
       ? localStorage.getItem(STORAGE_KEY)
       : await SecureStore.getItemAsync(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as ExchangeAccount[]) : [];
+    const result = raw ? (JSON.parse(raw) as ExchangeAccount[]) : [];
+    console.log(`[accounts] loaded ${result.length} accounts`);
+    return result;
   } catch (e) {
     console.error('[accounts] load error:', e);
     return [];
@@ -44,9 +46,12 @@ async function localSave(accounts: ExchangeAccount[]): Promise<void> {
   const raw = JSON.stringify(accounts);
   if (Platform.OS === 'web') {
     localStorage.setItem(STORAGE_KEY, raw);
+    const check = localStorage.getItem(STORAGE_KEY);
+    if (!check) throw new Error('localStorage 저장 실패 — 브라우저가 저장을 차단했을 수 있어요');
   } else {
     await SecureStore.setItemAsync(STORAGE_KEY, raw);
   }
+  console.log(`[accounts] saved ${accounts.length} accounts`);
 }
 
 function makeId(): string {

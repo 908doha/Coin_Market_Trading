@@ -47,6 +47,8 @@ class BotInstance {
     this.lastSignal = null;
     this.errorCount = 0;
     this.lastOrderAt = null;
+    // contract → 진입 시 ICT 분석 결과 저장 (포지션 상세 표시용)
+    this.entrySignals = new Map(); // e.g. 'BTC_USDT' → { signal, reason, confluence, entryAt }
   }
 
   async start() {
@@ -166,6 +168,18 @@ class BotInstance {
       });
 
       this.lastOrderAt = new Date().toISOString();
+
+      // 진입 시그널 저장 (포지션 상세 화면에서 ICT 분석 근거 표시)
+      this.entrySignals.set(CONTRACT, {
+        signal:     signal.signal,
+        reason:     signal.reason,
+        confluence: signal.confluence ?? [],
+        entry:      signal.entry,
+        sl:         signal.sl,
+        tp:         signal.tp,
+        entryAt:    this.lastOrderAt,
+      });
+
       logger.info(`[Bot:${this.accountId}] 진입 주문 완료 (size=${size})`);
 
       // ── 7. SL / TP 주문 (잠시 후 포지션 확인 후 설정) ───────────
@@ -228,13 +242,13 @@ class BotInstance {
 
   getStatus() {
     return {
-      accountId:   this.accountId,
-      agentId:     this.agentId,
-      running:     this.running,
-      startedAt:   this.startedAt,
-      lastTick:    this.lastTick,
-      lastOrderAt: this.lastOrderAt,
-      lastSignal:  this.lastSignal
+      accountId:    this.accountId,
+      agentId:      this.agentId,
+      running:      this.running,
+      startedAt:    this.startedAt,
+      lastTick:     this.lastTick,
+      lastOrderAt:  this.lastOrderAt,
+      lastSignal:   this.lastSignal
         ? {
             signal:     this.lastSignal.signal,
             reason:     this.lastSignal.reason,
@@ -244,7 +258,9 @@ class BotInstance {
             confluence: this.lastSignal.confluence,
           }
         : null,
-      errorCount:  this.errorCount,
+      // contract → 진입 시그널 (포지션 상세 화면용)
+      entrySignals: Object.fromEntries(this.entrySignals),
+      errorCount:   this.errorCount,
     };
   }
 }

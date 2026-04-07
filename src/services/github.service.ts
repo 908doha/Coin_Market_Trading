@@ -25,10 +25,21 @@ export const githubService = {
   async getAgentDefinitions(): Promise<AgentDefinition[]> {
     if (cache && Date.now() - cache.at < CACHE_TTL) return cache.data;
 
-    const res = await fetch(`${API_BASE}/api/agents`);
-    if (!res.ok) throw new Error('에이전트 목록을 불러오지 못했어요');
-    const data: AgentDefinition[] = await res.json();
+    const url = `${API_BASE}/api/agents`;
+    let res: Response;
+    try {
+      res = await fetch(url);
+    } catch (e: any) {
+      throw new Error(`네트워크 오류: ${e?.message ?? e} (${url})`);
+    }
 
+    if (!res.ok) {
+      let detail = '';
+      try { const j = await res.json(); detail = j?.error ?? JSON.stringify(j); } catch { detail = await res.text().catch(() => ''); }
+      throw new Error(`[${res.status}] ${detail || res.statusText} — ${url}`);
+    }
+
+    const data: AgentDefinition[] = await res.json();
     cache = { data, at: Date.now() };
     return data;
   },

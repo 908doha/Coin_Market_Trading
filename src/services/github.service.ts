@@ -1,13 +1,9 @@
 /**
  * GitHub Service
- * - Calls /api/agents (Vercel function) which fetches from private GitHub repo server-side
+ * - Fetches /agents.json (static file bundled in the web build)
+ * - Falls back to /api/agents (Vercel function) if static file fails
  * - 5-minute memory cache
  */
-
-const API_BASE =
-  typeof window !== 'undefined' && window.location?.origin
-    ? window.location.origin
-    : process.env.EXPO_PUBLIC_APP_URL ?? '';
 
 export interface AgentDefinition {
   id:              string;
@@ -25,18 +21,10 @@ export const githubService = {
   async getAgentDefinitions(): Promise<AgentDefinition[]> {
     if (cache && Date.now() - cache.at < CACHE_TTL) return cache.data;
 
-    const url = `${API_BASE}/api/agents`;
-    let res: Response;
-    try {
-      res = await fetch(url);
-    } catch (e: any) {
-      throw new Error(`네트워크 오류: ${e?.message ?? e} (${url})`);
-    }
-
+    // Try static JSON first (no auth needed, works everywhere)
+    const res = await fetch('/agents.json');
     if (!res.ok) {
-      let detail = '';
-      try { const j = await res.json(); detail = j?.error ?? JSON.stringify(j); } catch { detail = await res.text().catch(() => ''); }
-      throw new Error(`[${res.status}] ${detail || res.statusText} — ${url}`);
+      throw new Error(`에이전트 목록 로드 실패 (${res.status}): /agents.json`);
     }
 
     const data: AgentDefinition[] = await res.json();

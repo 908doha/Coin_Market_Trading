@@ -54,21 +54,16 @@ export default function RootLayout() {
 const styles = StyleSheet.create({
   webOuter: {
     flex:            1,
-    backgroundColor: '#E8E8E8',
+    backgroundColor: '#F5F5F5',
     alignItems:      'center',
     justifyContent:  'center',
   },
   webInner: {
-    // 3:4 비율 — 높이 기준으로 너비 계산
     width:           '100%',
-    maxWidth:        480,
+    maxWidth:        960,
     height:          '100%',
     maxHeight:       '100%',
     backgroundColor: '#F5F5F5',
     overflow:        'hidden',
-    // 웹 전용 그림자
-    ...(Platform.OS === 'web' ? {
-      boxShadow: '0 0 40px rgba(0,0,0,0.15)',
-    } as any : {}),
   },
 });

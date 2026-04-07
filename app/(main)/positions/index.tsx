@@ -6,7 +6,7 @@ import Animated, {
   useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing,
 } from 'react-native-reanimated';
 import {
-  Text, GlassCard, Chip, PressableScale, FadeTabView, TradingListSkeleton, PageHeader,
+  Text, GlassCard, Chip, PressableScale, FadeTabView, TradingListSkeleton, PageHeader, CurrencyToggle,
 } from '@/design-system';
 import { positionsService, tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
@@ -23,7 +23,18 @@ const EASE_OUT = Easing.out(Easing.cubic);
 // ─────────────────────────────────────────────
 //  Portfolio Summary Card
 // ─────────────────────────────────────────────
-function PortfolioSummary({ positions }: { positions: Position[] }) {
+function fmtAmt(krw: number, showUsd: boolean, rate: number) {
+  if (!showUsd) return formatKRW(krw);
+  return `$${(krw / rate).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+function fmtSigned(krw: number, showUsd: boolean, rate: number) {
+  if (!showUsd) return formatKRWSigned(krw);
+  const usd  = krw / rate;
+  const sign = usd >= 0 ? '+' : '';
+  return `${sign}$${Math.abs(usd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function PortfolioSummary({ positions, showUsd, rate }: { positions: Position[]; showUsd: boolean; rate: number }) {
   const totalInvested   = positions.reduce((s, p) => s + p.amount, 0);
   const totalProfit     = positions.reduce((s, p) => s + p.profit, 0);
   const totalProfitRate = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
@@ -34,13 +45,13 @@ function PortfolioSummary({ positions }: { positions: Position[] }) {
       <View style={styles.summaryRow}>
         <View style={{ flex: 1 }}>
           <Text variant="meta" color="#AEAEB2" style={styles.mb6}>총 투자금</Text>
-          <Text style={styles.summaryMain}>{formatKRW(totalInvested)}</Text>
+          <Text style={styles.summaryMain}>{fmtAmt(totalInvested, showUsd, rate)}</Text>
         </View>
         <View style={styles.summaryDivider} />
         <View style={{ flex: 1, alignItems: 'flex-end' }}>
           <Text variant="meta" color="#AEAEB2" style={styles.mb6}>평가 손익</Text>
           <Text style={[styles.summaryMain, { color: pnlColor }]}>
-            {formatKRWSigned(totalProfit)}
+            {fmtSigned(totalProfit, showUsd, rate)}
           </Text>
           <Text style={[styles.summaryRate, { color: pnlColor }]}>
             {totalProfitRate >= 0 ? '+' : ''}{totalProfitRate.toFixed(2)}%
@@ -54,13 +65,10 @@ function PortfolioSummary({ positions }: { positions: Position[] }) {
 // ─────────────────────────────────────────────
 //  Position Card Row
 // ─────────────────────────────────────────────
-function PositionCard({ pos, isLast }: { pos: Position; isLast: boolean }) {
+function PositionCard({ pos, isLast, showUsd, rate }: { pos: Position; isLast: boolean; showUsd: boolean; rate: number }) {
   const up = pos.profit >= 0;
   return (
-    <PressableScale
-      onPress={() => router.push(`/(main)/positions/${pos.id}`)}
-      scaleTo={0.98}
-    >
+    <PressableScale onPress={() => router.push(`/(main)/positions/${pos.id}`)} scaleTo={0.98}>
       <View style={[card.row, !isLast && card.rowBorder]}>
         <View style={card.icon}>
           <Text style={card.iconText}>{pos.coin.slice(0, 2)}</Text>
@@ -68,23 +76,19 @@ function PositionCard({ pos, isLast }: { pos: Position; isLast: boolean }) {
         <View style={{ flex: 1 }}>
           <View style={card.symbolRow}>
             <Text style={card.symbol}>{pos.symbol}</Text>
-            <View style={[card.badge, {
-              backgroundColor: pos.direction === 'Long' ? '#F0F0F0' : '#FFF0F0',
-            }]}>
-              <Text style={[card.badgeText, {
-                color: pos.direction === 'Long' ? '#555555' : '#D93025',
-              }]}>
+            <View style={[card.badge, { backgroundColor: pos.direction === 'Long' ? '#F0F0F0' : '#FFF0F0' }]}>
+              <Text style={[card.badgeText, { color: pos.direction === 'Long' ? '#555555' : '#D93025' }]}>
                 {pos.direction === 'Long' ? '롱' : '숏'}
               </Text>
             </View>
           </View>
           <Text variant="meta" color="#AEAEB2" style={{ marginTop: 3 }}>
-            {formatKRW(pos.amount)}
+            {fmtAmt(pos.amount, showUsd, rate)}
           </Text>
         </View>
         <View style={{ alignItems: 'flex-end' }}>
           <Text style={[card.profit, { color: up ? '#FF4747' : '#246CF9' }]}>
-            {formatKRWSigned(pos.profit)}
+            {fmtSigned(pos.profit, showUsd, rate)}
           </Text>
           <Text style={[card.rate, { color: up ? '#FF4747' : '#246CF9' }]}>
             {formatRate(pos.profitRate)}
@@ -103,7 +107,7 @@ function PositionCard({ pos, isLast }: { pos: Position; isLast: boolean }) {
 // ─────────────────────────────────────────────
 //  Trade History Row
 // ─────────────────────────────────────────────
-function TradeRow({ trade, isLast }: { trade: Trade; isLast: boolean }) {
+function TradeRow({ trade, isLast, showUsd, rate }: { trade: Trade; isLast: boolean; showUsd: boolean; rate: number }) {
   const up      = trade.profit >= 0;
   const dateStr = (() => {
     const d = new Date(trade.exitAt);
@@ -113,10 +117,7 @@ function TradeRow({ trade, isLast }: { trade: Trade; isLast: boolean }) {
   const typeLabel = trade.type === 'stop_loss' ? '손절' : (trade.direction === 'Long' ? '롱 청산' : '숏 청산');
 
   return (
-    <PressableScale
-      onPress={() => router.push(`/(main)/history/${trade.id}`)}
-      scaleTo={0.98}
-    >
+    <PressableScale onPress={() => router.push(`/(main)/history/${trade.id}`)} scaleTo={0.98}>
       <View style={[hist.row, !isLast && hist.rowBorder]}>
         <Text style={hist.date}>{dateStr}</Text>
         <View style={{ flex: 1 }}>
@@ -127,7 +128,7 @@ function TradeRow({ trade, isLast }: { trade: Trade; isLast: boolean }) {
         </View>
         <View style={{ alignItems: 'flex-end' }}>
           <Text style={[hist.amount, { color: up ? '#FF4747' : '#246CF9' }]}>
-            {formatKRWSigned(trade.profit)}
+            {fmtSigned(trade.profit, showUsd, rate)}
           </Text>
           <Text style={[hist.rate, { color: up ? '#FF4747' : '#246CF9' }]}>
             {formatRate(trade.profitRate)}
@@ -141,7 +142,7 @@ function TradeRow({ trade, isLast }: { trade: Trade; isLast: boolean }) {
 // ─────────────────────────────────────────────
 //  History Tab Content (with filter animation)
 // ─────────────────────────────────────────────
-function HistoryContent({ trades }: { trades: Trade[] | null }) {
+function HistoryContent({ trades, showUsd, rate }: { trades: Trade[] | null; showUsd: boolean; rate: number }) {
   const [filter, setFilter] = useState<HistoryFilter>('전체');
 
   const listOpacity    = useSharedValue(1);
@@ -178,7 +179,7 @@ function HistoryContent({ trades }: { trades: Trade[] | null }) {
   const stats = [
     { label: '총 거래', value: `${list.length}건`,        color: '#191919'    },
     { label: '승률',    value: `${winRate}%`,              color: winRateColor },
-    { label: '총 손익', value: formatKRWSigned(total),     color: totalColor   },
+    { label: '총 손익', value: fmtSigned(total, showUsd, rate), color: totalColor },
   ];
 
   return (
@@ -220,7 +221,7 @@ function HistoryContent({ trades }: { trades: Trade[] | null }) {
         ) : (
           <GlassCard intensity="medium" radius={20} padding={0} style={{ overflow: 'hidden' }}>
             {filtered.map((trade, i) => (
-              <TradeRow key={trade.id} trade={trade} isLast={i === filtered.length - 1} />
+              <TradeRow key={trade.id} trade={trade} isLast={i === filtered.length - 1} showUsd={showUsd} rate={rate} />
             ))}
           </GlassCard>
         )}
@@ -294,7 +295,9 @@ function AccountSelector({
 export default function Trading() {
   const [tab, setTab]               = useState<MainTab>('positions');
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
-  const { accounts } = useAccounts();
+  const [showUsd, setShowUsd]       = useState(false);
+  const { accounts, totalBalance }  = useAccounts();
+  const rate = totalBalance?.usdtKrw ?? 1350;
 
   // 선택된 계좌 (null = 전체)
   const selectedAccounts = selectedAccountId
@@ -345,7 +348,10 @@ export default function Trading() {
     <FadeTabView style={styles.root}>
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
 
-        <PageHeader title="트레이딩" />
+        <PageHeader
+          title="트레이딩"
+          rightElement={<CurrencyToggle showUsd={showUsd} onToggle={() => setShowUsd((v) => !v)} />}
+        />
 
         {/* ── Account Selector ── */}
         <AccountSelector selectedId={selectedAccountId} onSelect={setSelectedAccountId} />
@@ -385,16 +391,16 @@ export default function Trading() {
                 </GlassCard>
               ) : (
                 <>
-                  <PortfolioSummary positions={filteredPositions} />
+                  <PortfolioSummary positions={filteredPositions} showUsd={showUsd} rate={rate} />
                   <GlassCard intensity="medium" radius={20} padding={0} style={{ overflow: 'hidden' }}>
                     {filteredPositions.map((pos, i) => (
-                      <PositionCard key={pos.id} pos={pos} isLast={i === filteredPositions.length - 1} />
+                      <PositionCard key={pos.id} pos={pos} isLast={i === filteredPositions.length - 1} showUsd={showUsd} rate={rate} />
                     ))}
                   </GlassCard>
                 </>
               )
             ) : (
-              <HistoryContent trades={filteredTrades} />
+              <HistoryContent trades={filteredTrades} showUsd={showUsd} rate={rate} />
             )}
           </Animated.View>
           <View style={{ height: 120 }} />

@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Text, Card, Input, Button, Divider } from '@/design-system';
+import { Text, Card, Input, Button, Divider, SubPageHeader, ScreenTransition } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { accountService, ApiError } from '@/services';
 import { useMutation } from '@/hooks/useApi';
@@ -92,14 +92,9 @@ export default function Deposit() {
   }
 
   return (
+    <ScreenTransition>
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <View style={styles.navBar}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
-          <Text variant="body1">←</Text>
-        </Pressable>
-        <Text variant="heading3">충전하기</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <SubPageHeader title="충전하기" onBack={() => router.navigate('/(main)/account')} />
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
@@ -197,24 +192,16 @@ export default function Deposit() {
             onPress={handleSubmit}
             style={{ marginBottom: spacing[10] }}
           />
+          <View style={{ height: 120 }} />
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
+    </ScreenTransition>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg.default },
-  navBar: {
-    flexDirection:    'row',
-    alignItems:       'center',
-    justifyContent:   'space-between',
-    paddingHorizontal: spacing[5],
-    paddingVertical:  spacing[3],
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border.default,
-  },
-  backBtn: { width: 40, paddingVertical: spacing[1] },
   content: { paddingHorizontal: spacing[5], paddingTop: spacing[5] },
   section: { marginBottom: spacing[5] },
 

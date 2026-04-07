@@ -1,13 +1,15 @@
 import { client } from './client';
 
 export interface Balance {
-  total:          number;
-  invested:       number;
-  available:      number;
-  profitTotal:    number;
-  profitRate:     number;
-  profitToday:    number;
-  profitTodayRate: number;
+  total:          number;   // KRW
+  invested:       number;   // KRW
+  available:      number;   // KRW
+  profitTotal:    number;   // KRW
+  profitRate:     number;   // %
+  profitToday:    number;   // KRW
+  profitTodayRate: number;  // %
+  totalUsd?:      number;   // USD (optional — populated by exchange API)
+  usdtKrw?:       number;   // 환율
 }
 
 export interface ChartPoint {
@@ -15,7 +17,7 @@ export interface ChartPoint {
   value: number;
 }
 
-export type ChartPeriod = '1W' | '1M' | '3M' | '6M' | '1Y';
+export type ChartPeriod = '1W' | '1M' | '3M' | '6M' | '1Y' | 'ALL';
 
 export interface FundTransaction {
   id:           string;
@@ -41,6 +43,10 @@ export interface WithdrawRequest {
 export const accountService = {
   getBalance: () =>
     client.get<Balance>('/account/balance'),
+
+  /** 특정 거래소 계정의 잔고 (백엔드: GET /account/balance?exchange_account_id=xxx) */
+  getBalanceByAccountId: (exchangeAccountId: string) =>
+    client.get<Balance>(`/account/balance?exchange_account_id=${exchangeAccountId}`),
 
   getChart: (period: ChartPeriod) =>
     client.get<ChartPoint[]>(`/account/chart?period=${period}`),

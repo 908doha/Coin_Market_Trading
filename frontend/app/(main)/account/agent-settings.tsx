@@ -1,228 +1,401 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Pressable, Alert, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Text, Card, Button, Badge } from '@/design-system';
+import { Text, Card, Button, Badge, SubPageHeader, ScreenTransition, AgentSettingsSkeleton, useToast } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
-import { agentService, ApiError } from '@/services';
-import { useApi, useMutation } from '@/hooks/useApi';
-import type { AgentStatus, RiskLevel } from '@/services';
-import { RISK_LABELS, RISK_DESCRIPTIONS } from '@/constants';
+import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS } from '@/store/accounts';
+import type { ExchangeAccount } from '@/store/accounts';
 
-const RISK_VARIANTS: Record<RiskLevel, 'positive' | 'cautious' | 'negative'> = {
-  low:    'positive',
-  medium: 'cautious',
-  high:   'negative',
-};
+interface AgentDefinition {
+  id:          string;
+  name:        string;
+  description: string;
+  version?:    string;
+}
 
-export default function AgentSettings() {
-  const { data: settings, isLoading } = useApi(() => agentService.getSettings(), []);
+const DATA_ONLY_ID = '__data_only__';
 
-  const [status, setStatus] = useState<AgentStatus>('waiting');
-  const [risk, setRisk]     = useState<RiskLevel>('medium');
-
-  useEffect(() => {
-    if (settings) {
-      setStatus(settings.status);
-      setRisk(settings.riskLevel);
-    }
-  }, [settings]);
-
-  const { mutate: save, isLoading: saving } = useMutation(
-    (body: { status: AgentStatus; riskLevel: RiskLevel }) => agentService.updateSettings(body),
-    {
-      onSuccess: () => router.back(),
-      onError: (err) => {
-        const msg = err instanceof ApiError ? err.message : '저장에 실패했어요.';
-        Alert.alert('오류', msg);
-      },
-    },
+// ── Account chip selector ─────────────────────────────────────────────────────
+function AccountChips({
+  accounts,
+  selectedId,
+  onSelect,
+}: {
+  accounts:   ExchangeAccount[];
+  selectedId: string;
+  onSelect:   (id: string) => void;
+}) {
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.chipRow}
+    >
+      {accounts.map((acc) => {
+        const selected = selectedId === acc.id;
+        const color    = EXCHANGE_COLORS[acc.exchange];
+        return (
+          <Pressable
+            key={acc.id}
+            style={[
+              styles.chip,
+              selected
+                ? { backgroundColor: color + '18', borderColor: color }
+                : { backgroundColor: colors.bg.default, borderColor: colors.border.default },
+            ]}
+            onPress={() => onSelect(acc.id)}
+          >
+            <View style={[styles.chipDot, { backgroundColor: color }]} />
+            <Text
+              style={[styles.chipText, { color: selected ? color : '#AEAEB2' }]}
+              numberOfLines={1}
+            >
+              {acc.name || EXCHANGE_LABELS[acc.exchange]}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </ScrollView>
   );
+}
 
-  const isRunning = status === 'running';
+// ── Agent option row ──────────────────────────────────────────────────────────
+function AgentOption({
+  id,
+  name,
+  description,
+  badge,
+  version,
+  selected,
+  onPress,
+}: {
+  id:           string;
+  name:         string;
+  description:  string;
+  badge?:       string;
+  version?:     string;
+  selected:     boolean;
+  onPress:      () => void;
+}) {
+  return (
+    <Pressable
+      style={[styles.agentOption, selected && styles.agentOptionSelected]}
+      onPress={onPress}
+    >
+      <View style={{ flex: 1 }}>
+        <View style={styles.agentTitleRow}>
+          <Text variant="label1Bold">{name}</Text>
+          {badge && <Badge label={badge} variant="default" size="sm" />}
+          {version && (
+            <Text variant="caption1" color={colors.text.tertiary}>v{version}</Text>
+          )}
+        </View>
+        <Text variant="body2" color={colors.text.tertiary} style={{ marginTop: 2 }}>
+          {description}
+        </Text>
+      </View>
+      <View style={[styles.radioOuter, selected && styles.radioOuterSelected]}>
+        {selected && <View style={styles.radioInner} />}
+      </View>
+    </Pressable>
+  );
+}
 
-  const toggleStatus = () => {
-    if (isRunning) {
-      Alert.alert(
-        '운용 일시정지',
-        '에이전트 운용을 일시정지하면 새로운 거래를 시작하지 않습니다.\n현재 포지션은 유지됩니다.',
-        [
-          { text: '취소', style: 'cancel' },
-          { text: '일시정지', style: 'destructive', onPress: () => setStatus('paused') },
-        ]
-      );
-    } else {
-      setStatus('running');
+// ── Bot status badge ──────────────────────────────────────────────────────────
+function BotStatusBadge({ running }: { running: boolean | null }) {
+  if (running === null) return null;
+  return (
+    <View style={[styles.botBadge, { backgroundColor: running ? '#0A2' + '18' : colors.bg.elevated }]}>
+      <View style={[styles.botDot, { backgroundColor: running ? '#00C853' : '#888' }]} />
+      <Text style={[styles.botBadgeText, { color: running ? '#00C853' : colors.text.tertiary }]}>
+        {running ? '봇 실행 중' : '봇 중지됨'}
+      </Text>
+    </View>
+  );
+}
+
+// ── Main screen ───────────────────────────────────────────────────────────────
+export default function AgentSettings() {
+  const { accounts, updateAccount } = useAccounts();
+  const toast = useToast();
+
+  const [agentDefs, setAgentDefs]     = useState<AgentDefinition[] | null>(null);
+  const [defsLoading, setDefsLoading] = useState(true);
+  const [defsError, setDefsError]     = useState<string | null>(null);
+
+  const fetchAgentDefs = () => {
+    setDefsLoading(true);
+    setDefsError(null);
+    fetch('/api/agents')
+      .then((r) => r.json())
+      .then((data) => { setAgentDefs(Array.isArray(data) ? data : []); setDefsLoading(false); })
+      .catch((e) => { setDefsError(e?.message ?? '에이전트 목록 로드 실패'); setDefsLoading(false); });
+  };
+
+  useEffect(() => { fetchAgentDefs(); }, []);
+
+  // Selected account (default to first)
+  const [accountId, setAccountId] = useState<string>(accounts[0]?.id ?? '');
+
+  // Per-account draft agentId (null = data-only)
+  const [draftAgentId, setDraftAgentId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [botRunning, setBotRunning] = useState<boolean | null>(null);
+
+  // Sync draft when switching accounts
+  useEffect(() => {
+    const acc = accounts.find((a) => a.id === accountId);
+    setDraftAgentId(acc?.agentId ?? null);
+    setBotRunning(null);
+    if (acc) {
+      fetch(`/api/bot/status?accountId=${encodeURIComponent(acc.id)}`)
+        .then((r) => r.json())
+        .then((data) => setBotRunning(data?.running ?? false))
+        .catch(() => setBotRunning(false));
+    }
+  }, [accountId, accounts]);
+
+  // 에이전트 목록 로드 후, 저장된 agentId가 목록에 없으면 첫 번째 에이전트로 마이그레이션
+  useEffect(() => {
+    if (!agentDefs || agentDefs.length === 0) return;
+    const acc = accounts.find((a) => a.id === accountId);
+    if (!acc?.agentId) return;
+    const found = agentDefs.find((d) => d.id === acc.agentId);
+    if (!found) {
+      // 이전 형식의 agentId → 첫 번째 에이전트로 자동 매핑
+      setDraftAgentId(agentDefs[0].id);
+    }
+  }, [agentDefs, accountId]);
+
+  const selected = draftAgentId ?? DATA_ONLY_ID;
+
+  const handleSave = async () => {
+    if (!accountId) return;
+    setSaving(true);
+    try {
+      const acc = accounts.find((a) => a.id === accountId);
+      if (!acc) throw new Error('계좌를 찾을 수 없어요.');
+
+      // 1. 로컬 저장 먼저 (반드시 성공해야 함)
+      await updateAccount(accountId, { agentId: draftAgentId });
+      toast.show({ type: 'success', message: '에이전트 설정이 저장됐어요' });
+
+      // 2. 봇 서버 시작/정지는 best-effort (실패해도 저장은 완료)
+      if (draftAgentId) {
+        fetch('/api/bot/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            accountId: acc.id,
+            apiKey:    acc.apiKey,
+            apiSecret: acc.apiSecret,
+            exchange:  acc.exchange,
+            agentId:   draftAgentId,
+          }),
+        })
+          .then((r) => r.ok && setBotRunning(true))
+          .catch(() => {});
+      } else {
+        fetch('/api/bot/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ accountId: acc.id }),
+        })
+          .then(() => setBotRunning(false))
+          .catch(() => {});
+      }
+
+      router.back();
+    } catch (err: any) {
+      toast.show({ type: 'error', message: err?.message ?? '저장에 실패했어요' });
+    } finally {
+      setSaving(false);
     }
   };
 
-  if (isLoading) {
-    return (
-      <SafeAreaView style={styles.safe} edges={['top']}>
-        <View style={styles.navBar}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn}>
-            <Text variant="body1">←</Text>
-          </Pressable>
-          <Text variant="heading3">에이전트 설정</Text>
-          <View style={{ width: 40 }} />
-        </View>
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <ActivityIndicator color={colors.primary.default} />
-        </View>
-      </SafeAreaView>
-    );
-  }
-
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <View style={styles.navBar}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
-          <Text variant="body1">←</Text>
-        </Pressable>
-        <Text variant="heading3">에이전트 설정</Text>
-        <View style={{ width: 40 }} />
-      </View>
+    <ScreenTransition>
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <SubPageHeader title="에이전트 설정" onBack={() => router.navigate('/(main)/account')} />
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
-        {/* ── 운용 상태 ── */}
-        <Card variant="outlined" style={styles.section}>
-          <View style={styles.statusHeader}>
-            <View>
-              <Text variant="heading3">운용 상태</Text>
-              <Text variant="body2" color={colors.text.tertiary} style={{ marginTop: spacing[1] }}>
-                {isRunning ? '에이전트가 활성화되어 있습니다' : '에이전트가 일시 정지됐습니다'}
-              </Text>
-            </View>
-            <Badge
-              label={isRunning ? '운용중' : '일시정지'}
-              variant={isRunning ? 'positive' : 'cautious'}
-            />
-          </View>
-          <Pressable
-            style={[
-              styles.toggleBtn,
-              { backgroundColor: isRunning ? colors.negative.subtle : colors.positive.subtle },
-            ]}
-            onPress={toggleStatus}
-          >
-            <Text
-              variant="label1Bold"
-              color={isRunning ? colors.negative.text : colors.positive.text}
-            >
-              {isRunning ? '일시정지' : '운용 재개'}
+          {/* ── 계좌 선택 (계좌 있을 때만) ── */}
+          {accounts.length > 0 && (
+            <>
+              <Text style={styles.sectionLabel}>계좌 선택</Text>
+              <AccountChips
+                accounts={accounts}
+                selectedId={accountId}
+                onSelect={setAccountId}
+              />
+            </>
+          )}
+
+          {/* ── 봇 상태 ── */}
+          {accounts.length > 0 && <BotStatusBadge running={botRunning} />}
+
+          {/* ── 에이전트 선택 ── */}
+          <Card variant="outlined" style={styles.section}>
+            <Text variant="heading3" style={{ marginBottom: spacing[2] }}>에이전트 선택</Text>
+            <Text variant="body2" color={colors.text.tertiary} style={{ marginBottom: spacing[5] }}>
+              선택한 계좌에 적용할 에이전트를 선택하세요
             </Text>
-          </Pressable>
-        </Card>
 
-        {/* ── 리스크 수준 ── */}
-        <Card variant="outlined" style={styles.section}>
-          <Text variant="heading3" style={{ marginBottom: spacing[2] }}>리스크 수준</Text>
-          <Text variant="body2" color={colors.text.tertiary} style={{ marginBottom: spacing[5] }}>
-            에이전트가 거래할 때 감수하는 리스크 수준입니다
-          </Text>
+            {defsLoading ? (
+              <AgentSettingsSkeleton />
+            ) : (
+              <View style={{ gap: spacing[3] }}>
 
-          <View style={{ gap: spacing[3] }}>
-            {(['low', 'medium', 'high'] as RiskLevel[]).map((level) => (
-              <Pressable
-                key={level}
-                style={[
-                  styles.riskOption,
-                  risk === level && styles.riskOptionSelected,
-                ]}
-                onPress={() => setRisk(level)}
-              >
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing[2] }}>
-                    <Text variant="label1Bold">{RISK_LABELS[level]}</Text>
-                    <Badge label={RISK_LABELS[level]} variant={RISK_VARIANTS[level]} size="sm" />
+                {/* 데이터 전용 (default) */}
+                <AgentOption
+                  id={DATA_ONLY_ID}
+                  name="데이터 전용"
+                  description="자동 거래 없이 잔고와 포지션 현황만 표시합니다"
+                  badge="기본값"
+                  selected={selected === DATA_ONLY_ID}
+                  onPress={() => setDraftAgentId(null)}
+                />
+
+                {agentDefs?.map((def: AgentDefinition) => (
+                  <AgentOption
+                    key={def.id}
+                    id={def.id}
+                    name={def.name}
+                    description={def.description}
+                    version={def.version}
+                    selected={selected === def.id}
+                    onPress={() => setDraftAgentId(def.id)}
+                  />
+                ))}
+
+                {defsError && !defsLoading && (
+                  <View style={styles.emptyDefs}>
+                    <Text variant="body2" color="#FF4747" align="center" style={{ marginBottom: 4 }}>
+                      에이전트 목록 로드 실패
+                    </Text>
+                    <Text variant="caption1" color={colors.text.tertiary} align="center" style={{ marginBottom: 12 }}>
+                      {defsError}
+                    </Text>
+                    <Pressable style={styles.retryBtn} onPress={fetchAgentDefs}>
+                      <Text style={styles.retryBtnText}>다시 시도</Text>
+                    </Pressable>
                   </View>
-                  <Text variant="body2" color={colors.text.tertiary} style={{ marginTop: spacing[1] }}>
-                    {RISK_DESCRIPTIONS[level]}
-                  </Text>
-                </View>
-                <View style={[
-                  styles.radioOuter,
-                  risk === level && styles.radioOuterSelected,
-                ]}>
-                  {risk === level && <View style={styles.radioInner} />}
-                </View>
-              </Pressable>
-            ))}
-          </View>
-        </Card>
+                )}
 
-        {/* ── 주의 안내 ── */}
-        <Card variant="filled" style={[styles.section, { backgroundColor: colors.cautious.subtle }]}>
-          <Text variant="label1Bold" color={colors.cautious.text} style={{ marginBottom: spacing[2] }}>
-            ⚠️ 주의
-          </Text>
-          <Text variant="body2" color={colors.cautious.text} style={{ lineHeight: 22 }}>
-            리스크 수준 변경은 다음 거래부터 적용됩니다.{'\n'}
-            현재 보유 중인 포지션에는 영향을 주지 않습니다.
-          </Text>
-        </Card>
+                {!defsError && !agentDefs?.length && !defsLoading && (
+                  <View style={styles.emptyDefs}>
+                    <Text variant="body2" color={colors.text.tertiary} align="center">
+                      등록된 에이전트가 없어요{'\n'}
+                      GitHub /docs 폴더에 .md 파일을 추가하세요
+                    </Text>
+                  </View>
+                )}
+              </View>
+            )}
+          </Card>
 
-        <Button
-          variant="primary" size="lg" label="저장" fullWidth
-          loading={saving}
-          onPress={() => save({ status, riskLevel: risk })}
-          style={{ marginBottom: spacing[10] }}
-        />
-      </ScrollView>
-    </SafeAreaView>
+          {/* 주의 안내 (에이전트 선택시만) */}
+          {draftAgentId && (
+            <Card variant="filled" style={[styles.section, { backgroundColor: colors.cautious.subtle }]}>
+              <Text variant="label1Bold" color={colors.cautious.text} style={{ marginBottom: spacing[2] }}>
+                ⚠️ 주의
+              </Text>
+              <Text variant="body2" color={colors.cautious.text} style={{ lineHeight: 22 }}>
+                에이전트 변경은 다음 거래부터 적용됩니다.{'\n'}
+                현재 보유 중인 포지션에는 영향을 주지 않습니다.
+              </Text>
+            </Card>
+          )}
+
+          {accounts.length > 0 ? (
+            <Button
+              variant="primary" size="lg" label="저장" fullWidth
+              loading={saving}
+              onPress={handleSave}
+              style={{ marginBottom: spacing[10] }}
+            />
+          ) : (
+            <Pressable
+              style={[styles.emptyBtn, { marginBottom: spacing[10] }]}
+              onPress={() => router.push('/(main)/account/api-accounts')}
+            >
+              <Text style={styles.emptyBtnText}>API 계좌 연결하러 가기</Text>
+            </Pressable>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    </ScreenTransition>
   );
 }
 
 const styles = StyleSheet.create({
   safe:    { flex: 1, backgroundColor: colors.bg.default },
-  navBar: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: spacing[5], paddingVertical: spacing[3],
-    borderBottomWidth: 1, borderBottomColor: colors.border.default,
-  },
-  backBtn: { width: 40, paddingVertical: spacing[1] },
-  content: { paddingHorizontal: spacing[5], paddingTop: spacing[5] },
+  content: { paddingHorizontal: spacing[5], paddingTop: spacing[4], paddingBottom: 120 },
   section: { marginBottom: spacing[4] },
 
-  statusHeader: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
-    marginBottom: spacing[4],
-  },
-  toggleBtn: {
-    height:         44,
-    borderRadius:   borderRadius.md,
-    alignItems:     'center',
-    justifyContent: 'center',
+  sectionLabel: {
+    fontSize: 13, fontWeight: '600', color: colors.text.secondary,
+    marginBottom: spacing[3],
   },
 
-  riskOption: {
+  chipRow: { gap: spacing[2], paddingBottom: spacing[5] },
+  chip: {
     flexDirection:    'row',
     alignItems:       'center',
-    padding:          spacing[4],
-    borderRadius:     borderRadius.md,
+    gap:              6,
+    paddingHorizontal: 14,
+    paddingVertical:   9,
+    borderRadius:     999,
     borderWidth:      1.5,
-    borderColor:      colors.border.default,
-    backgroundColor:  colors.bg.default,
   },
-  riskOptionSelected: {
-    borderColor:      colors.primary.default,
-    backgroundColor:  colors.bg.subtle,
+  chipDot:  { width: 7, height: 7, borderRadius: 4 },
+  chipText: { fontSize: 13, fontWeight: '600', maxWidth: 120 },
+
+  agentOption: {
+    flexDirection:   'row',
+    alignItems:      'center',
+    padding:         spacing[4],
+    borderRadius:    borderRadius.md,
+    borderWidth:     1.5,
+    borderColor:     colors.border.default,
+    backgroundColor: colors.bg.default,
+  },
+  agentOptionSelected: {
+    borderColor:     colors.primary.default,
+    backgroundColor: colors.bg.subtle,
+  },
+  agentTitleRow: {
+    flexDirection: 'row', alignItems: 'center',
+    gap: spacing[2], marginBottom: spacing[1],
+    flexWrap: 'wrap',
   },
   radioOuter: {
-    width:          22,
-    height:         22,
-    borderRadius:   11,
-    borderWidth:    2,
-    borderColor:    colors.border.strong,
-    alignItems:     'center',
-    justifyContent: 'center',
+    width: 22, height: 22, borderRadius: 11,
+    borderWidth: 2, borderColor: colors.border.strong,
+    alignItems: 'center', justifyContent: 'center',
+    marginLeft: spacing[3], flexShrink: 0,
   },
   radioOuterSelected: { borderColor: colors.primary.default },
   radioInner: {
-    width:           10,
-    height:          10,
-    borderRadius:    5,
+    width: 10, height: 10, borderRadius: 5,
     backgroundColor: colors.primary.default,
   },
+
+  botBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12, paddingVertical: 6,
+    borderRadius: 99, marginBottom: spacing[4],
+    borderWidth: 1, borderColor: colors.border.default,
+  },
+  botDot:      { width: 7, height: 7, borderRadius: 4 },
+  botBadgeText: { fontSize: 12, fontWeight: '600' },
+
+  emptyDefs: { paddingVertical: spacing[6], alignItems: 'center' },
+  retryBtn:  { paddingHorizontal: 20, paddingVertical: 8, borderRadius: 10, backgroundColor: '#191919' },
+  retryBtnText: { fontSize: 13, fontWeight: '600', color: '#FFFFFF' },
+  emptyBtn:     { paddingHorizontal: 24, paddingVertical: 14, borderRadius: 14, backgroundColor: '#191919', alignItems: 'center' },
+  emptyBtnText: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
 });

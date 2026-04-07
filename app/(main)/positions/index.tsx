@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { View, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -294,9 +294,25 @@ function AccountSelector({
 export default function Trading() {
   const [tab, setTab]               = useState<MainTab>('positions');
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  const { accounts } = useAccounts();
 
-  const { data: positions, isLoading: posLoading }  = useApi(() => positionsService.getAll(), []);
-  const { data: trades,    isLoading: tradeLoading } = useApi(() => tradesService.getAll(), []);
+  // 선택된 계좌 (null = 전체)
+  const selectedAccounts = selectedAccountId
+    ? accounts.filter((a) => a.id === selectedAccountId)
+    : accounts;
+
+  const fetchPositions = useCallback(async () => {
+    if (!selectedAccounts.length) return [];
+    return positionsService.getAllByAccounts(selectedAccounts);
+  }, [selectedAccountId, accounts.length]);
+
+  const fetchTrades = useCallback(async () => {
+    if (!selectedAccounts.length) return [];
+    return tradesService.getAllByAccounts(selectedAccounts);
+  }, [selectedAccountId, accounts.length]);
+
+  const { data: positions, isLoading: posLoading }  = useApi(fetchPositions, [selectedAccountId, accounts.length]);
+  const { data: trades,    isLoading: tradeLoading } = useApi(fetchTrades,    [selectedAccountId, accounts.length]);
 
   // Tab content animation
   const tabOpacity    = useSharedValue(1);

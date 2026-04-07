@@ -77,21 +77,29 @@ async function fetchGatePositions(apiKey: string, apiSecret: string): Promise<Po
   return data
     .filter((p: any) => Number(p.size) !== 0)
     .map((p: any): Position => {
-      const size         = Number(p.size);
-      const entryPrice   = parseFloat(p.entry_price || '0');
-      const markPrice    = parseFloat(p.mark_price || '0');
+      const size          = Number(p.size);
+      const entryPrice    = parseFloat(p.entry_price || '0');
+      const markPrice     = parseFloat(p.mark_price || '0');
       const unrealisedPnl = parseFloat(p.unrealised_pnl || '0');
-      const leverage     = parseInt(p.leverage || '1', 10);
-      const contract     = p.contract as string; // e.g. BTC_USDT
-      const coin         = contract.replace('_USDT', '');
-      const notional     = Math.abs(size) * markPrice;
+      const leverage      = parseInt(p.leverage || '1', 10);
+      const contract      = p.contract as string; // e.g. BTC_USDT
+      const coin          = contract.replace('_USDT', '');
+
+      // Gate.io가 내려주는 margin(증거금 USDT), value(명목가치 USDT) 직접 사용
+      // → size * markPrice 계산은 quanto_multiplier 미적용으로 수천 배 오차 발생
+      const marginUsdt   = parseFloat(p.margin || '0');
+      const notionalUsdt = parseFloat(p.value  || '0') || (marginUsdt * leverage);
 
       const profitKrw    = unrealisedPnl * usdtKrw;
-      const amountKrw    = notional * usdtKrw;
-      // 레버리지 반영: 실제 투자금(증거금) 대비 수익률
-      const profitRate   = entryPrice > 0
-        ? ((markPrice - entryPrice) / entryPrice) * 100 * (size > 0 ? 1 : -1) * leverage
-        : 0;
+      const marginKrw    = marginUsdt * usdtKrw;
+      const notionalKrw  = notionalUsdt * usdtKrw;
+
+      // 증거금 대비 수익률
+      const profitRate = marginUsdt > 0
+        ? (unrealisedPnl / marginUsdt) * 100
+        : entryPrice > 0
+          ? ((markPrice - entryPrice) / entryPrice) * 100 * (size > 0 ? 1 : -1) * leverage
+          : 0;
 
       // 레버리지별 리스크 레벨 (1~5)
       const riskLevel = leverage <= 3 ? 1 : leverage <= 5 ? 2 : leverage <= 10 ? 3 : leverage <= 20 ? 4 : 5;
@@ -109,23 +117,19 @@ async function fetchGatePositions(apiKey: string, apiSecret: string): Promise<Po
         ? `${openTime.getFullYear()}.${String(openTime.getMonth()+1).padStart(2,'0')}.${String(openTime.getDate()).padStart(2,'0')}`
         : '-';
 
-      // 증거금 = notional / leverage
-      const marginUsdt = notional / leverage;
-      const marginKrw  = marginUsdt * usdtKrw;
-
       return {
         id:           p.contract + '_' + (p.update_time || Date.now()),
         symbol:       contract.replace('_', '/'),
         coin,
         direction:    size > 0 ? 'Long' : 'Short',
-        amount:       marginKrw,           // 증거금 (KRW)
+        amount:       marginKrw,           // 실제 증거금 (KRW)
         profit:       profitKrw,
         profitRate:   parseFloat(profitRate.toFixed(2)),
         entryPrice,
         markPrice,
         leverage,
         currentPrice: markPrice,
-        currentValue: amountKrw,           // 평가금 (KRW)
+        currentValue: notionalKrw,         // 명목가치 (KRW)
         weight:       100,
         entryAt,
         holdingPeriod,

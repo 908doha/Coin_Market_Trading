@@ -143,10 +143,12 @@ function MiniChart({ data, positive }: { data: { value: number }[]; positive: bo
 function AccountRow({
   account,
   balance,
+  error,
   isLast,
 }: {
   account:  ExchangeAccount;
   balance:  Balance | null;
+  error:    string | null;
   isLast:   boolean;
 }) {
   const color    = EXCHANGE_COLORS[account.exchange];
@@ -174,6 +176,9 @@ function AccountRow({
           <Text style={accRow.name} numberOfLines={1}>
             {account.name || label}
           </Text>
+          {error && !balance && (
+            <Text style={accRow.error} numberOfLines={2}>{error}</Text>
+          )}
         </View>
 
         {/* 손익 뱃지 */}
@@ -194,7 +199,7 @@ function AccountRow({
 
 export default function Home() {
   const [period, setPeriod] = useState<typeof PERIODS[number]>('1M');
-  const { accounts, balances, totalBalance, balancesLoading } = useAccounts();
+  const { accounts, balances, balanceErrors, totalBalance, balancesLoading } = useAccounts();
 
   const { data: singleBalance, isLoading: singleLoading } = useApi(
     () => accounts.length === 0 ? accountService.getBalance() : Promise.resolve(null),
@@ -314,6 +319,7 @@ export default function Home() {
                   key={acc.id}
                   account={acc}
                   balance={balances[acc.id] ?? null}
+                  error={balanceErrors[acc.id] ?? null}
                   isLast={i === accounts.length - 1}
                 />
               ))}
@@ -498,6 +504,7 @@ const accRow = StyleSheet.create({
 
   amount: { fontSize: 20, fontWeight: '700', color: colors.text.primary, letterSpacing: -0.3, marginBottom: 3 },
   name:   { fontSize: 13, color: colors.text.tertiary, fontWeight: '500' },
+  error:  { fontSize: 11, color: colors.negative.default, marginTop: 3, lineHeight: 15 },
 
   pnlBadge: {
     borderRadius: borderRadius.md - 2,

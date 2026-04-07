@@ -58,6 +58,7 @@ function makeId(): string {
 interface AccountsContextValue {
   accounts:        ExchangeAccount[];
   balances:        Record<string, Balance | null>;
+  balanceErrors:   Record<string, string | null>;
   totalBalance:    Balance | null;
   balancesLoading: boolean;
   isLoading:       boolean;
@@ -90,6 +91,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
   const [accounts, setAccounts]          = useState<ExchangeAccount[]>([]);
   const [isLoading, setIsLoading]        = useState(true);
   const [balances, setBalances]          = useState<Record<string, Balance | null>>({});
+  const [balanceErrors, setBalErrors]    = useState<Record<string, string | null>>({});
   const [balancesLoading, setBalLoading] = useState(false);
   const accountsRef = useRef(accounts);
   accountsRef.current = accounts;
@@ -115,15 +117,19 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
             apiKey:    acc.apiKey,
             apiSecret: acc.apiSecret,
           });
-          return { id: acc.id, bal };
-        } catch {
-          return { id: acc.id, bal: null };
+          return { id: acc.id, bal, err: null };
+        } catch (e: any) {
+          const msg = e?.message ?? '잔고 조회 실패';
+          console.error(`[balance:${acc.id}]`, msg);
+          return { id: acc.id, bal: null, err: msg };
         }
       }),
     );
-    const map: Record<string, Balance | null> = {};
-    results.forEach(({ id, bal }) => { map[id] = bal; });
+    const map:    Record<string, Balance | null> = {};
+    const errMap: Record<string, string | null>  = {};
+    results.forEach(({ id, bal, err }) => { map[id] = bal; errMap[id] = err; });
     setBalances(map);
+    setBalErrors(errMap);
     setBalLoading(false);
   }, []);
 
@@ -170,7 +176,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
   return (
     <AccountsContext.Provider value={{
       accounts, isLoading,
-      balances, totalBalance, balancesLoading,
+      balances, balanceErrors, totalBalance, balancesLoading,
       addAccount, updateAccount, removeAccount, refreshBalances,
     }}>
       {children}

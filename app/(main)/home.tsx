@@ -12,7 +12,7 @@ import type { Balance } from '@/services';
 import type { AgentDefinition } from '@/services';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 
-const PERIODS = ['1W', '1M', '3M', '6M', '1Y'] as const;
+const PERIODS = ['1D', '1W', '1M', '3M', '6M', '1Y'] as const;
 
 const AGENT_COLORS = ['#3182F6', '#1AC24E', '#FF8A00', '#9B59B6', '#E74C3C', '#16A085'];
 

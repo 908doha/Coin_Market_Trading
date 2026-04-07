@@ -67,6 +67,19 @@ export default function PositionDetail() {
   const fmt$ = (v: number) =>
     `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+  // 포지션 자동 설명 텍스트 생성
+  const positionSummary = position ? (() => {
+    const dir     = direction === 'Long' ? '롱(매수)' : '숏(매도)';
+    const lev     = position.leverage;
+    const profitSign = isProfit ? '수익' : '손실';
+    const pctAbs  = Math.abs(position.profitRate).toFixed(2);
+    const pnlAbs  = Math.abs(position.profit);
+    const since   = p.entryAt ? `${p.entryAt}에 진입한 ` : '';
+    const holding = position.holdingPeriod ? ` ${position.holdingPeriod} 보유 중이며,` : '';
+
+    return `${since}${position.symbol} ${dir} 포지션입니다. ${lev}배 레버리지로${holding} 현재 ${pctAbs}% (${Math.round(pnlAbs / 10000).toLocaleString('ko-KR')}만원) ${profitSign} 중입니다.${p.liqPrice > 0 ? ` 청산가는 $${p.liqPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}입니다.` : ''}`;
+  })() : null;
+
   return (
     <ScreenTransition>
       <SafeAreaView style={st.safe} edges={['top']}>
@@ -109,6 +122,13 @@ export default function PositionDetail() {
                   </View>
                 </View>
               </GlassCard>
+
+              {/* ── 포지션 요약 설명 ───────────────────── */}
+              {positionSummary && (
+                <GlassCard intensity="low" radius={20} padding={16} style={st.section}>
+                  <Text style={st.summaryText}>{positionSummary}</Text>
+                </GlassCard>
+              )}
 
               {/* ── 손익 히어로 카드 ────────────────────── */}
               <GlassCard intensity="medium" radius={24} padding={24} style={st.section}>
@@ -235,6 +255,8 @@ const st = StyleSheet.create({
   sectionTitle: { fontSize: 15, fontWeight: '700', color: colors.text.primary, marginBottom: 12 },
 
   riskWrap: { paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.border.default },
+
+  summaryText: { fontSize: 14, color: colors.text.secondary, lineHeight: 22 },
 
   reasonBox:  { backgroundColor: colors.bg.subtle, borderRadius: 12, padding: 14 },
   reasonLabel: { fontSize: 12, fontWeight: '600', color: colors.text.tertiary, marginBottom: 6 },

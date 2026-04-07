@@ -518,7 +518,7 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: spacing[5] },
 
   heroCard:     { marginBottom: spacing[3] },
-  heroAmount:   { fontSize: 26, fontWeight: '700', color: colors.text.primary, letterSpacing: -0.5, marginTop: spacing[2], marginBottom: spacing[2] },
+  heroAmount:   { fontSize: 26, fontWeight: '700', color: colors.text.primary, letterSpacing: -0.5, marginTop: spacing[2], marginBottom: 4 },
   heroSubRow:   { flexDirection: 'row', alignItems: 'center', gap: spacing[2], marginBottom: spacing[1] },
   heroPnl:      { fontSize: 15, fontWeight: '600' },
   pnlBadge:     { borderRadius: borderRadius.sm, paddingHorizontal: spacing[2], paddingVertical: 3 },

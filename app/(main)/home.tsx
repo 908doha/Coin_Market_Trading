@@ -224,40 +224,65 @@ function ExchangeLogo({ exchange, size = 44 }: { exchange: ExchangeType; size?: 
   );
 }
 
+// ── 통화 토글 ────────────────────────────────────────────────────────────────
+function CurrencyToggle({ showUsd, onToggle }: { showUsd: boolean; onToggle: () => void }) {
+  return (
+    <PressableScale onPress={onToggle} scaleTo={0.94}>
+      <View style={toggle.wrap}>
+        <View style={[toggle.pill, !showUsd && toggle.pillActive]}>
+          <Text style={[toggle.label, !showUsd && toggle.labelActive]}>₩</Text>
+        </View>
+        <View style={[toggle.pill, showUsd && toggle.pillActive]}>
+          <Text style={[toggle.label, showUsd && toggle.labelActive]}>$</Text>
+        </View>
+      </View>
+    </PressableScale>
+  );
+}
+
+const toggle = StyleSheet.create({
+  wrap:        { flexDirection: 'row', backgroundColor: colors.bg.default, borderRadius: borderRadius.full, padding: 3, gap: 2 },
+  pill:        { paddingHorizontal: spacing[3], paddingVertical: spacing[1] + 1, borderRadius: borderRadius.full },
+  pillActive:  { backgroundColor: colors.primary.default },
+  label:       { fontSize: 13, fontWeight: '700', color: colors.text.tertiary },
+  labelActive: { color: '#fff' },
+});
+
 // ── 연결된 계정 행 ────────────────────────────────────────────────────────────
 function AccountRow({
-  account,
-  balance,
-  error,
-  isLast,
+  account, balance, error, isLast, showUsd,
 }: {
   account:  ExchangeAccount;
   balance:  Balance | null;
   error:    string | null;
   isLast:   boolean;
+  showUsd:  boolean;
 }) {
   const label    = EXCHANGE_LABELS[account.exchange];
   const isProfit = (balance?.profitTotal ?? 0) >= 0;
 
+  const mainAmount = balance
+    ? showUsd && (balance.totalUsd ?? 0) > 0
+      ? `$${balance.totalUsd!.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      : formatKRW(balance.total)
+    : (error ? '조회 실패' : '—');
+
+  const subAmount = balance
+    ? showUsd
+      ? formatKRW(balance.total)
+      : (balance.totalUsd ?? 0) > 0
+        ? `≈ $${balance.totalUsd!.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        : null
+    : null;
+
   return (
-    <PressableScale
-      onPress={() => router.push('/(main)/account/api-accounts')}
-      scaleTo={0.99}
-    >
+    <PressableScale onPress={() => router.push('/(main)/account/api-accounts')} scaleTo={0.99}>
       <View style={[accRow.wrap, !isLast && accRow.border]}>
-        {/* 거래소 로고 */}
         <ExchangeLogo exchange={account.exchange} size={44} />
 
-        {/* 금액 + 계좌명 */}
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={accRow.amount} numberOfLines={1}>
-            {balance ? formatKRW(balance.total) : (error ? '조회 실패' : '—')}
-          </Text>
-          {balance && (balance.totalUsd ?? 0) > 0 && (
-            <Text style={accRow.usd}>
-              ≈ ${balance.totalUsd!.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </Text>
-          )}
+          <Text style={accRow.amount} numberOfLines={1}>{mainAmount}</Text>
+          {subAmount && <Text style={accRow.sub}>{subAmount}</Text>}
           <Text style={accRow.name} numberOfLines={1}>
             {account.name || label} · {label}
           </Text>
@@ -266,7 +291,6 @@ function AccountRow({
           )}
         </View>
 
-        {/* 손익 뱃지 */}
         {balance && (
           <View style={accRow.pnlCol}>
             <Text style={[accRow.pnlText, { color: isProfit ? colors.market.rise : colors.market.fall }]}>
@@ -283,7 +307,8 @@ function AccountRow({
 }
 
 export default function Home() {
-  const [period, setPeriod] = useState<typeof PERIODS[number]>('1M');
+  const [period, setPeriod]   = useState<typeof PERIODS[number]>('1M');
+  const [showUsd, setShowUsd] = useState(false);
   const { accounts, balances, balanceErrors, totalBalance, balancesLoading } = useAccounts();
 
   const { data: singleBalance, isLoading: singleLoading } = useApi(
@@ -318,21 +343,12 @@ export default function Home() {
     return map;
   }, [agents, accounts, groupedTrades]);
 
-  const anyAgentActive = Object.values(agentStatsMap).some((s) => s.isActive);
-
   return (
     <FadeTabView style={styles.root}>
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
         <PageHeader
           title="🐦‍⬛ Osprey"
-          rightElement={
-            <View style={[styles.agentBadge, { backgroundColor: anyAgentActive ? colors.positive.subtle : colors.bg.elevated }]}>
-              <View style={[styles.agentDot, { backgroundColor: anyAgentActive ? colors.positive.default : colors.text.disabled }]} />
-              <Text variant="meta" style={{ color: anyAgentActive ? colors.positive.default : colors.text.disabled }}>
-                {anyAgentActive ? '운용중' : '대기중'}
-              </Text>
-            </View>
-          }
+          rightElement={<CurrencyToggle showUsd={showUsd} onToggle={() => setShowUsd((v) => !v)} />}
         />
 
         <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -342,12 +358,11 @@ export default function Home() {
             {balLoading ? <AssetCardSkeleton /> : (
               <>
                 <Text variant="meta" color={colors.text.tertiary} style={{ marginBottom: 6 }}>총 자산</Text>
-                <Text style={styles.heroAmount}>{formatKRW(balance?.total ?? 0)}</Text>
-                {(balance?.totalUsd ?? 0) > 0 && (
-                  <Text variant="body2" color={colors.text.tertiary} style={{ marginBottom: 4 }}>
-                    ≈ ${(balance!.totalUsd!).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </Text>
-                )}
+                <Text style={styles.heroAmount}>
+                  {showUsd && (balance?.totalUsd ?? 0) > 0
+                    ? `$${balance!.totalUsd!.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    : formatKRW(balance?.total ?? 0)}
+                </Text>
                 <View style={styles.heroSubRow}>
                   <Text style={[styles.heroPnl, { color: isProfit ? colors.market.rise : colors.market.fall }]}>
                     {formatKRWSigned(balance?.profitTotal ?? 0)}
@@ -380,9 +395,9 @@ export default function Home() {
             </GlassCard>
           </View>
 
-          {/* ── 연결된 API 계정 ── */}
+          {/* ── 연결된 계좌 ── */}
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>연결된 계정</Text>
+            <Text style={styles.sectionTitle}>연결된 계좌</Text>
             <PressableScale onPress={() => router.push('/(main)/account/api-accounts')} scaleTo={0.96}>
               <View style={styles.manageBtn}>
                 <Text style={styles.manageBtnText}>관리</Text>
@@ -411,6 +426,7 @@ export default function Home() {
                   balance={balances[acc.id] ?? null}
                   error={balanceErrors[acc.id] ?? null}
                   isLast={i === accounts.length - 1}
+                  showUsd={showUsd}
                 />
               ))}
             </GlassCard>
@@ -513,9 +529,6 @@ const styles = StyleSheet.create({
   root:    { flex: 1, backgroundColor: colors.bg.elevated },
   content: { paddingHorizontal: spacing[5] },
 
-  agentBadge: { flexDirection: 'row', alignItems: 'center', gap: spacing[1] + 2, borderRadius: borderRadius.full, paddingHorizontal: spacing[3], paddingVertical: spacing[1] + 2 },
-  agentDot:   { width: 6, height: 6, borderRadius: borderRadius.full },
-
   heroCard:     { marginBottom: spacing[3] },
   heroAmount:   { fontSize: 26, fontWeight: '700', color: colors.text.primary, letterSpacing: -0.5, marginTop: spacing[2], marginBottom: spacing[2] },
   heroSubRow:   { flexDirection: 'row', alignItems: 'center', gap: spacing[2], marginBottom: spacing[1] },
@@ -586,7 +599,7 @@ const accRow = StyleSheet.create({
   border: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border.default },
 
   amount: { fontSize: 18, fontWeight: '700', color: colors.text.primary, letterSpacing: -0.3 },
-  usd:    { fontSize: 12, fontWeight: '500', color: colors.text.tertiary, marginTop: 1 },
+  sub:    { fontSize: 12, fontWeight: '500', color: colors.text.tertiary, marginTop: 1 },
   name:   { fontSize: 12, color: colors.text.disabled, fontWeight: '500', marginTop: 2 },
   error:  { fontSize: 11, color: colors.negative.default, marginTop: 3, lineHeight: 15 },
 

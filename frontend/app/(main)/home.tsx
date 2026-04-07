@@ -3,7 +3,7 @@ import { View, StyleSheet, ScrollView, TouchableWithoutFeedback, Modal, Pressabl
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Svg, { Polyline, Defs, LinearGradient, Stop, Polygon, Path, Rect, Text as SvgText, Line, Circle } from 'react-native-svg';
-import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS } from 'react-native-reanimated';
 import { Text, GlassCard, PressableScale, FadeTabView, AssetCardSkeleton, PageHeader, CurrencyToggle } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { accountService, positionsService, tradesService } from '@/services';
@@ -88,7 +88,7 @@ function AgentRow({
   );
 }
 
-// ── 기간 선택 바텀시트 (Toss 스타일) ─────────────────────────────────────────
+// ── 기간 선택 바텀시트 ────────────────────────────────────────────────────────
 function PeriodBottomSheet({
   visible, period, onChange, onClose,
 }: {
@@ -97,11 +97,31 @@ function PeriodBottomSheet({
   onChange: (k: PeriodKey) => void;
   onClose:  () => void;
 }) {
+  const translateY = useSharedValue(400);
+  const [mounted, setMounted] = React.useState(false);
+
+  React.useEffect(() => {
+    if (visible) {
+      setMounted(true);
+      translateY.value = withSpring(0, { damping: 26, stiffness: 280, mass: 0.8 });
+    } else {
+      translateY.value = withTiming(400, { duration: 240 }, () => {
+        runOnJS(setMounted)(false);
+      });
+    }
+  }, [visible]);
+
+  const sheetStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+  }));
+
+  if (!mounted) return null;
+
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible transparent animationType="none" onRequestClose={onClose}>
+      {/* 배경: 즉시 표시, 애니메이션 없음 */}
       <Pressable style={sheet.overlay} onPress={onClose}>
-        {/* stopPropagation 대신 빈 onPress로 버블 차단 */}
-        <View style={sheet.sheet}>
+        <Animated.View style={[sheet.sheet, sheetStyle]}>
           <View style={sheet.handle} />
 
           {PERIODS.map((p) => {
@@ -116,12 +136,12 @@ function PeriodBottomSheet({
                   {p.label}
                 </Text>
                 {active && (
-                  <Svg width={24} height={24} viewBox="0 0 24 24">
+                  <Svg width={22} height={22} viewBox="0 0 24 24">
                     <Circle cx="12" cy="12" r="12" fill={colors.primary.default} />
                     <Path
                       d="M7 12.5l3.5 3.5 6.5-7"
                       stroke="#fff"
-                      strokeWidth="2"
+                      strokeWidth="2.2"
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       fill="none"
@@ -133,7 +153,7 @@ function PeriodBottomSheet({
           })}
 
           <View style={{ height: 34 }} />
-        </View>
+        </Animated.View>
       </Pressable>
     </Modal>
   );
@@ -142,7 +162,7 @@ function PeriodBottomSheet({
 const sheet = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: 'rgba(0,0,0,0.45)',
     justifyContent: 'flex-end',
   },
   sheet: {

@@ -88,77 +88,72 @@ function AgentRow({
   );
 }
 
-// ── 기간 드롭다운 ─────────────────────────────────────────────────────────────
-function PeriodDropdown({ period, onChange }: { period: PeriodKey; onChange: (k: PeriodKey) => void }) {
-  const [open, setOpen] = useState(false);
-  const label = PERIODS.find((p) => p.key === period)?.label ?? period;
-
+// ── 기간 선택 바텀시트 ────────────────────────────────────────────────────────
+function PeriodBottomSheet({
+  visible, period, onChange, onClose,
+}: {
+  visible:  boolean;
+  period:   PeriodKey;
+  onChange: (k: PeriodKey) => void;
+  onClose:  () => void;
+}) {
   return (
-    <View>
-      <Pressable style={drop.trigger} onPress={() => setOpen(true)}>
-        <Text style={drop.triggerText}>{label}</Text>
-        <Text style={drop.chevron}>▾</Text>
-      </Pressable>
-
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-        <Pressable style={drop.backdrop} onPress={() => setOpen(false)}>
-          <View style={drop.menu}>
-            {PERIODS.map((p) => (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={sheet.backdrop} onPress={onClose}>
+        <Pressable style={sheet.container} onPress={() => {}}>
+          {/* 핸들 */}
+          <View style={sheet.handle} />
+          <Text style={sheet.title}>기간 선택</Text>
+          {PERIODS.map((p) => {
+            const active = p.key === period;
+            return (
               <Pressable
                 key={p.key}
-                style={[drop.item, p.key === period && drop.itemActive]}
-                onPress={() => { onChange(p.key); setOpen(false); }}
+                style={[sheet.item, active && sheet.itemActive]}
+                onPress={() => { onChange(p.key); onClose(); }}
               >
-                <Text style={[drop.itemText, p.key === period && drop.itemTextActive]}>
+                <Text style={[sheet.itemText, active && sheet.itemTextActive]}>
                   {p.label}
                 </Text>
-                {p.key === period && <Text style={drop.check}>✓</Text>}
+                {active && <Text style={sheet.check}>✓</Text>}
               </Pressable>
-            ))}
-          </View>
+            );
+          })}
+          <View style={{ height: 20 }} />
         </Pressable>
-      </Modal>
-    </View>
+      </Pressable>
+    </Modal>
   );
 }
 
-const drop = StyleSheet.create({
-  trigger: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    gap:            6,
-    paddingHorizontal: 14,
-    paddingVertical:    8,
-    borderRadius:   99,
-    borderWidth:    1,
-    borderColor:    colors.border.default,
-    backgroundColor: colors.bg.default,
-    alignSelf:      'flex-start',
-  },
-  triggerText: { fontSize: 13, fontWeight: '600', color: colors.text.secondary },
-  chevron:     { fontSize: 11, color: colors.text.tertiary, marginTop: 1 },
+const sheet = StyleSheet.create({
   backdrop: {
     flex:            1,
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    justifyContent:  'center',
-    alignItems:      'center',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent:  'flex-end',
   },
-  menu: {
+  container: {
     backgroundColor: colors.bg.default,
-    borderRadius:    16,
-    width:           220,
-    overflow:        'hidden',
-    shadowColor:     '#000',
-    shadowOffset:    { width: 0, height: 8 },
-    shadowOpacity:   0.12,
-    shadowRadius:    20,
-    elevation:       12,
+    borderTopLeftRadius:  24,
+    borderTopRightRadius: 24,
+    paddingTop:    12,
+    paddingHorizontal: 0,
+  },
+  handle: {
+    width: 36, height: 4, borderRadius: 2,
+    backgroundColor: colors.border.strong,
+    alignSelf: 'center',
+    marginBottom: 20,
+  },
+  title: {
+    fontSize: 16, fontWeight: '700', color: colors.text.primary,
+    paddingHorizontal: 20, marginBottom: 8,
   },
   item: {
     flexDirection:  'row',
     alignItems:     'center',
     justifyContent: 'space-between',
-    paddingVertical:   15,
+    paddingVertical:   16,
     paddingHorizontal: 20,
   },
   itemActive:     { backgroundColor: colors.bg.subtle },
@@ -189,24 +184,36 @@ const PAD_B    = 0;
 const DRAW_H   = CHART_H - PAD_T - PAD_B;
 
 interface AssetChartProps {
-  data:     { value: number; date?: string }[];
-  positive: boolean;
-  showUsd:  boolean;
-  rate:     number;
+  data:           { value: number; date?: string }[];
+  positive:       boolean;
+  showUsd:        boolean;
+  rate:           number;
+  period:         PeriodKey;
+  onPeriodPress:  () => void;
 }
 
-function AssetChart({ data, positive, showUsd, rate }: AssetChartProps) {
+function AssetChart({ data, positive, showUsd, rate, period, onPeriodPress }: AssetChartProps) {
   const [tooltip, setTooltip] = useState<{ idx: number; x: number; y: number } | null>(null);
+
+  const periodLabel = PERIODS.find((p) => p.key === period)?.label ?? period;
 
   if (!data?.length || data.length < 2) {
     return (
-      <View style={{ height: CHART_H, alignItems: 'center', justifyContent: 'center' }}>
-        <Text variant="caption1" color={colors.text.disabled}>데이터 없음</Text>
+      <View>
+        <Pressable style={chartSt.periodRow} onPress={onPeriodPress}>
+          <Text style={chartSt.periodLabel}>{periodLabel}</Text>
+          <Text style={chartSt.periodChevron}>▾</Text>
+        </Pressable>
+        <View style={{ height: CHART_H, alignItems: 'center', justifyContent: 'center' }}>
+          <Text variant="caption1" color={colors.text.disabled}>데이터 없음</Text>
+        </View>
       </View>
     );
   }
 
-  const values = data.map((d) => d.value);
+  const values = data
+    .map((d) => (typeof d.value === 'number' && isFinite(d.value) ? d.value : null))
+    .filter((v): v is number => v !== null);
   const min    = Math.min(...values);
   const max    = Math.max(...values);
   const range  = max - min || max * 0.02 || 1;
@@ -253,15 +260,17 @@ function AssetChart({ data, positive, showUsd, rate }: AssetChartProps) {
 
   return (
     <View>
-      {/* 변동률 라벨 */}
-      <View style={chartSt.changeRow}>
-        <Text style={[chartSt.changePct, { color }]}>
-          {changeSign}{changePct.toFixed(2)}%
-        </Text>
-        <Text variant="caption1" color={colors.text.disabled} style={{ marginLeft: 4 }}>
-          기간 수익률
-        </Text>
-      </View>
+      {/* 기간 선택 + 변동률 */}
+      <Pressable style={chartSt.periodRow} onPress={onPeriodPress}>
+        <Text style={chartSt.periodLabel}>{periodLabel}</Text>
+        <Text style={chartSt.periodChevron}>▾</Text>
+        <View style={chartSt.changePill}>
+          <Text style={[chartSt.changePct, { color }]}>
+            {changeSign}{changePct.toFixed(2)}%
+          </Text>
+          <Text style={chartSt.changeLabel}> 기간 수익률</Text>
+        </View>
+      </Pressable>
 
       {/* SVG 차트 */}
       <TouchableWithoutFeedback onPress={handleTouch} onPressOut={() => setTooltip(null)}>
@@ -360,8 +369,15 @@ function AssetChart({ data, positive, showUsd, rate }: AssetChartProps) {
 }
 
 const chartSt = StyleSheet.create({
-  changeRow: { flexDirection: 'row', alignItems: 'baseline', marginBottom: spacing[2] },
-  changePct: { fontSize: 14, fontWeight: '700' },
+  periodRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    marginBottom: spacing[2], alignSelf: 'flex-start',
+  },
+  periodLabel:   { fontSize: 13, fontWeight: '600', color: colors.text.secondary },
+  periodChevron: { fontSize: 11, color: colors.text.tertiary, marginTop: 1 },
+  changePill:    { flexDirection: 'row', alignItems: 'baseline', marginLeft: 8 },
+  changePct:     { fontSize: 14, fontWeight: '700' },
+  changeLabel:   { fontSize: 13, color: colors.text.disabled },
   yLabels:   {
     flexDirection: 'row', justifyContent: 'space-between',
     marginTop: 4, paddingHorizontal: 2,
@@ -514,8 +530,9 @@ function AccountRow({
 }
 
 export default function Home() {
-  const [period, setPeriod]   = useState<PeriodKey>('1M');
-  const [showUsd, setShowUsd] = useState(false);
+  const [period, setPeriod]         = useState<PeriodKey>('1M');
+  const [showUsd, setShowUsd]       = useState(false);
+  const [showPeriodSheet, setShowPeriodSheet] = useState(false);
   const { accounts, balances, balanceErrors, totalBalance, balancesLoading } = useAccounts();
 
   const { data: singleBalance, isLoading: singleLoading } = useApi(
@@ -632,10 +649,9 @@ export default function Home() {
                     positive={isProfit}
                     showUsd={showUsd}
                     rate={balance?.usdtKrw ?? 1350}
+                    period={period}
+                    onPeriodPress={() => setShowPeriodSheet(true)}
                   />
-                </View>
-                <View style={styles.periodRow}>
-                  <PeriodDropdown period={period} onChange={setPeriod} />
                 </View>
               </>
             )}
@@ -775,6 +791,13 @@ export default function Home() {
           <View style={{ height: 120 }} />
         </ScrollView>
       </SafeAreaView>
+
+      <PeriodBottomSheet
+        visible={showPeriodSheet}
+        period={period}
+        onChange={setPeriod}
+        onClose={() => setShowPeriodSheet(false)}
+      />
     </FadeTabView>
   );
 }
@@ -790,7 +813,6 @@ const styles = StyleSheet.create({
   pnlBadge:     { borderRadius: borderRadius.sm, paddingHorizontal: spacing[2], paddingVertical: 3 },
   pnlBadgeText: { fontSize: 13, fontWeight: '600' },
   chartArea:    { marginTop: spacing[5], marginBottom: spacing[3] },
-  periodRow:    { flexDirection: 'row' },
 
   statsRow:  { flexDirection: 'row', gap: spacing[2] + 2, marginBottom: spacing[3] },
   statCard:  { flex: 1 },

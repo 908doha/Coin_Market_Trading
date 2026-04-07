@@ -22,7 +22,9 @@ const logger = require('../utils/logger');
  */
 class IctStrategy {
   constructor() {
-    this.name = 'ICT Multi-Timeframe Strategy';
+    this.name            = 'ICT Multi-Timeframe Strategy';
+    this.leverage        = 5;    // 레버리지 (에이전트별 고유 설정)
+    this.positionUsdt    = 100;  // 포지션 크기 (USDT)
   }
 
   /**

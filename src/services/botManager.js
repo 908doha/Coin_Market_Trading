@@ -54,10 +54,11 @@ class BotInstance {
     const bal = await this.gate.futures.listFuturesAccounts(SETTLE);
     logger.info(`[Bot:${this.accountId}] 시작 — 잔고 ${bal.body.available} USDT`);
 
-    // 레버리지 설정
+    // 레버리지 설정 (전략 고유값 사용)
+    const leverage = this.strategy.leverage ?? config.leverage;
     try {
-      await this.gate.futures.updatePositionLeverage(SETTLE, CONTRACT, String(config.leverage), {});
-      logger.info(`[Bot:${this.accountId}] 레버리지 ${config.leverage}x 설정 완료`);
+      await this.gate.futures.updatePositionLeverage(SETTLE, CONTRACT, String(leverage), {});
+      logger.info(`[Bot:${this.accountId}] 레버리지 ${leverage}x 설정 완료`);
     } catch (e) {
       logger.warn(`[Bot:${this.accountId}] 레버리지 설정 실패 (무시): ${e.message}`);
     }
@@ -131,7 +132,9 @@ class BotInstance {
       const direction = signal.signal; // 'long' | 'short'
       const balRes    = await this.gate.futures.listFuturesAccounts(SETTLE);
       const available = parseFloat(balRes.body.available ?? '0');
-      const budget    = Math.min(config.positionSizeUsdt, available * 0.9);
+      const leverage     = this.strategy.leverage      ?? config.leverage;
+      const positionUsdt = this.strategy.positionUsdt  ?? config.positionSizeUsdt;
+      const budget       = Math.min(positionUsdt, available * 0.9);
 
       if (budget < 1) {
         logger.warn(`[Bot:${this.accountId}] 잔고 부족 (${available} USDT)`);
@@ -139,12 +142,12 @@ class BotInstance {
       }
 
       // Gate.io 선물 계약 크기 조회
-      const contractInfo = await this.pubApi.getFuturesContract(SETTLE, CONTRACT);
+      const contractInfo     = await this.pubApi.getFuturesContract(SETTLE, CONTRACT);
       const quantoMultiplier = parseFloat(contractInfo.body?.quanto_multiplier ?? '0.0001');
-      const markPrice = parseFloat(contractInfo.body?.mark_price ?? signal.entry);
+      const markPrice        = parseFloat(contractInfo.body?.mark_price ?? signal.entry);
 
-      // 계약 수 = 예산 / (mark_price * quanto_multiplier)
-      const contracts = Math.max(1, Math.floor((budget * config.leverage) / (markPrice * quantoMultiplier)));
+      // 계약 수 = 예산 × 레버리지 / (mark_price × quanto_multiplier)
+      const contracts = Math.max(1, Math.floor((budget * leverage) / (markPrice * quantoMultiplier)));
       const size      = direction === 'long' ? contracts : -contracts;
 
       logger.info(

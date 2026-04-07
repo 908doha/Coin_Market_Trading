@@ -295,34 +295,91 @@ class IctStrategy {
 
   /**
    * SL/TP 계산
+   * 방향에 맞지 않는 레벨(예: Long SL이 진입가 위)은 자동 폴백
    */
   _calculateSLTP(price, direction, mtfStructure, ltfEntry, htfBias) {
     let sl, tp;
+    const slPct = config.stopLossPercent / 100;
 
     if (direction === 'bullish') {
-      // SL 우선순위: MTF OB 하단 → LTF 스윙 로우 → PDL → 고정 비율
-      if (mtfStructure.orderBlocks.length > 0) {
-        const ob = mtfStructure.orderBlocks[mtfStructure.orderBlocks.length - 1];
-        sl = ob.low * (1 - config.stopLossPercent / 100 * 0.3);
-      } else if (ltfEntry.swingLows && ltfEntry.swingLows.length > 0) {
-        sl = ltfEntry.swingLows[ltfEntry.swingLows.length - 1].price * (1 - 0.001);
-      } else if (htfBias.pdhl) {
-        sl = htfBias.pdhl.pdl * (1 - 0.001);
-      } else {
-        sl = price * (1 - config.stopLossPercent / 100);
+      // Long: SL은 반드시 진입가보다 낮아야 함
+      const candidates = [];
+
+      // 1순위: MTF OB 하단 (진입가보다 아래인 경우만)
+      for (let i = mtfStructure.orderBlocks.length - 1; i >= 0; i--) {
+        const ob = mtfStructure.orderBlocks[i];
+        if (ob.low < price) {
+          candidates.push(ob.low * (1 - slPct * 0.3));
+          break;
+        }
+      }
+
+      // 2순위: LTF 스윙 로우 (진입가보다 아래)
+      if (candidates.length === 0 && ltfEntry.swingLows) {
+        for (let i = ltfEntry.swingLows.length - 1; i >= 0; i--) {
+          const slow = ltfEntry.swingLows[i].price;
+          if (slow < price) {
+            candidates.push(slow * (1 - 0.001));
+            break;
+          }
+        }
+      }
+
+      // 3순위: PDL (진입가보다 아래)
+      if (candidates.length === 0 && htfBias.pdhl && htfBias.pdhl.pdl < price) {
+        candidates.push(htfBias.pdhl.pdl * (1 - 0.001));
+      }
+
+      // 폴백: 고정 비율
+      if (candidates.length === 0) {
+        candidates.push(price * (1 - slPct));
+      }
+
+      sl = candidates[0];
+      // 최종 검증: Long SL은 반드시 진입가보다 낮아야 함
+      if (sl >= price) {
+        sl = price * (1 - slPct);
       }
       const risk = price - sl;
       tp = price + risk * 3;
     } else {
-      if (mtfStructure.orderBlocks.length > 0) {
-        const ob = mtfStructure.orderBlocks[mtfStructure.orderBlocks.length - 1];
-        sl = ob.high * (1 + config.stopLossPercent / 100 * 0.3);
-      } else if (ltfEntry.swingHighs && ltfEntry.swingHighs.length > 0) {
-        sl = ltfEntry.swingHighs[ltfEntry.swingHighs.length - 1].price * (1 + 0.001);
-      } else if (htfBias.pdhl) {
-        sl = htfBias.pdhl.pdh * (1 + 0.001);
-      } else {
-        sl = price * (1 + config.stopLossPercent / 100);
+      // Short: SL은 반드시 진입가보다 높아야 함
+      const candidates = [];
+
+      // 1순위: MTF OB 상단 (진입가보다 위인 경우만)
+      for (let i = mtfStructure.orderBlocks.length - 1; i >= 0; i--) {
+        const ob = mtfStructure.orderBlocks[i];
+        if (ob.high > price) {
+          candidates.push(ob.high * (1 + slPct * 0.3));
+          break;
+        }
+      }
+
+      // 2순위: LTF 스윙 하이 (진입가보다 위)
+      if (candidates.length === 0 && ltfEntry.swingHighs) {
+        for (let i = ltfEntry.swingHighs.length - 1; i >= 0; i--) {
+          const shigh = ltfEntry.swingHighs[i].price;
+          if (shigh > price) {
+            candidates.push(shigh * (1 + 0.001));
+            break;
+          }
+        }
+      }
+
+      // 3순위: PDH (진입가보다 위)
+      if (candidates.length === 0 && htfBias.pdhl && htfBias.pdhl.pdh > price) {
+        candidates.push(htfBias.pdhl.pdh * (1 + 0.001));
+      }
+
+      // 폴백
+      if (candidates.length === 0) {
+        candidates.push(price * (1 + slPct));
+      }
+
+      sl = candidates[0];
+      // 최종 검증: Short SL은 반드시 진입가보다 높아야 함
+      if (sl <= price) {
+        sl = price * (1 + slPct);
       }
       const risk = sl - price;
       tp = price - risk * 3;

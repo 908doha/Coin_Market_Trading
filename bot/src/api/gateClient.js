@@ -264,21 +264,30 @@ const gateClient = {
 
   /**
    * SL/TP 지정가 주문 세트 등록
-   * Gate.io SDK의 FuturesPriceTriggeredOrder 모델 사용
+   * Gate.io Price Triggered Order (Plan Order)
+   *
+   * @param contract 거래쌍
+   * @param positionSize 현재 포지션 사이즈 (항상 양수)
+   * @param direction 'long' 또는 'short'
+   * @param sl 손절 가격
+   * @param tp 익절 가격
    */
-  async placeSLTP(contract, size, direction, sl, tp) {
+  async placeSLTP(contract, positionSize, direction, sl, tp) {
     const results = { slOrder: null, tpOrder: null };
+    const absSize = Math.abs(positionSize);
 
     if (direction === 'long') {
-      // Long SL: 마크가격이 SL 이하 → 청산 매도
-      results.slOrder = await this._createTriggerOrder(contract, size, sl, sl, 2, 'close-long-order');
-      // Long TP: 마크가격이 TP 이상 → 청산 매도
-      results.tpOrder = await this._createTriggerOrder(contract, size, tp, tp, 1, 'close-long-order');
+      // Long 청산 = 매도 (음수 size)
+      // SL: mark price <= sl 도달 시 청산 (rule=2)
+      results.slOrder = await this._createTriggerOrder(contract, -absSize, sl, 2, 'close-long-order');
+      // TP: mark price >= tp 도달 시 청산 (rule=1)
+      results.tpOrder = await this._createTriggerOrder(contract, -absSize, tp, 1, 'close-long-order');
     } else {
-      // Short SL: 마크가격이 SL 이상 → 청산 매수
-      results.slOrder = await this._createTriggerOrder(contract, size, sl, sl, 1, 'close-short-order');
-      // Short TP: 마크가격이 TP 이하 → 청산 매수
-      results.tpOrder = await this._createTriggerOrder(contract, size, tp, tp, 2, 'close-short-order');
+      // Short 청산 = 매수 (양수 size)
+      // SL: mark price >= sl 도달 시 청산 (rule=1)
+      results.slOrder = await this._createTriggerOrder(contract, absSize, sl, 1, 'close-short-order');
+      // TP: mark price <= tp 도달 시 청산 (rule=2)
+      results.tpOrder = await this._createTriggerOrder(contract, absSize, tp, 2, 'close-short-order');
     }
 
     logger.info(`SL/TP 등록 완료: SL=${sl} TP=${tp}`);
@@ -286,35 +295,32 @@ const gateClient = {
   },
 
   /**
-   * 조건부 주문 생성 (SDK 모델 사용)
+   * Gate.io Price Triggered Order 생성
+   * 지정가(GTC) + reduceOnly 방식으로 포지션 청산 전용
    */
-  async _createTriggerOrder(contract, size, triggerPrice, orderPrice, rule, orderType) {
+  async _createTriggerOrder(contract, size, triggerPrice, rule, orderType) {
     try {
       const order = new GateApi.FuturesPriceTriggeredOrder();
 
       const initial = new GateApi.FuturesInitialOrder();
       initial.contract = contract;
-      initial.size = 0;          // autoSize 사용 시 0
-      initial.price = '0';       // 시장가로 청산
-      initial.close = true;      // 청산 주문
-      initial.tif = 'ioc';       // 즉시 체결
-      initial.autoSize = 'close_long';
-      if (orderType === 'close-short-order') {
-        initial.autoSize = 'close_short';
-      }
+      initial.size = size;                   // 청산 방향 (음수: 매도, 양수: 매수)
+      initial.price = triggerPrice.toString(); // 지정가
+      initial.tif = 'gtc';                   // Good Till Cancel
+      initial.reduceOnly = true;             // 포지션 감소 전용
 
       const trigger = new GateApi.FuturesPriceTrigger();
-      trigger.strategyType = 0;  // price trigger
-      trigger.priceType = 1;     // mark price
+      trigger.strategyType = 0;              // price trigger
+      trigger.priceType = 1;                 // mark price
       trigger.price = triggerPrice.toString();
-      trigger.rule = rule;       // 1: >=, 2: <=
+      trigger.rule = rule;                   // 1: >=, 2: <=
 
       order.initial = initial;
       order.trigger = trigger;
       order.orderType = orderType;
 
       const { body } = await futuresApi.createPriceTriggeredOrder(SETTLE, order);
-      logger.info(`조건부 주문 등록: ${orderType} trigger=${triggerPrice} id=${body.id}`);
+      logger.info(`조건부 주문 등록: ${orderType} trigger=${triggerPrice} size=${size} id=${body.id}`);
       return body;
     } catch (err) {
       logger.error(`조건부 주문 실패 [${orderType}]: ${err.message}`);

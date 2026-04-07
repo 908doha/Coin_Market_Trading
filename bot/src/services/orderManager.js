@@ -16,6 +16,7 @@ class OrderManager {
     this.dailyPnlResetDate = new Date().toDateString();
     this.slOrderId = null;
     this.tpOrderId = null;
+    this.lastKnownPosition = null;
   }
 
   /**
@@ -102,11 +103,33 @@ class OrderManager {
     // 1. 시장가 진입 주문
     const order = await gateClient.createOrder(contract, size, side);
 
-    // 2. SL/TP 지정가 주문을 거래소에 등록 (최대 3회 재시도)
+    // 2. 실제 체결된 포지션 조회 (체결 반영 대기)
+    await new Promise(r => setTimeout(r, 1000));
+    let actualPosition = null;
+    for (let i = 0; i < 3; i++) {
+      actualPosition = await gateClient.getPosition(contract);
+      if (actualPosition && actualPosition.size !== 0) break;
+      await new Promise(r => setTimeout(r, 1000));
+    }
+
+    if (!actualPosition || actualPosition.size === 0) {
+      logger.error('진입 주문 체결 확인 실패');
+      return { executed: false, reason: '진입 체결 확인 실패' };
+    }
+
+    const actualSize = Math.abs(actualPosition.size);
+    this.lastKnownPosition = {
+      size: actualPosition.size,
+      entryPrice: actualPosition.entryPrice,
+      unrealisedPnl: actualPosition.unrealisedPnl,
+    };
+    logger.info(`[체결 확인] size=${actualPosition.size} entry=${actualPosition.entryPrice}`);
+
+    // 3. SL/TP 지정가 주문을 거래소에 등록 (최대 3회 재시도)
     let sltpSuccess = false;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const sltpResult = await gateClient.placeSLTP(contract, size, direction, sl, tp);
+        const sltpResult = await gateClient.placeSLTP(contract, actualSize, direction, sl, tp);
         this.slOrderId = sltpResult.slOrder ? sltpResult.slOrder.id : null;
         this.tpOrderId = sltpResult.tpOrder ? sltpResult.tpOrder.id : null;
         logger.info(`SL 주문 ID: ${this.slOrderId} | TP 주문 ID: ${this.tpOrderId}`);
@@ -142,61 +165,60 @@ class OrderManager {
    *
    * SL/TP는 거래소 조건부 주문으로 등록되어 있으므로
    * 여기서는 포지션 상태와 체결 여부만 확인한다.
+   *
+   * 체결 판단 규칙:
+   *  - 이전에 포지션 있었다가 지금 없음 → SL/TP 체결
+   *  - 처음부터 포지션 없음 → 진입 실패 또는 조회 오류
    */
   async monitorPosition(contract, sl, tp, direction) {
     const position = await gateClient.getPosition(contract);
 
-    // 포지션이 없으면 SL 또는 TP가 체결된 것
-    if (!position || position.size === 0) {
-      // 남은 조건부 주문 정리 (SL 체결 시 TP 취소, TP 체결 시 SL 취소)
+    // 포지션이 살아 있음
+    if (position && position.size !== 0) {
+      const currentPrice = position.markPrice;
+      this.lastKnownPosition = {
+        size: position.size,
+        entryPrice: position.entryPrice,
+        unrealisedPnl: position.unrealisedPnl,
+      };
+      logger.debug(
+        `[포지션] ${direction} | 현재: ${currentPrice} | PnL: ${position.unrealisedPnl.toFixed(2)} USDT | SL: ${sl} | TP: ${tp}`
+      );
+      return { action: 'holding', price: currentPrice, pnl: position.unrealisedPnl };
+    }
+
+    // 포지션이 없음: 이전에 있었던 경우에만 청산으로 판단
+    if (!this.lastKnownPosition) {
+      // 한번도 포지션을 확인한 적 없음 → 진입 실패 또는 미체결
+      logger.warn(`[포지션 확인 불가] 진입 후 포지션 조회 실패 - 조건부 주문 정리`);
       try {
         await gateClient.cancelAllTriggerOrders(contract);
       } catch {
-        // 이미 없을 수 있음
+        // 무시
       }
-
-      // 어떤 주문이 체결됐는지 확인
-      const closedPnl = await this._getLastClosedPnl(contract);
-
-      if (closedPnl !== null) {
-        this.dailyPnl += closedPnl;
-        const action = closedPnl >= 0 ? 'tp_hit' : 'sl_hit';
-        const label = action === 'tp_hit' ? 'TP 익절' : 'SL 손절';
-        logger.info(`[${label}] 지정가 체결 | PnL: ${closedPnl.toFixed(2)} USDT`);
-
-        this.slOrderId = null;
-        this.tpOrderId = null;
-
-        return { action, price: 0, pnl: closedPnl };
-      }
-
       this.slOrderId = null;
       this.tpOrderId = null;
-      return { action: 'none', reason: '포지션 없음' };
+      return { action: 'failed', reason: '포지션 조회 실패' };
     }
 
-    // 포지션 유지 중
-    const currentPrice = position.markPrice;
-    logger.debug(
-      `[포지션] ${direction} | 현재: ${currentPrice} | PnL: ${position.unrealisedPnl.toFixed(2)} USDT | SL: ${sl} | TP: ${tp} (지정가 대기 중)`
-    );
-    return { action: 'holding', price: currentPrice, pnl: position.unrealisedPnl };
-  }
-
-  /**
-   * 최근 청산된 포지션의 실현 PnL 조회
-   */
-  async _getLastClosedPnl(contract) {
+    // 이전에는 있었는데 지금 없음 → SL/TP 체결
     try {
-      const position = await gateClient.getPosition(contract);
-      if (position && position.size === 0) {
-        // 포지션이 닫힌 상태에서의 정보 활용
-        return position.unrealisedPnl || 0;
-      }
+      await gateClient.cancelAllTriggerOrders(contract);
     } catch {
-      // 무시
+      // 이미 없을 수 있음
     }
-    return 0;
+
+    const pnl = this.lastKnownPosition.unrealisedPnl || 0;
+    const action = pnl >= 0 ? 'tp_hit' : 'sl_hit';
+    const label = action === 'tp_hit' ? 'TP 익절' : 'SL 손절';
+    logger.info(`[${label}] 지정가 체결 | PnL: ${pnl.toFixed(2)} USDT`);
+
+    this.dailyPnl += pnl;
+    this.slOrderId = null;
+    this.tpOrderId = null;
+    this.lastKnownPosition = null;
+
+    return { action, price: 0, pnl };
   }
 
   /**

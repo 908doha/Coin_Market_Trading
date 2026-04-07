@@ -81,6 +81,16 @@ function AgentRow({
   );
 }
 
+// ── 자산 통계 카드 ────────────────────────────────────────────────────────────
+function StatCard({ label, value }: { label: string; value: string }) {
+  return (
+    <GlassCard style={styles.statCard} intensity="low" radius={20} padding={16}>
+      <Text variant="meta" color={colors.text.tertiary} style={{ marginBottom: 4 }}>{label}</Text>
+      <Text style={styles.statValue}>{value}</Text>
+    </GlassCard>
+  );
+}
+
 // ── 라인 차트 ──────────────────────────────────────────────────────────────────
 const CHART_H = 64;
 const CHART_W = 600; // viewBox width — scales with container
@@ -385,14 +395,8 @@ export default function Home() {
 
           {/* ── 자산 분배 ── */}
           <View style={styles.statsRow}>
-            <GlassCard style={styles.statCard} intensity="low" radius={20} padding={16}>
-              <Text variant="meta" color={colors.text.tertiary} style={{ marginBottom: 6 }}>가용 자산</Text>
-              <Text style={styles.statValue}>{formatKRW(balance?.available ?? 0)}</Text>
-            </GlassCard>
-            <GlassCard style={styles.statCard} intensity="low" radius={20} padding={16}>
-              <Text variant="meta" color={colors.text.tertiary} style={{ marginBottom: 6 }}>투자 중</Text>
-              <Text style={styles.statValue}>{formatKRW(balance?.invested ?? 0)}</Text>
-            </GlassCard>
+            <StatCard label="가용 자산" value={formatKRW(balance?.available ?? 0)} />
+            <StatCard label="투자 중"   value={formatKRW(balance?.invested ?? 0)} />
           </View>
 
           {/* ── 연결된 계좌 ── */}

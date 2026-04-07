@@ -10,17 +10,27 @@
 import crypto from 'crypto';
 
 interface Position {
-  id:          string;
-  symbol:      string;
-  coin:        string;
-  direction:   'Long' | 'Short';
-  amount:      number;   // KRW
-  profit:      number;   // KRW
-  profitRate:  number;   // %
-  entryPrice:  number;
-  markPrice:   number;
-  leverage:    number;
-  agentReason?: string;
+  id:            string;
+  symbol:        string;
+  coin:          string;
+  direction:     'Long' | 'Short';
+  amount:        number;   // KRW (증거금)
+  profit:        number;   // KRW
+  profitRate:    number;   // %
+  entryPrice:    number;
+  markPrice:     number;
+  leverage:      number;
+  agentReason?:  string;
+  // 상세 화면용
+  currentPrice:  number;
+  currentValue:  number;   // KRW (평가금)
+  weight:        number;   // 포트폴리오 내 비중 (단일 포지션에서는 100)
+  entryAt:       string;
+  holdingPeriod: string;
+  riskLevel:     1 | 2 | 3 | 4 | 5;
+  liqPrice:      number;   // 청산가
+  size:          number;   // 계약 수
+  usdtKrw:       number;
 }
 
 // ── Gate.io 선물 포지션 조회 ───────────────────────────────────────────────────
@@ -83,17 +93,46 @@ async function fetchGatePositions(apiKey: string, apiSecret: string): Promise<Po
         ? ((markPrice - entryPrice) / entryPrice) * 100 * (size > 0 ? 1 : -1) * leverage
         : 0;
 
+      // 레버리지별 리스크 레벨 (1~5)
+      const riskLevel = leverage <= 3 ? 1 : leverage <= 5 ? 2 : leverage <= 10 ? 3 : leverage <= 20 ? 4 : 5;
+
+      // 보유 기간 계산
+      const openTime   = p.open_time ? new Date(p.open_time * 1000) : null;
+      const holdingMs  = openTime ? Date.now() - openTime.getTime() : 0;
+      const holdingDays = Math.floor(holdingMs / (1000 * 60 * 60 * 24));
+      const holdingHours = Math.floor((holdingMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const holdingPeriod = holdingDays > 0
+        ? `${holdingDays}일 ${holdingHours}시간`
+        : holdingHours > 0 ? `${holdingHours}시간` : '1시간 미만';
+
+      const entryAt = openTime
+        ? `${openTime.getFullYear()}.${String(openTime.getMonth()+1).padStart(2,'0')}.${String(openTime.getDate()).padStart(2,'0')}`
+        : '-';
+
+      // 증거금 = notional / leverage
+      const marginUsdt = notional / leverage;
+      const marginKrw  = marginUsdt * usdtKrw;
+
       return {
-        id:         p.contract + '_' + (p.update_time || Date.now()),
-        symbol:     contract.replace('_', '/'),
+        id:           p.contract + '_' + (p.update_time || Date.now()),
+        symbol:       contract.replace('_', '/'),
         coin,
-        direction:  size > 0 ? 'Long' : 'Short',
-        amount:     amountKrw,
-        profit:     profitKrw,
-        profitRate: parseFloat(profitRate.toFixed(2)),
+        direction:    size > 0 ? 'Long' : 'Short',
+        amount:       marginKrw,           // 증거금 (KRW)
+        profit:       profitKrw,
+        profitRate:   parseFloat(profitRate.toFixed(2)),
         entryPrice,
         markPrice,
         leverage,
+        currentPrice: markPrice,
+        currentValue: amountKrw,           // 평가금 (KRW)
+        weight:       100,
+        entryAt,
+        holdingPeriod,
+        riskLevel:    riskLevel as 1|2|3|4|5,
+        liqPrice:     parseFloat(p.liq_price || '0'),
+        size:         Math.abs(size),
+        usdtKrw,
       };
     });
 }

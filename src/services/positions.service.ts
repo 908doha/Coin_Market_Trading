@@ -29,6 +29,9 @@ const API_BASE =
     ? window.location.origin
     : process.env.EXPO_PUBLIC_APP_URL ?? '';
 
+// 마지막으로 조회한 포지션 캐시 (id → Position)
+const positionsCache = new Map<string, Position>();
+
 export const positionsService = {
   /** 특정 계좌의 실제 포지션 조회 */
   getByAccount: async (params: {
@@ -45,7 +48,7 @@ export const positionsService = {
     return res.json();
   },
 
-  /** 모든 계좌의 포지션 합산 */
+  /** 모든 계좌의 포지션 합산 (캐시에 저장) */
   getAllByAccounts: async (
     accounts: { id: string; exchange: ExchangeType; apiKey: string; apiSecret: string }[],
   ): Promise<Position[]> => {
@@ -57,6 +60,15 @@ export const positionsService = {
           .catch(() => [] as Position[]),
       ),
     );
-    return results.flat();
+    const all = results.flat();
+    // 캐시 갱신
+    positionsCache.clear();
+    all.forEach((p) => positionsCache.set(p.id, p));
+    return all;
+  },
+
+  /** 캐시에서 단일 포지션 조회 */
+  getById: async (id: string): Promise<Position | null> => {
+    return positionsCache.get(id) ?? null;
   },
 };

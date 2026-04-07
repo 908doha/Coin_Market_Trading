@@ -3,14 +3,16 @@ import { View, StyleSheet } from 'react-native';
 import { Text } from '../Text';
 
 interface PageHeaderProps {
-  title: string;
+  title: string | React.ReactNode;
   rightElement?: React.ReactNode;
 }
 
 export function PageHeader({ title, rightElement }: PageHeaderProps) {
   return (
     <View style={styles.wrap}>
-      <Text style={styles.title}>{title}</Text>
+      {typeof title === 'string'
+        ? <Text style={styles.title}>{title}</Text>
+        : <View>{title}</View>}
       {rightElement && <View>{rightElement}</View>}
     </View>
   );

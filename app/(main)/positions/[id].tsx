@@ -11,6 +11,7 @@ import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
+import { router } from 'expo-router';
 
 // ─── 정보 행 ─────────────────────────────────────────────────────────────────
 function InfoRow({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
@@ -146,7 +147,7 @@ export default function PositionDetail() {
   return (
     <ScreenTransition>
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <SubPageHeader title="포지션 상세" />
+      <SubPageHeader title="포지션 상세" onBack={() => router.navigate('/(main)/positions')} />
 
       <ScrollView
         style={styles.scroll}
@@ -217,63 +218,87 @@ export default function PositionDetail() {
         {/* ── 가격 정보 ───────────────────────────── */}
         <Card variant="outlined" style={styles.section}>
           <Text variant="heading3" style={{ marginBottom: spacing[3] }}>가격 현황</Text>
-          <InfoRow label="진입가"  value={formatKRW(position.entryPrice)} />
+          <InfoRow label="진입가"  value={`$${position.entryPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} />
           <Divider />
           <InfoRow
             label="현재가"
-            value={formatKRW(position.currentPrice)}
+            value={`$${position.currentPrice!.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
             valueColor={isProfit ? colors.market.rise : colors.market.fall}
           />
-          <Divider />
-          <InfoRow label="목표가"  value={formatKRW(position.targetPrice)} valueColor={colors.positive.text} />
-          <Divider />
-          <InfoRow label="손절가"  value={formatKRW(position.stopLoss)}    valueColor={colors.negative.text} />
+          {(position as any).liqPrice > 0 && (
+            <>
+              <Divider />
+              <InfoRow
+                label="청산가"
+                value={`$${(position as any).liqPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+                valueColor={colors.negative.text}
+              />
+            </>
+          )}
+          {position.stopLoss != null && position.stopLoss > 0 && (
+            <>
+              <Divider />
+              <InfoRow label="손절가" value={`$${position.stopLoss!.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} valueColor={colors.negative.text} />
+            </>
+          )}
+          {position.targetPrice != null && position.targetPrice > 0 && (
+            <>
+              <Divider />
+              <InfoRow label="목표가" value={`$${position.targetPrice!.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} valueColor={colors.positive.text} />
+            </>
+          )}
 
-          {/* 가격 범위 바 */}
-          <View style={{ marginTop: spacing[4] }}>
-            <PriceBar
-              stopLoss={position.stopLoss}
-              entryPrice={position.entryPrice}
-              currentPrice={position.currentPrice}
-              targetPrice={position.targetPrice}
-            />
-          </View>
+          {/* 가격 범위 바 — stopLoss & targetPrice 있을 때만 */}
+          {position.stopLoss! > 0 && position.targetPrice! > 0 && (
+            <View style={{ marginTop: spacing[4] }}>
+              <PriceBar
+                stopLoss={position.stopLoss!}
+                entryPrice={position.entryPrice}
+                currentPrice={position.currentPrice!}
+                targetPrice={position.targetPrice!}
+              />
+            </View>
+          )}
         </Card>
 
         {/* ── 포지션 정보 ─────────────────────────── */}
         <Card variant="outlined" style={styles.section}>
           <Text variant="heading3" style={{ marginBottom: spacing[3] }}>포지션 정보</Text>
-          <InfoRow label="비중"         value={`${position.weight}%`} />
+          <InfoRow label="레버리지"   value={`${position.leverage}x`} />
           <Divider />
-          <InfoRow label="예상 보유기간" value={position.holdingPeriod} />
+          <InfoRow label="계약 수"    value={`${(position as any).size ?? 1} 계약`} />
+          <Divider />
+          <InfoRow label="보유 기간"  value={position.holdingPeriod ?? '-'} />
           <Divider />
           <View style={{ paddingVertical: spacing[3] }}>
             <Text variant="body2" color={colors.text.tertiary} style={{ marginBottom: spacing[2] }}>리스크 수준</Text>
-            <RiskGauge level={position.riskLevel} />
+            <RiskGauge level={(position.riskLevel ?? 3) as 1|2|3|4|5} />
           </View>
         </Card>
 
-        {/* ── 에이전트 판단 근거 ⭐️ ─────────────────── */}
-        <Card variant="outlined" style={styles.section}>
-          <View style={styles.agentHeader}>
-            <Text style={styles.robotEmoji}>🤖</Text>
-            <Text variant="heading3">에이전트 판단 근거</Text>
-          </View>
-
-          <View style={styles.reasonBlock}>
-            <Text variant="label1Bold" style={{ marginBottom: spacing[2] }}>진입 이유</Text>
-            <Text variant="body2" color={colors.text.secondary} style={{ lineHeight: 24 }}>
-              {position.agentReason}
-            </Text>
-          </View>
-
-          <View style={[styles.reasonBlock, styles.planBlock]}>
-            <Text variant="label1Bold" style={{ marginBottom: spacing[2] }}>운용 계획</Text>
-            <Text variant="body2" color={colors.text.secondary} style={{ lineHeight: 24 }}>
-              {position.agentPlan}
-            </Text>
-          </View>
-        </Card>
+        {/* ── 에이전트 판단 근거 (있을 때만) ──────── */}
+        {position.agentReason && (
+          <Card variant="outlined" style={styles.section}>
+            <View style={styles.agentHeader}>
+              <Text style={styles.robotEmoji}>🤖</Text>
+              <Text variant="heading3">에이전트 판단 근거</Text>
+            </View>
+            <View style={styles.reasonBlock}>
+              <Text variant="label1Bold" style={{ marginBottom: spacing[2] }}>진입 이유</Text>
+              <Text variant="body2" color={colors.text.secondary} style={{ lineHeight: 24 }}>
+                {position.agentReason}
+              </Text>
+            </View>
+            {position.agentPlan && (
+              <View style={[styles.reasonBlock, styles.planBlock]}>
+                <Text variant="label1Bold" style={{ marginBottom: spacing[2] }}>운용 계획</Text>
+                <Text variant="body2" color={colors.text.secondary} style={{ lineHeight: 24 }}>
+                  {position.agentPlan}
+                </Text>
+              </View>
+            )}
+          </Card>
+        )}
 
         <View style={{ height: 120 }} />
         </>)}

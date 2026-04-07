@@ -240,6 +240,25 @@ class BotInstance {
     logger.info(`[Bot:${this.accountId}] SL(${sl}) / TP(${tp}) 설정 완료`);
   }
 
+  /** 현재 시장 데이터로 전략 즉시 분석 (포지션 상세 화면용) */
+  async analyze(contract) {
+    const target = contract ?? CONTRACT;
+    try {
+      const [htfRaw, mtfRaw, ltfRaw] = await Promise.all([
+        this.pubApi.listFuturesCandlesticks(SETTLE, target, { interval: config.timeframes.htf, limit: 200 }),
+        this.pubApi.listFuturesCandlesticks(SETTLE, target, { interval: config.timeframes.mtf, limit: 200 }),
+        this.pubApi.listFuturesCandlesticks(SETTLE, target, { interval: config.timeframes.ltf, limit: 200 }),
+      ]);
+      const toCandles = (raw) => raw.body.map((c) => ({
+        time: c.t, open: parseFloat(c.o), high: parseFloat(c.h),
+        low: parseFloat(c.l), close: parseFloat(c.c), volume: parseFloat(c.v),
+      }));
+      return this.strategy.analyze({ htf: toCandles(htfRaw), mtf: toCandles(mtfRaw), ltf: toCandles(ltfRaw) });
+    } catch (err) {
+      return { signal: null, reason: `분석 오류: ${err.message}`, confluence: [] };
+    }
+  }
+
   getStatus() {
     return {
       accountId:    this.accountId,
@@ -302,6 +321,12 @@ class BotManager {
     const all = {};
     for (const [id, bot] of this.bots) all[id] = bot.getStatus();
     return all;
+  }
+
+  async analyze(accountId, contract) {
+    const bot = this.bots.get(accountId);
+    if (!bot) return { signal: null, reason: '봇이 실행 중이지 않습니다', confluence: [] };
+    return bot.analyze(contract);
   }
 
   isRunning(accountId) {

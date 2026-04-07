@@ -62,4 +62,19 @@ router.get('/agents', (req, res) => {
   res.json(list);
 });
 
+// ── GET /bot/analyze ── 특정 계좌·심볼 전략 즉시 분석 ───────────
+// query: accountId, contract (예: BTC_USDT)
+router.get('/analyze', auth, async (req, res) => {
+  const { accountId, contract } = req.query;
+  if (!accountId) return res.status(400).json({ error: 'accountId 필요' });
+
+  try {
+    const result = await botManager.analyze(accountId, contract ?? undefined);
+    res.json(result);
+  } catch (err) {
+    logger.error(`[/bot/analyze] ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

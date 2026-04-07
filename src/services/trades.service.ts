@@ -54,4 +54,19 @@ export const tradesService = {
       new Date(b.exitAt).getTime() - new Date(a.exitAt).getTime(),
     );
   },
+  /** accountId → Trade[] 로 묶어서 반환 (에이전트별 통계 계산용) */
+  getGroupedByAccount: async (
+    accounts: { id: string; exchange: ExchangeType; apiKey: string; apiSecret: string }[],
+  ): Promise<Record<string, Trade[]>> => {
+    if (!accounts.length) return {};
+    const entries = await Promise.all(
+      accounts.map(async (acc) => {
+        const trades = await tradesService
+          .getByAccount({ exchange: acc.exchange, apiKey: acc.apiKey, apiSecret: acc.apiSecret })
+          .catch(() => [] as Trade[]);
+        return [acc.id, trades] as [string, Trade[]];
+      }),
+    );
+    return Object.fromEntries(entries);
+  },
 };

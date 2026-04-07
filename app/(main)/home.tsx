@@ -1,22 +1,61 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Svg, { Polyline, Defs, LinearGradient, Stop, Polygon } from 'react-native-svg';
 import { Text, GlassCard, PeriodSelector, PressableScale, FadeTabView, AssetCardSkeleton, PageHeader } from '@/design-system';
-import { accountService, agentService, positionsService } from '@/services';
+import { accountService, positionsService, tradesService, githubService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeAccount } from '@/store/accounts';
 import type { Balance } from '@/services';
+import type { AgentDefinition } from '@/services';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 
 const PERIODS = ['1W', '1M', '3M', '6M', '1Y'] as const;
 
-const agentStatusMap = {
-  running: { label: '운용중',   color: '#1AC24E', bg: '#EDFBF3' },
-  paused:  { label: '일시정지', color: '#FF8A00', bg: '#FFF8E8' },
-  waiting: { label: '대기중',   color: '#AEAEB2', bg: '#F5F5F5' },
-};
+const AGENT_COLORS = ['#3182F6', '#1AC24E', '#FF8A00', '#9B59B6', '#E74C3C', '#16A085'];
+
+// ── 에이전트 행 ──────────────────────────────────────────────────────────────
+function AgentRow({
+  agent, color, isActive, winRate, tradeCount, isLast,
+}: {
+  agent: AgentDefinition; color: string; isActive: boolean;
+  winRate: number; tradeCount: number; isLast: boolean;
+}) {
+  const abbr = agent.name.replace(/[^가-힣A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || 'AI';
+  return (
+    <View style={[agentRow.wrap, !isLast && agentRow.border]}>
+      <View style={[agentRow.icon, { backgroundColor: color + '20' }]}>
+        <Text style={[agentRow.iconText, { color }]}>{abbr}</Text>
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={agentRow.name} numberOfLines={1}>{agent.name}</Text>
+        <View style={agentRow.statusWrap}>
+          <View style={[agentRow.statusDot, { backgroundColor: isActive ? '#1AC24E' : '#AEAEB2' }]} />
+          <Text style={[agentRow.statusText, { color: isActive ? '#1AC24E' : '#AEAEB2' }]}>
+            {isActive ? '운용중' : '대기중'}
+          </Text>
+          {agent.version && (
+            <Text style={agentRow.version}>v{agent.version}</Text>
+          )}
+        </View>
+      </View>
+      <View style={agentRow.stats}>
+        <View style={agentRow.statItem}>
+          <Text style={[agentRow.statVal, { color: winRate >= 60 ? '#FF4747' : winRate >= 40 ? '#191919' : '#246CF9' }]}>
+            {tradeCount > 0 ? `${winRate}%` : '—'}
+          </Text>
+          <Text style={agentRow.statLabel}>30일 승률</Text>
+        </View>
+        <View style={agentRow.divider} />
+        <View style={agentRow.statItem}>
+          <Text style={agentRow.statVal}>{tradeCount}</Text>
+          <Text style={agentRow.statLabel}>총 거래</Text>
+        </View>
+      </View>
+    </View>
+  );
+}
 
 // ── 라인 차트 ──────────────────────────────────────────────────────────────────
 const CHART_H = 64;
@@ -133,20 +172,39 @@ export default function Home() {
   const [period, setPeriod] = useState<typeof PERIODS[number]>('1M');
   const { accounts, balances, totalBalance, balancesLoading } = useAccounts();
 
-  // 연결된 계정 있으면 그 합산 잔고, 없으면 기존 단일 API 잔고
   const { data: singleBalance, isLoading: singleLoading } = useApi(
     () => accounts.length === 0 ? accountService.getBalance() : Promise.resolve(null),
     [accounts.length],
   );
-  const { data: chart }      = useApi(() => accountService.getChart(period), [period]);
-  const { data: agentStats } = useApi(() => agentService.getStats(), []);
-  const { data: positions }  = useApi(() => positionsService.getAll(), []);
+  const { data: chart }   = useApi(() => accountService.getChart(period), [period]);
+  const { data: agents }  = useApi(() => githubService.getAgentDefinitions(), []);
+  const { data: positions } = useApi(
+    () => positionsService.getAllByAccounts(accounts), [accounts],
+  );
+  const { data: groupedTrades } = useApi(
+    () => tradesService.getGroupedByAccount(accounts), [accounts],
+  );
 
-  const balance   = accounts.length > 0 ? totalBalance : singleBalance;
+  const balance    = accounts.length > 0 ? totalBalance : singleBalance;
   const balLoading = accounts.length > 0 ? balancesLoading : singleLoading;
+  const isProfit   = (balance?.profitTotal ?? 0) >= 0;
 
-  const isProfit    = (balance?.profitTotal ?? 0) >= 0;
-  const agentStatus = agentStatusMap[agentStats?.status ?? 'waiting'];
+  // 에이전트별 통계 계산
+  const agentStatsMap = useMemo(() => {
+    const map: Record<string, { winRate: number; tradeCount: number; isActive: boolean }> = {};
+    if (!agents) return map;
+    for (const agent of agents) {
+      const agentAccounts = accounts.filter((a) => a.agentId === agent.id);
+      const isActive = agentAccounts.length > 0;
+      const trades = agentAccounts.flatMap((a) => groupedTrades?.[a.id] ?? []);
+      const wins   = trades.filter((t) => t.profit > 0).length;
+      const winRate = trades.length > 0 ? Math.round((wins / trades.length) * 100) : 0;
+      map[agent.id] = { winRate, tradeCount: trades.length, isActive };
+    }
+    return map;
+  }, [agents, accounts, groupedTrades]);
+
+  const anyAgentActive = Object.values(agentStatsMap).some((s) => s.isActive);
 
   return (
     <FadeTabView style={styles.root}>
@@ -154,9 +212,11 @@ export default function Home() {
         <PageHeader
           title="🐦‍⬛ Osprey"
           rightElement={
-            <View style={[styles.agentBadge, { backgroundColor: agentStatus.bg }]}>
-              <View style={[styles.agentDot, { backgroundColor: agentStatus.color }]} />
-              <Text variant="meta" style={{ color: agentStatus.color }}>{agentStatus.label}</Text>
+            <View style={[styles.agentBadge, { backgroundColor: anyAgentActive ? '#EDFBF3' : '#F5F5F5' }]}>
+              <View style={[styles.agentDot, { backgroundColor: anyAgentActive ? '#1AC24E' : '#AEAEB2' }]} />
+              <Text variant="meta" style={{ color: anyAgentActive ? '#1AC24E' : '#AEAEB2' }}>
+                {anyAgentActive ? '운용중' : '대기중'}
+              </Text>
             </View>
           }
         />
@@ -236,27 +296,36 @@ export default function Home() {
             </GlassCard>
           )}
 
-          {/* ── 에이전트 상태 ── */}
-          <GlassCard style={styles.section} intensity="low" radius={20} padding={18}>
-            <View style={styles.agentRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.sectionTitle}>AI 에이전트</Text>
-                <Text style={[styles.agentStatusText, { color: agentStatus.color }]}>
-                  {agentStatus.label}
-                </Text>
+          {/* ── AI 에이전트 ── */}
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>AI 에이전트</Text>
+            <PressableScale onPress={() => router.push('/(main)/account/agent-settings')} scaleTo={0.96}>
+              <View style={styles.manageBtn}>
+                <Text style={styles.manageBtnText}>설정</Text>
               </View>
-              <View style={styles.agentStats}>
-                <View style={styles.agentStatItem}>
-                  <Text style={styles.agentStatVal}>{agentStats?.winRate30d ?? 0}%</Text>
-                  <Text variant="meta" color="#AEAEB2" style={{ marginTop: 2 }}>30일 승률</Text>
-                </View>
-                <View style={styles.agentStatDivider} />
-                <View style={styles.agentStatItem}>
-                  <Text style={styles.agentStatVal}>{agentStats?.totalTrades ?? 0}</Text>
-                  <Text variant="meta" color="#AEAEB2" style={{ marginTop: 2 }}>총 거래</Text>
-                </View>
+            </PressableScale>
+          </View>
+          <GlassCard intensity="medium" radius={20} padding={0} style={[styles.section, { overflow: 'hidden' }]}>
+            {!agents?.length ? (
+              <View style={{ paddingVertical: 24, alignItems: 'center' }}>
+                <Text style={{ fontSize: 13, color: '#AEAEB2' }}>에이전트 로딩 중...</Text>
               </View>
-            </View>
+            ) : (
+              agents.map((agent, i) => {
+                const stats = agentStatsMap[agent.id] ?? { winRate: 0, tradeCount: 0, isActive: false };
+                return (
+                  <AgentRow
+                    key={agent.id}
+                    agent={agent}
+                    color={AGENT_COLORS[i % AGENT_COLORS.length]}
+                    isActive={stats.isActive}
+                    winRate={stats.winRate}
+                    tradeCount={stats.tradeCount}
+                    isLast={i === agents.length - 1}
+                  />
+                );
+              })
+            )}
           </GlassCard>
 
           {/* ── 활성 포지션 ── */}
@@ -353,12 +422,6 @@ const styles = StyleSheet.create({
   addBtn:            { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 12, backgroundColor: '#191919' },
   addBtnText:        { fontSize: 13, fontWeight: '600', color: '#FFFFFF' },
 
-  agentRow:         { flexDirection: 'row', alignItems: 'center' },
-  agentStatusText:  { fontSize: 14, fontWeight: '600', marginTop: 4 },
-  agentStats:       { flexDirection: 'row', alignItems: 'center', gap: 16 },
-  agentStatItem:    { alignItems: 'center' },
-  agentStatVal:     { fontSize: 18, fontWeight: '700', color: '#191919' },
-  agentStatDivider: { width: 1, height: 32, backgroundColor: '#F0F0F0' },
 
   posHeader:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   posArrow:     { fontSize: 22, color: '#C4C4C4', lineHeight: 26 },
@@ -371,6 +434,26 @@ const styles = StyleSheet.create({
   dirBadge:     { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   dirText:      { fontSize: 11, fontWeight: '600' },
   emptyText:    { fontSize: 14, color: '#AEAEB2' },
+});
+
+const agentRow = StyleSheet.create({
+  wrap: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 16, paddingHorizontal: 20, gap: 14,
+  },
+  border:    { borderBottomWidth: 1, borderBottomColor: '#F2F2F2' },
+  icon:      { width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  iconText:  { fontSize: 13, fontWeight: '800', letterSpacing: -0.5 },
+  name:      { fontSize: 14, fontWeight: '700', color: '#191919', marginBottom: 4 },
+  statusWrap:{ flexDirection: 'row', alignItems: 'center', gap: 5 },
+  statusDot: { width: 6, height: 6, borderRadius: 3 },
+  statusText:{ fontSize: 12, fontWeight: '600' },
+  version:   { fontSize: 11, color: '#AEAEB2', marginLeft: 4 },
+  stats:     { flexDirection: 'row', alignItems: 'center', gap: 12, flexShrink: 0 },
+  statItem:  { alignItems: 'center', minWidth: 44 },
+  statVal:   { fontSize: 17, fontWeight: '700', color: '#191919' },
+  statLabel: { fontSize: 11, color: '#AEAEB2', marginTop: 2 },
+  divider:   { width: 1, height: 32, backgroundColor: '#F0F0F0' },
 });
 
 const accRow = StyleSheet.create({

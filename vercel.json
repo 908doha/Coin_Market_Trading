@@ -3,7 +3,8 @@
   "outputDirectory": "dist",
   "framework": null,
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/$1" },
-    { "source": "/:path*",   "destination": "/index.html" }
+    { "source": "/api/bot/:path*", "destination": "/api/bot/[...path]" },
+    { "source": "/api/(.*)",       "destination": "/api/$1" },
+    { "source": "/:path*",         "destination": "/index.html" }
   ]
 }

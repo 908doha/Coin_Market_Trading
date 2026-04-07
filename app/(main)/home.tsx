@@ -1,8 +1,9 @@
 import React, { useState, useMemo } from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
+import { View, StyleSheet, ScrollView, TouchableWithoutFeedback } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import Svg, { Polyline, Defs, LinearGradient, Stop, Polygon, Path, Rect, Text as SvgText } from 'react-native-svg';
+import Svg, { Polyline, Defs, LinearGradient, Stop, Polygon, Path, Rect, Text as SvgText, Line, Circle } from 'react-native-svg';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { Text, GlassCard, PeriodSelector, PressableScale, FadeTabView, AssetCardSkeleton, PageHeader, CurrencyToggle } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { accountService, positionsService, tradesService, githubService } from '@/services';
@@ -94,63 +95,193 @@ function StatCard({ label, krw, showUsd, rate }: { label: string; krw: number; s
   );
 }
 
-// ── 라인 차트 ──────────────────────────────────────────────────────────────────
-const CHART_H = 64;
-const CHART_W = 600; // viewBox width — scales with container
+// ── 자산 차트 ──────────────────────────────────────────────────────────────────
+const CHART_H  = 120;
+const CHART_W  = 600; // SVG viewBox width
+const PAD_L    = 0;
+const PAD_T    = 12;
+const PAD_B    = 0;
+const DRAW_H   = CHART_H - PAD_T - PAD_B;
 
-function MiniChart({ data, positive }: { data: { value: number }[]; positive: boolean }) {
-  if (!data?.length) return <View style={{ height: CHART_H }} />;
+interface AssetChartProps {
+  data:     { value: number; date?: string }[];
+  positive: boolean;
+  showUsd:  boolean;
+  rate:     number;
+}
+
+function AssetChart({ data, positive, showUsd, rate }: AssetChartProps) {
+  const [tooltip, setTooltip] = useState<{ idx: number; x: number; y: number } | null>(null);
+
+  if (!data?.length || data.length < 2) {
+    return (
+      <View style={{ height: CHART_H, alignItems: 'center', justifyContent: 'center' }}>
+        <Text variant="caption1" color={colors.text.disabled}>데이터 없음</Text>
+      </View>
+    );
+  }
 
   const values = data.map((d) => d.value);
   const min    = Math.min(...values);
   const max    = Math.max(...values);
-  const range  = max - min || 1;
+  const range  = max - min || max * 0.02 || 1;
   const color  = positive ? colors.market.rise : colors.market.fall;
+  const n      = values.length;
 
-  const n = values.length;
-  // Map to SVG coordinates; leave 2px padding top/bottom so stroke isn't clipped
-  const pts = values.map((v, i) => {
-    const x = (i / (n - 1)) * CHART_W;
-    const y = 2 + (1 - (v - min) / range) * (CHART_H - 4);
-    return `${x},${y}`;
-  });
+  // 시작 → 끝 변동률
+  const startV   = values[0];
+  const endV     = values[n - 1];
+  const changePct = startV !== 0 ? ((endV - startV) / Math.abs(startV)) * 100 : 0;
+  const changeSign = changePct >= 0 ? '+' : '';
 
-  // Closed polygon for the fill area (line points + bottom-right + bottom-left)
-  const fillPts = [
-    ...pts,
-    `${CHART_W},${CHART_H}`,
-    `0,${CHART_H}`,
-  ].join(' ');
+  const toY = (v: number) => PAD_T + (1 - (v - min) / range) * DRAW_H;
+  const toX = (i: number) => PAD_L + (i / (n - 1)) * CHART_W;
+
+  const pts = values.map((v, i) => `${toX(i)},${toY(v)}`);
+  const fillPts = [...pts, `${CHART_W},${CHART_H}`, `${PAD_L},${CHART_H}`].join(' ');
+
+  // 수평 기준선 3개 (min, mid, max)
+  const gridValues = [max, (max + min) / 2, min];
+
+  // 마지막 포인트
+  const lastX = toX(n - 1);
+  const lastY = toY(endV);
+
+  // 툴팁 포인트
+  const tipV = tooltip !== null ? values[tooltip.idx] : null;
+  const tipX = tooltip !== null ? tooltip.x : null;
+  const tipY = tooltip !== null ? tooltip.y : null;
+
+  const handleTouch = (evt: any) => {
+    const { locationX } = evt.nativeEvent;
+    // locationX는 렌더된 width 기준 → SVG viewBox 비율로 변환
+    const ratio = locationX / evt.nativeEvent.target?.getBoundingClientRect?.()?.width || locationX / 390;
+    const svgX  = ratio * CHART_W;
+    const idx   = Math.max(0, Math.min(n - 1, Math.round((svgX / CHART_W) * (n - 1))));
+    setTooltip({ idx, x: toX(idx), y: toY(values[idx]) });
+  };
+
+  const formatTip = (v: number) => {
+    if (showUsd && rate > 0) return `$${(v / rate).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+    return `${Math.round(v / 10000).toLocaleString('ko-KR')}만원`;
+  };
 
   return (
-    <View style={{ height: CHART_H }}>
-      <Svg
-        width="100%"
-        height={CHART_H}
-        viewBox={`0 0 ${CHART_W} ${CHART_H}`}
-        preserveAspectRatio="none"
-      >
-        <Defs>
-          <LinearGradient id="chartFill" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0"   stopColor={color} stopOpacity="0.18" />
-            <Stop offset="1"   stopColor={color} stopOpacity="0"    />
-          </LinearGradient>
-        </Defs>
-        {/* Fill area */}
-        <Polygon points={fillPts} fill="url(#chartFill)" />
-        {/* Line */}
-        <Polyline
-          points={pts.join(' ')}
-          fill="none"
-          stroke={color}
-          strokeWidth="2.5"
-          strokeLinejoin="round"
-          strokeLinecap="round"
-        />
-      </Svg>
+    <View>
+      {/* 변동률 라벨 */}
+      <View style={chartSt.changeRow}>
+        <Text style={[chartSt.changePct, { color }]}>
+          {changeSign}{changePct.toFixed(2)}%
+        </Text>
+        <Text variant="caption1" color={colors.text.disabled} style={{ marginLeft: 4 }}>
+          기간 수익률
+        </Text>
+      </View>
+
+      {/* SVG 차트 */}
+      <TouchableWithoutFeedback onPress={handleTouch} onPressOut={() => setTooltip(null)}>
+        <View style={{ height: CHART_H }}>
+          <Svg
+            width="100%"
+            height={CHART_H}
+            viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+            preserveAspectRatio="none"
+          >
+            <Defs>
+              <LinearGradient id="aFill" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0%"   stopColor={color} stopOpacity="0.22" />
+                <Stop offset="100%" stopColor={color} stopOpacity="0"    />
+              </LinearGradient>
+            </Defs>
+
+            {/* 수평 격자선 */}
+            {gridValues.map((gv, gi) => (
+              <Line
+                key={gi}
+                x1={PAD_L} y1={toY(gv)}
+                x2={CHART_W} y2={toY(gv)}
+                stroke={colors.border.default}
+                strokeWidth="0.8"
+                strokeDasharray="4,4"
+              />
+            ))}
+
+            {/* 채우기 */}
+            <Polygon points={fillPts} fill="url(#aFill)" />
+
+            {/* 라인 */}
+            <Polyline
+              points={pts.join(' ')}
+              fill="none"
+              stroke={color}
+              strokeWidth="2.2"
+              strokeLinejoin="round"
+              strokeLinecap="round"
+            />
+
+            {/* 마지막 포인트 */}
+            <Circle cx={lastX} cy={lastY} r="4" fill={color} />
+            <Circle cx={lastX} cy={lastY} r="7" fill={color} fillOpacity="0.2" />
+
+            {/* 툴팁 */}
+            {tooltip !== null && tipX !== null && tipY !== null && (
+              <>
+                {/* 수직선 */}
+                <Line
+                  x1={tipX} y1={PAD_T}
+                  x2={tipX} y2={CHART_H}
+                  stroke={color} strokeWidth="1.2" strokeDasharray="3,3"
+                />
+                {/* 포인트 */}
+                <Circle cx={tipX} cy={tipY} r="5" fill={color} />
+                <Circle cx={tipX} cy={tipY} r="9" fill={color} fillOpacity="0.15" />
+                {/* 값 라벨 */}
+                <Rect
+                  x={Math.min(tipX - 60, CHART_W - 130)}
+                  y={PAD_T - 2}
+                  width="120"
+                  height="22"
+                  rx="6"
+                  fill={color}
+                />
+                <SvgText
+                  x={Math.min(tipX, CHART_W - 70)}
+                  y={PAD_T + 14}
+                  textAnchor="middle"
+                  fontSize="13"
+                  fontWeight="700"
+                  fill="white"
+                >
+                  {formatTip(tipV!)}
+                </SvgText>
+              </>
+            )}
+          </Svg>
+        </View>
+      </TouchableWithoutFeedback>
+
+      {/* Y축 레이블 */}
+      <View style={chartSt.yLabels}>
+        {gridValues.map((gv, gi) => (
+          <Text key={gi} variant="caption1" color={colors.text.disabled}>
+            {showUsd && rate > 0
+              ? `$${Math.round(gv / rate).toLocaleString('en-US')}`
+              : `${Math.round(gv / 10000).toLocaleString('ko-KR')}만`}
+          </Text>
+        ))}
+      </View>
     </View>
   );
 }
+
+const chartSt = StyleSheet.create({
+  changeRow: { flexDirection: 'row', alignItems: 'baseline', marginBottom: spacing[2] },
+  changePct: { fontSize: 14, fontWeight: '700' },
+  yLabels:   {
+    flexDirection: 'row', justifyContent: 'space-between',
+    marginTop: 4, paddingHorizontal: 2,
+  },
+});
 
 // ── 거래소 로고 아이콘 ────────────────────────────────────────────────────────
 function ExchangeLogo({ exchange, size = 44 }: { exchange: ExchangeType; size?: number }) {
@@ -371,7 +502,12 @@ export default function Home() {
                   </View>
                 </View>
                 <View style={styles.chartArea}>
-                  <MiniChart data={chart ?? []} positive={isProfit} />
+                  <AssetChart
+                    data={chart ?? []}
+                    positive={isProfit}
+                    showUsd={showUsd}
+                    rate={balance?.usdtKrw ?? 1350}
+                  />
                 </View>
                 <View style={styles.periodRow}>
                   <PeriodSelector periods={PERIODS} active={period} onChange={setPeriod} />

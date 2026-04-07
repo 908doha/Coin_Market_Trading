@@ -8,14 +8,6 @@
 
 const REPO   = 'openclaw4286-code/Coin_Market_Trading';
 const BRANCH = 'claude/gateio-trading-bot-SDKao';
-// GitHub contents API accepts branch name directly in ?ref= (no refs/heads/ prefix needed)
-const REF    = BRANCH;
-
-const CORS = {
-  'Access-Control-Allow-Origin':  '*',
-  'Access-Control-Allow-Methods': 'GET, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-};
 
 interface AgentDefinition {
   id:              string;
@@ -32,6 +24,7 @@ function parseMarkdown(content: string, fileName: string): AgentDefinition {
   const headingMatch = content.match(/^#\s+(.+)$/m);
   const name = headingMatch ? headingMatch[1].trim() : id;
 
+  // Extract first meaningful paragraph after the heading (skip ---, >, empty lines)
   const lines = content.split('\n');
   const descLines: string[] = [];
   let pastHeading = false;
@@ -40,11 +33,12 @@ function parseMarkdown(content: string, fileName: string): AgentDefinition {
       if (/^#\s/.test(line)) pastHeading = true;
       continue;
     }
-    if (line.trim() === '' || line.startsWith('>') || line.startsWith('#')) {
+    const t = line.trim();
+    if (t === '' || t === '---' || line.startsWith('>') || line.startsWith('#')) {
       if (descLines.length) break;
       continue;
     }
-    descLines.push(line.trim());
+    descLines.push(t);
     if (descLines.length >= 2) break;
   }
 
@@ -57,7 +51,7 @@ function parseMarkdown(content: string, fileName: string): AgentDefinition {
   return {
     id,
     name,
-    description: descLines.join(' '),
+    description: descLines.join(' ') || '에이전트 전략 문서',
     isDashboardOnly,
     version,
     fileName,
@@ -65,14 +59,21 @@ function parseMarkdown(content: string, fileName: string): AgentDefinition {
 }
 
 export default async function handler(req: any, res: any) {
-  if (req.method === 'OPTIONS') return res.status(200).set(CORS).end();
-  if (req.method !== 'GET')    return res.status(405).set(CORS).json({ error: 'Method not allowed' });
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+  if (req.method !== 'GET') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
 
   const token = process.env.GITHUB_TOKEN;
   if (!token) {
-    return res.status(503).set(CORS).json({
+    res.status(503).json({
       error: 'GITHUB_TOKEN 환경변수가 설정되지 않았습니다. Vercel 프로젝트 설정에서 추가해주세요.',
     });
+    return;
   }
 
   const ghHeaders = {
@@ -82,31 +83,31 @@ export default async function handler(req: any, res: any) {
   };
 
   try {
-    // 1. List docs/ directory — use REF (not encodeURIComponent, slash is valid in query value)
-    const listUrl = `https://api.github.com/repos/${REPO}/contents/docs?ref=${REF}`;
+    // 1. List docs/ directory
+    const listUrl = `https://api.github.com/repos/${REPO}/contents/docs?ref=${BRANCH}`;
     const listRes = await fetch(listUrl, { headers: ghHeaders });
 
     if (!listRes.ok) {
       const body = await listRes.text();
-      return res.status(502).set(CORS).json({
+      res.status(502).json({
         error: `GitHub 디렉토리 조회 실패 (${listRes.status})`,
         detail: body,
       });
+      return;
     }
 
     const files: { name: string; path: string; type: string }[] = await listRes.json();
     const mdFiles = files.filter((f) => f.type === 'file' && f.name.endsWith('.md'));
 
-    // 2. Fetch each file content via GitHub API (base64) — avoids short-lived download_url tokens
+    // 2. Fetch each file content via GitHub API (base64)
     const defs = await Promise.all(
       mdFiles.map(async (file): Promise<AgentDefinition | null> => {
         try {
-          const contentUrl = `https://api.github.com/repos/${REPO}/contents/${file.path}?ref=${REF}`;
+          const contentUrl = `https://api.github.com/repos/${REPO}/contents/${file.path}?ref=${BRANCH}`;
           const r = await fetch(contentUrl, { headers: ghHeaders });
           if (!r.ok) return null;
           const json: { content?: string; encoding?: string } = await r.json();
           if (!json.content || json.encoding !== 'base64') return null;
-          // GitHub returns base64 with newlines — strip them before decoding
           const text = Buffer.from(json.content.replace(/\n/g, ''), 'base64').toString('utf-8');
           return parseMarkdown(text, file.name);
         } catch {
@@ -116,8 +117,8 @@ export default async function handler(req: any, res: any) {
     );
 
     const data = defs.filter((d): d is AgentDefinition => d !== null);
-    return res.status(200).set(CORS).json(data);
+    res.status(200).json(data);
   } catch (err: any) {
-    return res.status(500).set(CORS).json({ error: err?.message ?? 'Internal error' });
+    res.status(500).json({ error: err?.message ?? 'Internal error' });
   }
 }

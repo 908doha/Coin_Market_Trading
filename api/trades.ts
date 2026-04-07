@@ -9,12 +9,6 @@
 
 import crypto from 'crypto';
 
-const CORS = {
-  'Access-Control-Allow-Origin':  '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-};
-
 interface Trade {
   id:          string;
   symbol:      string;
@@ -93,12 +87,13 @@ async function fetchGateTrades(apiKey: string, apiSecret: string): Promise<Trade
 }
 
 export default async function handler(req: any, res: any) {
-  if (req.method === 'OPTIONS') return res.status(200).set(CORS).end();
-  if (req.method !== 'POST')   return res.status(405).set(CORS).json({ error: 'Method not allowed' });
+  if (req.method === 'OPTIONS') { res.status(200).end(); return; }
+  if (req.method !== 'POST')   { res.status(405).json({ error: 'Method not allowed' }); return; }
 
   const { exchange, apiKey, apiSecret } = req.body ?? {};
   if (!apiKey || !apiSecret) {
-    return res.status(400).set(CORS).json({ error: 'apiKey, apiSecret 필요' });
+    res.status(400).json({ error: 'apiKey, apiSecret 필요' });
+    return;
   }
 
   try {
@@ -106,12 +101,10 @@ export default async function handler(req: any, res: any) {
 
     if (exchange === 'gate') {
       trades = await fetchGateTrades(apiKey, apiSecret);
-    } else {
-      trades = [];
     }
 
-    return res.status(200).set(CORS).json(trades);
+    res.status(200).json(trades);
   } catch (err: any) {
-    return res.status(502).set(CORS).json({ error: err?.message ?? 'Internal error' });
+    res.status(502).json({ error: err?.message ?? 'Internal error' });
   }
 }

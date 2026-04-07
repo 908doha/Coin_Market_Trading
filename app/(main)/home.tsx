@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Svg, { Polyline, Defs, LinearGradient, Stop, Polygon } from 'react-native-svg';
 import { Text, GlassCard, PeriodSelector, PressableScale, FadeTabView, AssetCardSkeleton, PageHeader } from '@/design-system';
+import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { accountService, positionsService, tradesService, githubService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeAccount } from '@/store/accounts';
@@ -23,37 +24,60 @@ function AgentRow({
   winRate: number; tradeCount: number; isLast: boolean;
 }) {
   const abbr = agent.name.replace(/[^가-힣A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || 'AI';
+  const winColor = winRate >= 60
+    ? colors.market.rise
+    : winRate >= 40
+      ? colors.text.primary
+      : colors.market.fall;
+
   return (
-    <View style={[agentRow.wrap, !isLast && agentRow.border]}>
-      <View style={[agentRow.icon, { backgroundColor: color + '20' }]}>
-        <Text style={[agentRow.iconText, { color }]}>{abbr}</Text>
-      </View>
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={agentRow.name} numberOfLines={1}>{agent.name}</Text>
-        <View style={agentRow.statusWrap}>
-          <View style={[agentRow.statusDot, { backgroundColor: isActive ? '#1AC24E' : '#AEAEB2' }]} />
-          <Text style={[agentRow.statusText, { color: isActive ? '#1AC24E' : '#AEAEB2' }]}>
-            {isActive ? '운용중' : '대기중'}
-          </Text>
-          {agent.version && (
-            <Text style={agentRow.version}>v{agent.version}</Text>
-          )}
+    <PressableScale
+      onPress={() => router.push('/(main)/account/agent-settings')}
+      scaleTo={0.99}
+    >
+      <View style={[agentSt.wrap, !isLast && agentSt.border]}>
+        {/* 아이콘 */}
+        <View style={[agentSt.icon, { backgroundColor: color + '20' }]}>
+          <Text style={[agentSt.iconText, { color }]}>{abbr}</Text>
+        </View>
+
+        {/* 이름 + 상태 */}
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text variant="label1Bold" numberOfLines={1}>{agent.name}</Text>
+          <View style={agentSt.statusRow}>
+            <View style={[agentSt.dot, {
+              backgroundColor: isActive ? colors.positive.default : colors.text.disabled,
+            }]} />
+            <Text variant="caption1" style={{
+              color: isActive ? colors.positive.default : colors.text.disabled,
+              fontWeight: '600',
+            }}>
+              {isActive ? '운용중' : '대기중'}
+            </Text>
+            {agent.version && (
+              <Text variant="caption1" color={colors.text.tertiary}>
+                {' '}v{agent.version}
+              </Text>
+            )}
+          </View>
+        </View>
+
+        {/* 승률 | 거래 */}
+        <View style={agentSt.stats}>
+          <View style={agentSt.statItem}>
+            <Text variant="label1Bold" style={{ color: tradeCount > 0 ? winColor : colors.text.disabled }}>
+              {tradeCount > 0 ? `${winRate}%` : '—'}
+            </Text>
+            <Text variant="caption1" color={colors.text.tertiary} style={{ marginTop: 2 }}>30일 승률</Text>
+          </View>
+          <View style={agentSt.divider} />
+          <View style={agentSt.statItem}>
+            <Text variant="label1Bold">{tradeCount}</Text>
+            <Text variant="caption1" color={colors.text.tertiary} style={{ marginTop: 2 }}>총 거래</Text>
+          </View>
         </View>
       </View>
-      <View style={agentRow.stats}>
-        <View style={agentRow.statItem}>
-          <Text style={[agentRow.statVal, { color: winRate >= 60 ? '#FF4747' : winRate >= 40 ? '#191919' : '#246CF9' }]}>
-            {tradeCount > 0 ? `${winRate}%` : '—'}
-          </Text>
-          <Text style={agentRow.statLabel}>30일 승률</Text>
-        </View>
-        <View style={agentRow.divider} />
-        <View style={agentRow.statItem}>
-          <Text style={agentRow.statVal}>{tradeCount}</Text>
-          <Text style={agentRow.statLabel}>총 거래</Text>
-        </View>
-      </View>
-    </View>
+    </PressableScale>
   );
 }
 
@@ -68,7 +92,7 @@ function MiniChart({ data, positive }: { data: { value: number }[]; positive: bo
   const min    = Math.min(...values);
   const max    = Math.max(...values);
   const range  = max - min || 1;
-  const color  = positive ? '#FF4747' : '#246CF9';
+  const color  = positive ? colors.market.rise : colors.market.fall;
 
   const n = values.length;
   // Map to SVG coordinates; leave 2px padding top/bottom so stroke isn't clipped
@@ -156,9 +180,9 @@ function AccountRow({
         {balance && (
           <View style={[
             accRow.pnlBadge,
-            { backgroundColor: isProfit ? '#FFF0F0' : '#EFF3FF' },
+            { backgroundColor: isProfit ? colors.market.riseSubtle : colors.market.fallSubtle },
           ]}>
-            <Text style={[accRow.pnlText, { color: isProfit ? '#FF4747' : '#246CF9' }]}>
+            <Text style={[accRow.pnlText, { color: isProfit ? colors.market.rise : colors.market.fall }]}>
               {formatKRWSigned(balance.profitTotal)}
             </Text>
           </View>
@@ -212,9 +236,9 @@ export default function Home() {
         <PageHeader
           title="🐦‍⬛ Osprey"
           rightElement={
-            <View style={[styles.agentBadge, { backgroundColor: anyAgentActive ? '#EDFBF3' : '#F5F5F5' }]}>
-              <View style={[styles.agentDot, { backgroundColor: anyAgentActive ? '#1AC24E' : '#AEAEB2' }]} />
-              <Text variant="meta" style={{ color: anyAgentActive ? '#1AC24E' : '#AEAEB2' }}>
+            <View style={[styles.agentBadge, { backgroundColor: anyAgentActive ? colors.positive.subtle : colors.bg.elevated }]}>
+              <View style={[styles.agentDot, { backgroundColor: anyAgentActive ? colors.positive.default : colors.text.disabled }]} />
+              <Text variant="meta" style={{ color: anyAgentActive ? colors.positive.default : colors.text.disabled }}>
                 {anyAgentActive ? '운용중' : '대기중'}
               </Text>
             </View>
@@ -227,14 +251,14 @@ export default function Home() {
           <GlassCard style={styles.heroCard} intensity="medium" radius={24}>
             {balLoading ? <AssetCardSkeleton /> : (
               <>
-                <Text variant="meta" color="#AEAEB2" style={{ marginBottom: 6 }}>총 자산</Text>
+                <Text variant="meta" color={colors.text.tertiary} style={{ marginBottom: 6 }}>총 자산</Text>
                 <Text style={styles.heroAmount}>{formatKRW(balance?.total ?? 0)}</Text>
                 <View style={styles.heroSubRow}>
-                  <Text style={[styles.heroPnl, { color: isProfit ? '#FF4747' : '#246CF9' }]}>
+                  <Text style={[styles.heroPnl, { color: isProfit ? colors.market.rise : colors.market.fall }]}>
                     {formatKRWSigned(balance?.profitTotal ?? 0)}
                   </Text>
-                  <View style={[styles.pnlBadge, { backgroundColor: isProfit ? '#FFF0F0' : '#F0F0F0' }]}>
-                    <Text style={[styles.pnlBadgeText, { color: isProfit ? '#D93025' : '#246CF9' }]}>
+                  <View style={[styles.pnlBadge, { backgroundColor: isProfit ? colors.market.riseSubtle : colors.bg.elevated }]}>
+                    <Text style={[styles.pnlBadgeText, { color: isProfit ? colors.negative.text : colors.market.fall }]}>
                       {formatRate(balance?.profitRate ?? 0)}
                     </Text>
                   </View>
@@ -252,11 +276,11 @@ export default function Home() {
           {/* ── 자산 분배 ── */}
           <View style={styles.statsRow}>
             <GlassCard style={styles.statCard} intensity="low" radius={20} padding={16}>
-              <Text variant="meta" color="#AEAEB2" style={{ marginBottom: 6 }}>가용 자산</Text>
+              <Text variant="meta" color={colors.text.tertiary} style={{ marginBottom: 6 }}>가용 자산</Text>
               <Text style={styles.statValue}>{formatKRW(balance?.available ?? 0)}</Text>
             </GlassCard>
             <GlassCard style={styles.statCard} intensity="low" radius={20} padding={16}>
-              <Text variant="meta" color="#AEAEB2" style={{ marginBottom: 6 }}>투자 중</Text>
+              <Text variant="meta" color={colors.text.tertiary} style={{ marginBottom: 6 }}>투자 중</Text>
               <Text style={styles.statValue}>{formatKRW(balance?.invested ?? 0)}</Text>
             </GlassCard>
           </View>
@@ -308,7 +332,7 @@ export default function Home() {
           <GlassCard intensity="medium" radius={20} padding={0} style={[styles.section, { overflow: 'hidden' }]}>
             {!agents?.length ? (
               <View style={{ paddingVertical: 24, alignItems: 'center' }}>
-                <Text style={{ fontSize: 13, color: '#AEAEB2' }}>에이전트 로딩 중...</Text>
+                <Text variant="body2" color={colors.text.tertiary}>에이전트 로딩 중...</Text>
               </View>
             ) : (
               agents.map((agent, i) => {
@@ -351,27 +375,27 @@ export default function Home() {
                     style={[styles.posItem, idx === 0 && { marginTop: 16 }]}
                   >
                     <View style={styles.posRow}>
-                      <View style={[styles.posIcon, { backgroundColor: up ? '#FFF0F0' : '#F0F0F0' }]}>
-                        <Text style={{ fontSize: 18, fontWeight: '700', color: up ? '#D93025' : '#246CF9' }}>
+                      <View style={[styles.posIcon, { backgroundColor: up ? colors.market.riseSubtle : colors.bg.elevated }]}>
+                        <Text style={{ fontSize: 18, fontWeight: '700', color: up ? colors.negative.text : colors.market.fall }}>
                           {pos.coin.slice(0, 2)}
                         </Text>
                       </View>
                       <View style={{ flex: 1 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing[2] }}>
                           <Text style={styles.posSymbol}>{pos.symbol}</Text>
-                          <View style={[styles.dirBadge, { backgroundColor: pos.direction === 'Long' ? '#F0F0F0' : '#FFF0F0' }]}>
-                            <Text style={[styles.dirText, { color: pos.direction === 'Long' ? '#555555' : '#D93025' }]}>
+                          <View style={[styles.dirBadge, { backgroundColor: pos.direction === 'Long' ? colors.bg.elevated : colors.market.riseSubtle }]}>
+                            <Text style={[styles.dirText, { color: pos.direction === 'Long' ? colors.text.secondary : colors.negative.text }]}>
                               {pos.direction}
                             </Text>
                           </View>
                         </View>
-                        <Text variant="meta" color="#AEAEB2">{formatKRW(pos.amount)}</Text>
+                        <Text variant="meta" color={colors.text.tertiary}>{formatKRW(pos.amount)}</Text>
                       </View>
                       <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={[styles.posProfit, { color: up ? '#FF4747' : '#246CF9' }]}>
+                        <Text style={[styles.posProfit, { color: up ? colors.market.rise : colors.market.fall }]}>
                           {formatKRWSigned(pos.profit)}
                         </Text>
-                        <Text style={[styles.posProfitRate, { color: up ? '#FF4747' : '#246CF9' }]}>
+                        <Text style={[styles.posProfitRate, { color: up ? colors.market.rise : colors.market.fall }]}>
                           {formatRate(pos.profitRate)}
                         </Text>
                       </View>
@@ -390,96 +414,95 @@ export default function Home() {
 }
 
 const styles = StyleSheet.create({
-  root:    { flex: 1, backgroundColor: '#F5F5F5' },
-  content: { paddingHorizontal: 20 },
+  root:    { flex: 1, backgroundColor: colors.bg.elevated },
+  content: { paddingHorizontal: spacing[5] },
 
-  agentBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6 },
-  agentDot:   { width: 6, height: 6, borderRadius: 3 },
+  agentBadge: { flexDirection: 'row', alignItems: 'center', gap: spacing[1] + 2, borderRadius: borderRadius.full, paddingHorizontal: spacing[3], paddingVertical: spacing[1] + 2 },
+  agentDot:   { width: 6, height: 6, borderRadius: borderRadius.full },
 
-  heroCard:     { marginBottom: 12 },
-  heroAmount:   { fontSize: 26, fontWeight: '700', color: '#191919', letterSpacing: -0.5, marginTop: 8, marginBottom: 8 },
-  heroSubRow:   { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
+  heroCard:     { marginBottom: spacing[3] },
+  heroAmount:   { fontSize: 26, fontWeight: '700', color: colors.text.primary, letterSpacing: -0.5, marginTop: spacing[2], marginBottom: spacing[2] },
+  heroSubRow:   { flexDirection: 'row', alignItems: 'center', gap: spacing[2], marginBottom: spacing[1] },
   heroPnl:      { fontSize: 15, fontWeight: '600' },
-  pnlBadge:     { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
+  pnlBadge:     { borderRadius: borderRadius.sm, paddingHorizontal: spacing[2], paddingVertical: 3 },
   pnlBadgeText: { fontSize: 13, fontWeight: '600' },
-  chartArea:    { marginTop: 20, marginBottom: 12 },
+  chartArea:    { marginTop: spacing[5], marginBottom: spacing[3] },
   periodRow:    { flexDirection: 'row' },
 
-  statsRow:  { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  statsRow:  { flexDirection: 'row', gap: spacing[2] + 2, marginBottom: spacing[3] },
   statCard:  { flex: 1 },
-  statValue: { fontSize: 16, fontWeight: '700', color: '#191919' },
+  statValue: { fontSize: 16, fontWeight: '700', color: colors.text.primary },
 
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  sectionTitle:  { fontSize: 16, fontWeight: '700', color: '#191919' },
-  manageBtn:     { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 12, backgroundColor: '#F0F0F0' },
-  manageBtnText: { fontSize: 13, fontWeight: '600', color: '#555555' },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing[2] + 2 },
+  sectionTitle:  { fontSize: 16, fontWeight: '700', color: colors.text.primary },
+  manageBtn:     { paddingHorizontal: spacing[3], paddingVertical: spacing[1], borderRadius: borderRadius.md, backgroundColor: colors.bg.elevated },
+  manageBtnText: { fontSize: 13, fontWeight: '600', color: colors.text.secondary },
 
-  section: { marginBottom: 12 },
+  section: { marginBottom: spacing[3] },
 
-
-  emptyAccounts:     { alignItems: 'center', gap: 8 },
-  emptyAccountsText: { fontSize: 13, color: '#AEAEB2' },
-  addBtn:            { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 12, backgroundColor: '#191919' },
-  addBtnText:        { fontSize: 13, fontWeight: '600', color: '#FFFFFF' },
-
+  emptyAccounts:     { alignItems: 'center', gap: spacing[2] },
+  emptyAccountsText: { fontSize: 13, color: colors.text.tertiary },
+  addBtn:            { paddingHorizontal: spacing[3] + 2, paddingVertical: spacing[1] + 2, borderRadius: borderRadius.md, backgroundColor: colors.primary.default },
+  addBtnText:        { fontSize: 13, fontWeight: '600', color: colors.primary.foreground },
 
   posHeader:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  posArrow:     { fontSize: 22, color: '#C4C4C4', lineHeight: 26 },
-  posItem:      { marginTop: 12 },
-  posRow:       { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  posArrow:     { fontSize: 22, color: colors.text.disabled, lineHeight: 26 },
+  posItem:      { marginTop: spacing[3] },
+  posRow:       { flexDirection: 'row', alignItems: 'center', gap: spacing[3] },
   posIcon:      { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
-  posSymbol:    { fontSize: 15, fontWeight: '700', color: '#191919' },
+  posSymbol:    { fontSize: 15, fontWeight: '700', color: colors.text.primary },
   posProfit:    { fontSize: 15, fontWeight: '700' },
   posProfitRate:{ fontSize: 12, fontWeight: '600', marginTop: 2 },
-  dirBadge:     { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  dirBadge:     { borderRadius: borderRadius.xs + 2, paddingHorizontal: spacing[1] + 2, paddingVertical: 2 },
   dirText:      { fontSize: 11, fontWeight: '600' },
-  emptyText:    { fontSize: 14, color: '#AEAEB2' },
+  emptyText:    { fontSize: 14, color: colors.text.tertiary },
 });
 
-const agentRow = StyleSheet.create({
+const agentSt = StyleSheet.create({
   wrap: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingVertical: 16, paddingHorizontal: 20, gap: 14,
+    flexDirection:     'row',
+    alignItems:        'center',
+    paddingVertical:   spacing[4],
+    paddingHorizontal: spacing[5],
+    gap:               spacing[3] + 2,
   },
-  border:    { borderBottomWidth: 1, borderBottomColor: '#F2F2F2' },
-  icon:      { width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  border:    { borderBottomWidth: 1, borderBottomColor: colors.border.default },
+  icon:      {
+    width: 48, height: 48, borderRadius: borderRadius.lg,
+    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
   iconText:  { fontSize: 13, fontWeight: '800', letterSpacing: -0.5 },
-  name:      { fontSize: 14, fontWeight: '700', color: '#191919', marginBottom: 4 },
-  statusWrap:{ flexDirection: 'row', alignItems: 'center', gap: 5 },
-  statusDot: { width: 6, height: 6, borderRadius: 3 },
-  statusText:{ fontSize: 12, fontWeight: '600' },
-  version:   { fontSize: 11, color: '#AEAEB2', marginLeft: 4 },
-  stats:     { flexDirection: 'row', alignItems: 'center', gap: 12, flexShrink: 0 },
-  statItem:  { alignItems: 'center', minWidth: 44 },
-  statVal:   { fontSize: 17, fontWeight: '700', color: '#191919' },
-  statLabel: { fontSize: 11, color: '#AEAEB2', marginTop: 2 },
-  divider:   { width: 1, height: 32, backgroundColor: '#F0F0F0' },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: spacing[1], marginTop: spacing[1] },
+  dot:       { width: 6, height: 6, borderRadius: borderRadius.full },
+  stats:     { flexDirection: 'row', alignItems: 'center', gap: spacing[3], flexShrink: 0 },
+  statItem:  { alignItems: 'center', minWidth: 42 },
+  divider:   { width: 1, height: 32, backgroundColor: colors.border.default },
 });
 
 const accRow = StyleSheet.create({
   wrap: {
     flexDirection:     'row',
     alignItems:        'center',
-    paddingVertical:   18,
-    paddingHorizontal: 20,
-    gap:               14,
+    paddingVertical:   spacing[4] + 2,
+    paddingHorizontal: spacing[5],
+    gap:               spacing[3] + 2,
   },
-  border: { borderBottomWidth: 1, borderBottomColor: '#F2F2F2' },
+  border: { borderBottomWidth: 1, borderBottomColor: colors.border.default },
 
   icon: {
-    width: 48, height: 48, borderRadius: 16,
+    width: 48, height: 48, borderRadius: borderRadius.lg,
     alignItems: 'center', justifyContent: 'center',
     flexShrink: 0,
   },
   iconText: { fontSize: 14, fontWeight: '800', letterSpacing: -0.5 },
 
-  amount: { fontSize: 20, fontWeight: '700', color: '#191919', letterSpacing: -0.3, marginBottom: 3 },
-  name:   { fontSize: 13, color: '#AEAEB2', fontWeight: '500' },
+  amount: { fontSize: 20, fontWeight: '700', color: colors.text.primary, letterSpacing: -0.3, marginBottom: 3 },
+  name:   { fontSize: 13, color: colors.text.tertiary, fontWeight: '500' },
 
   pnlBadge: {
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
+    borderRadius: borderRadius.md - 2,
+    paddingHorizontal: spacing[2] + 2,
+    paddingVertical: spacing[1] + 3,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,

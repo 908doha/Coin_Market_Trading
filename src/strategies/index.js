@@ -13,17 +13,24 @@ const fs   = require('fs');
 const path = require('path');
 
 // agentId → Strategy 클래스
-const registry = new Map();
+const registry    = new Map();
+// agentId → { id, name, description, version }
+const definitions = new Map();
 
 const files = fs.readdirSync(__dirname)
   .filter((f) => f.endsWith('.js') && f !== 'index.js');
 
 for (const file of files) {
   const mod  = require(path.join(__dirname, file));
-  const ids  = mod.AGENT_IDS ?? [];
+  const defs = mod.AGENT_DEFINITIONS ?? [];
+  const ids  = defs.length ? defs.map((d) => d.id) : (mod.AGENT_IDS ?? []);
+
   for (const id of ids) {
     registry.set(id, mod);
   }
+  for (const def of defs) {
+    definitions.set(def.id, def);
+  }
 }
 
-module.exports = { registry };
+module.exports = { registry, definitions };

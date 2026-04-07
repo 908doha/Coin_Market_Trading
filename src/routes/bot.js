@@ -9,6 +9,7 @@
 const express    = require('express');
 const botManager = require('../services/botManager');
 const logger     = require('../utils/logger');
+const { definitions } = require('../strategies');
 
 const router = express.Router();
 
@@ -53,6 +54,12 @@ router.get('/status', auth, (req, res) => {
   const { accountId } = req.query;
   const status = botManager.getStatus(accountId ?? undefined);
   res.json(status ?? {});
+});
+
+// ── GET /bot/agents ── 등록된 에이전트 목록 ──────────────────────
+router.get('/agents', (req, res) => {
+  const list = Array.from(definitions.values());
+  res.json(list);
 });
 
 module.exports = router;

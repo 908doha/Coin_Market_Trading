@@ -299,9 +299,27 @@ class IctStrategy {
 
 module.exports = IctStrategy;
 
-// 앱에서 이 전략에 매핑되는 agentId 목록
-IctStrategy.AGENT_IDS = [
-  'ict-strategy-1-indicators',
-  'ict-strategy-2-sessions-liquidity',
-  'ict-strategy-3-entry-sltp',
+// 앱에서 이 전략에 매핑되는 에이전트 정의
+IctStrategy.AGENT_DEFINITIONS = [
+  {
+    id:          'ict-strategy-1-indicators',
+    name:        'ICT 전략 — 지표',
+    description: 'HTF/MTF/LTF 멀티 타임프레임 + 스윙 구조 지표 기반 ICT 자동매매',
+    version:     '1.0',
+  },
+  {
+    id:          'ict-strategy-2-sessions-liquidity',
+    name:        'ICT 전략 — 세션/유동성',
+    description: '킬존(런던·뉴욕) + 유동성 스윕 중심의 ICT 진입 전략',
+    version:     '1.0',
+  },
+  {
+    id:          'ict-strategy-3-entry-sltp',
+    name:        'ICT 전략 — OTE 진입/SL·TP',
+    description: 'OTE 구간 정밀 진입 + MSS 기반 손절·익절 자동 설정',
+    version:     '1.0',
+  },
 ];
+
+// AGENT_IDS는 registry 호환용 (AGENT_DEFINITIONS에서 자동 파생)
+IctStrategy.AGENT_IDS = IctStrategy.AGENT_DEFINITIONS.map((d) => d.id);

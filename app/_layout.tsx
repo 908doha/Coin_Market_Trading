@@ -7,6 +7,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useFonts } from 'expo-font';
 import { AuthProvider } from '@/store/auth';
 import { AccountsProvider } from '@/store/accounts';
+import { colors } from '@/design-system/tokens';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -54,7 +55,7 @@ export default function RootLayout() {
 const styles = StyleSheet.create({
   webOuter: {
     flex:            1,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: colors.bg.elevated,
     alignItems:      'center',
     justifyContent:  'center',
   },
@@ -63,7 +64,7 @@ const styles = StyleSheet.create({
     maxWidth:        960,
     height:          '100%',
     maxHeight:       '100%',
-    backgroundColor: '#F5F5F5',
+    backgroundColor: colors.bg.elevated,
     overflow:        'hidden',
   },
 });

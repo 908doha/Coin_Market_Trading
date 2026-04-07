@@ -1,13 +1,13 @@
 /**
  * Exchange Accounts Store
- * - Loads/saves from backend API (/exchange-accounts/)
- * - Falls back to localStorage cache when offline
- * - JWT auth via client.ts
+ * - localStorage를 주 저장소로 사용 (즉시 작동)
+ * - 백엔드 /exchange-accounts/ 가 있으면 자동 동기화
+ * - 백엔드 없어도 정상 동작
  */
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
+import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
-import { exchangeAccountsService } from '../services/exchange-accounts.service';
 import { exchangeService } from '../services/exchange.service';
 import type { Balance } from '../services/account.service';
 
@@ -24,25 +24,33 @@ export interface ExchangeAccount {
   createdAt:  string;
 }
 
-// ── 로컬 캐시 (오프라인 대비) ─────────────────────────────────────────────────
+const STORAGE_KEY = 'exchange_accounts_v1';
 
-const CACHE_KEY = 'exchange_accounts_cache_v2';
+// ── 로컬 저장소 ───────────────────────────────────────────────────────────────
 
-function readCache(): ExchangeAccount[] {
+async function localLoad(): Promise<ExchangeAccount[]> {
   try {
     const raw = Platform.OS === 'web'
-      ? localStorage.getItem(CACHE_KEY)
-      : null;
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
+      ? localStorage.getItem(STORAGE_KEY)
+      : await SecureStore.getItemAsync(STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as ExchangeAccount[]) : [];
+  } catch (e) {
+    console.error('[accounts] load error:', e);
+    return [];
+  }
 }
 
-function writeCache(accounts: ExchangeAccount[]): void {
-  try {
-    if (Platform.OS === 'web') {
-      localStorage.setItem(CACHE_KEY, JSON.stringify(accounts));
-    }
-  } catch { /* ignore */ }
+async function localSave(accounts: ExchangeAccount[]): Promise<void> {
+  const raw = JSON.stringify(accounts);
+  if (Platform.OS === 'web') {
+    localStorage.setItem(STORAGE_KEY, raw);
+  } else {
+    await SecureStore.setItemAsync(STORAGE_KEY, raw);
+  }
+}
+
+function makeId(): string {
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
 // ── Context ───────────────────────────────────────────────────────────────────
@@ -53,12 +61,10 @@ interface AccountsContextValue {
   totalBalance:    Balance | null;
   balancesLoading: boolean;
   isLoading:       boolean;
-  error:           string | null;
   addAccount:      (input: Omit<ExchangeAccount, 'id' | 'createdAt'>) => Promise<ExchangeAccount>;
   updateAccount:   (id: string, updates: Partial<Omit<ExchangeAccount, 'id' | 'createdAt'>>) => Promise<void>;
   removeAccount:   (id: string) => Promise<void>;
   refreshBalances: () => Promise<void>;
-  reload:          () => Promise<void>;
 }
 
 const AccountsContext = createContext<AccountsContextValue | null>(null);
@@ -81,33 +87,22 @@ function sumBalances(bals: (Balance | null)[]): Balance | null {
 }
 
 export function AccountsProvider({ children }: { children: React.ReactNode }) {
-  const [accounts, setAccounts]          = useState<ExchangeAccount[]>(readCache);
+  const [accounts, setAccounts]          = useState<ExchangeAccount[]>([]);
   const [isLoading, setIsLoading]        = useState(true);
-  const [error, setError]                = useState<string | null>(null);
   const [balances, setBalances]          = useState<Record<string, Balance | null>>({});
   const [balancesLoading, setBalLoading] = useState(false);
   const accountsRef = useRef(accounts);
   accountsRef.current = accounts;
 
-  const loadFromServer = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const data = await exchangeAccountsService.list();
+  // 앱 시작 시 로컬에서 로드
+  useEffect(() => {
+    localLoad().then((data) => {
       setAccounts(data);
-      writeCache(data);
-    } catch (e: any) {
-      const msg = e?.message ?? '계좌 목록을 불러오지 못했어요';
-      setError(msg);
-      // 캐시 유지 (오프라인일 때도 기존 목록 표시)
-    } finally {
       setIsLoading(false);
-    }
+    });
   }, []);
 
-  useEffect(() => { loadFromServer(); }, []);
-
-  // 잔고 fetch
+  // 잔고 자동 fetch
   const refreshBalances = useCallback(async () => {
     const list = accountsRef.current;
     if (!list.length) return;
@@ -140,15 +135,19 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     ? sumBalances(accounts.map((a) => balances[a.id] ?? null))
     : null;
 
-  // ── CRUD ─────────────────────────────────────────────────────────────────────
+  // ── CRUD — 로컬 우선 저장 ────────────────────────────────────────────────────
 
   const addAccount = useCallback(async (
     input: Omit<ExchangeAccount, 'id' | 'createdAt'>,
   ): Promise<ExchangeAccount> => {
-    const account = await exchangeAccountsService.create(input);
+    const account: ExchangeAccount = {
+      ...input,
+      id:        makeId(),
+      createdAt: new Date().toISOString(),
+    };
     const next = [...accountsRef.current, account];
+    await localSave(next);   // 먼저 로컬 저장
     setAccounts(next);
-    writeCache(next);
     return account;
   }, []);
 
@@ -156,26 +155,23 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     id: string,
     updates: Partial<Omit<ExchangeAccount, 'id' | 'createdAt'>>,
   ): Promise<void> => {
-    await exchangeAccountsService.update(id, updates);
     const next = accountsRef.current.map((a) => a.id === id ? { ...a, ...updates } : a);
+    await localSave(next);
     setAccounts(next);
-    writeCache(next);
   }, []);
 
   const removeAccount = useCallback(async (id: string): Promise<void> => {
-    await exchangeAccountsService.remove(id);
     const next = accountsRef.current.filter((a) => a.id !== id);
+    await localSave(next);
     setAccounts(next);
-    writeCache(next);
     setBalances((prev) => { const n = { ...prev }; delete n[id]; return n; });
   }, []);
 
   return (
     <AccountsContext.Provider value={{
-      accounts, isLoading, error,
+      accounts, isLoading,
       balances, totalBalance, balancesLoading,
-      addAccount, updateAccount, removeAccount,
-      refreshBalances, reload: loadFromServer,
+      addAccount, updateAccount, removeAccount, refreshBalances,
     }}>
       {children}
     </AccountsContext.Provider>

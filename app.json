@@ -7,7 +7,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "coinmarkettrading",
     "userInterfaceStyle": "automatic",
-    "platforms": ["ios", "android", "web"],
     "splash": {
       "image": "./assets/images/splash.png",
       "resizeMode": "contain",

@@ -247,18 +247,21 @@ function AccountRow({
   const label    = EXCHANGE_LABELS[account.exchange];
   const isProfit = (balance?.profitTotal ?? 0) >= 0;
 
-  const mainAmount = balance
-    ? showUsd && (balance.totalUsd ?? 0) > 0
+  const hasUsd   = (balance?.totalUsd ?? 0) > 0;
+  const amount   = balance
+    ? showUsd && hasUsd
       ? `$${balance.totalUsd!.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
       : formatKRW(balance.total)
     : (error ? '조회 실패' : '—');
 
-  const subAmount = balance
-    ? showUsd
-      ? formatKRW(balance.total)
-      : (balance.totalUsd ?? 0) > 0
-        ? `≈ $${balance.totalUsd!.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-        : null
+  const pnlText  = balance
+    ? showUsd && hasUsd && balance.usdtKrw
+      ? (() => {
+          const usd  = balance.profitTotal / balance.usdtKrw;
+          const sign = usd >= 0 ? '+' : '';
+          return `${sign}$${Math.abs(usd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        })()
+      : formatKRWSigned(balance.profitTotal)
     : null;
 
   return (
@@ -267,8 +270,7 @@ function AccountRow({
         <ExchangeLogo exchange={account.exchange} size={44} />
 
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={accRow.amount} numberOfLines={1}>{mainAmount}</Text>
-          {subAmount && <Text style={accRow.sub}>{subAmount}</Text>}
+          <Text style={accRow.amount} numberOfLines={1}>{amount}</Text>
           <Text style={accRow.name} numberOfLines={1}>
             {account.name || label} · {label}
           </Text>
@@ -277,13 +279,13 @@ function AccountRow({
           )}
         </View>
 
-        {balance && (
+        {pnlText && (
           <View style={accRow.pnlCol}>
             <Text style={[accRow.pnlText, { color: isProfit ? colors.market.rise : colors.market.fall }]}>
-              {formatKRWSigned(balance.profitTotal)}
+              {pnlText}
             </Text>
             <Text style={[accRow.pnlRate, { color: isProfit ? colors.market.rise : colors.market.fall }]}>
-              {formatRate(balance.profitRate)}
+              {formatRate(balance!.profitRate)}
             </Text>
           </View>
         )}
@@ -351,7 +353,13 @@ export default function Home() {
                 </Text>
                 <View style={styles.heroSubRow}>
                   <Text style={[styles.heroPnl, { color: isProfit ? colors.market.rise : colors.market.fall }]}>
-                    {formatKRWSigned(balance?.profitTotal ?? 0)}
+                    {showUsd && (balance?.usdtKrw ?? 0) > 0
+                      ? (() => {
+                          const usd  = (balance!.profitTotal) / balance!.usdtKrw!;
+                          const sign = usd >= 0 ? '+' : '';
+                          return `${sign}$${Math.abs(usd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                        })()
+                      : formatKRWSigned(balance?.profitTotal ?? 0)}
                   </Text>
                   <View style={[styles.pnlBadge, { backgroundColor: isProfit ? colors.market.riseSubtle : colors.bg.elevated }]}>
                     <Text style={[styles.pnlBadgeText, { color: isProfit ? colors.negative.text : colors.market.fall }]}>
@@ -579,7 +587,6 @@ const accRow = StyleSheet.create({
   border: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border.default },
 
   amount: { fontSize: 18, fontWeight: '700', color: colors.text.primary, letterSpacing: -0.3 },
-  sub:    { fontSize: 12, fontWeight: '500', color: colors.text.tertiary, marginTop: 1 },
   name:   { fontSize: 12, color: colors.text.disabled, fontWeight: '500', marginTop: 2 },
   error:  { fontSize: 11, color: colors.negative.default, marginTop: 3, lineHeight: 15 },
 

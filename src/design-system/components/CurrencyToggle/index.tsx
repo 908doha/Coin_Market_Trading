@@ -67,13 +67,15 @@ export function CurrencyToggle({ showUsd, onToggle }: CurrencyToggleProps) {
 const st = StyleSheet.create({
   track: {
     flexDirection:    'row',
-    backgroundColor:  colors.bg.default,
+    backgroundColor:  colors.bg.elevated,
     borderRadius:     borderRadius.full,
     padding:          PAD,
     width:            PILL_W * 2 + PAD * 2,
     height:           PILL_H + PAD * 2,
     position:         'relative',
     overflow:         'hidden',
+    borderWidth:      1,
+    borderColor:      colors.border.default,
   },
   pill: {
     position:         'absolute',

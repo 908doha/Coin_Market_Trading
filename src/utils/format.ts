@@ -1,12 +1,12 @@
 /** 1,234,567원 */
 export function formatKRW(value: number): string {
-  return `${Math.abs(value).toLocaleString('ko-KR')}원`;
+  return `${Math.round(Math.abs(value)).toLocaleString('ko-KR')}원`;
 }
 
 /** +1,234원 or -1,234원 */
 export function formatKRWSigned(value: number): string {
   const sign = value >= 0 ? '+' : '-';
-  return `${sign}${Math.abs(value).toLocaleString('ko-KR')}원`;
+  return `${sign}${Math.round(Math.abs(value)).toLocaleString('ko-KR')}원`;
 }
 
 /** +3.75% or -1.20% */

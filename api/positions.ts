@@ -21,6 +21,7 @@ interface Position {
   markPrice:     number;
   leverage:      number;
   agentReason?:  string;
+  accountId?:    string;
   // 상세 화면용
   currentPrice:  number;
   currentValue:  number;   // KRW (평가금)
@@ -145,7 +146,7 @@ export default async function handler(req: any, res: any) {
   if (req.method === 'OPTIONS') { res.status(200).end(); return; }
   if (req.method !== 'POST')   { res.status(405).json({ error: 'Method not allowed' }); return; }
 
-  const { exchange, apiKey, apiSecret } = req.body ?? {};
+  const { exchange, apiKey, apiSecret, accountId } = req.body ?? {};
   if (!apiKey || !apiSecret) {
     res.status(400).json({ error: 'apiKey, apiSecret 필요' });
     return;
@@ -156,6 +157,11 @@ export default async function handler(req: any, res: any) {
 
     if (exchange === 'gate') {
       positions = await fetchGatePositions(apiKey, apiSecret);
+    }
+
+    // accountId가 있으면 각 포지션에 주입
+    if (accountId) {
+      positions = positions.map((p) => ({ ...p, accountId }));
     }
 
     res.status(200).json(positions);

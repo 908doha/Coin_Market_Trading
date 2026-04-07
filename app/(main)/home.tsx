@@ -564,9 +564,9 @@ export default function Home() {
     return Array.from(seen.values());
   }, [accounts, groupedTrades]);
 
-  // /api/bot/agents 에서 실제 이름/설명 로드
+  // /api/agents 에서 실제 이름/설명 로드
   const { data: botAgents } = useApi(
-    () => fetch('/api/bot/agents').then((r) => r.json()).catch(() => []),
+    () => fetch('/api/agents').then((r) => r.json()).catch(() => []),
     [],
   );
 

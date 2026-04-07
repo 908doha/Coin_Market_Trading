@@ -126,7 +126,7 @@ export default function AgentSettings() {
   const fetchAgentDefs = () => {
     setDefsLoading(true);
     setDefsError(null);
-    fetch('/api/bot/agents')
+    fetch('/api/agents')
       .then((r) => r.json())
       .then((data) => { setAgentDefs(Array.isArray(data) ? data : []); setDefsLoading(false); })
       .catch((e) => { setDefsError(e?.message ?? '에이전트 목록 로드 실패'); setDefsLoading(false); });

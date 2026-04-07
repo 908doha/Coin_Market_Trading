@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
@@ -7,6 +7,16 @@ import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
+
+interface BotSignal {
+  signal:     string;
+  reason:     string;
+  confluence: string[];
+  entry:      number;
+  sl?:        number;
+  tp?:        number;
+  entryAt?:   string;
+}
 
 // ─── 정보 행 ─────────────────────────────────────────────────────────────────
 function InfoRow({
@@ -58,6 +68,23 @@ export default function PositionDetail() {
     () => positionsService.getById(id),
     [id],
   );
+
+  // 봇 서버에서 ICT 분석 시그널 조회
+  const [botSignal, setBotSignal] = useState<BotSignal | null>(null);
+  useEffect(() => {
+    if (!position) return;
+    const accountId = (position as any).accountId;
+    if (!accountId) return;
+    fetch(`/api/bot/status?accountId=${encodeURIComponent(accountId)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        // entrySignals: { 'BTC_USDT': { signal, reason, confluence, ... } }
+        const contract = (position.symbol ?? '').replace('/', '_'); // BTC/USDT → BTC_USDT
+        const sig = data?.entrySignals?.[contract];
+        if (sig) setBotSignal(sig);
+      })
+      .catch(() => {});
+  }, [position]);
 
   const isProfit  = (position?.profit ?? 0) >= 0;
   const pnlColor  = isProfit ? colors.market.rise : colors.market.fall;
@@ -123,10 +150,26 @@ export default function PositionDetail() {
                 </View>
               </GlassCard>
 
-              {/* ── 포지션 요약 설명 ───────────────────── */}
-              {positionSummary && (
+              {/* ── 포지션 요약 / ICT 분석 설명 ────────── */}
+              {(positionSummary || botSignal) && (
                 <GlassCard intensity="low" radius={20} padding={16} style={st.section}>
-                  <Text style={st.summaryText}>{positionSummary}</Text>
+                  {botSignal ? (
+                    <>
+                      <Text style={st.summaryText}>{botSignal.reason}</Text>
+                      {botSignal.confluence?.length > 0 && (
+                        <View style={{ marginTop: 12, gap: 6 }}>
+                          {botSignal.confluence.map((c, i) => (
+                            <View key={i} style={st.confluenceRow}>
+                              <Text style={st.confluenceDot}>•</Text>
+                              <Text style={st.confluenceText}>{c}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                    </>
+                  ) : (
+                    <Text style={st.summaryText}>{positionSummary}</Text>
+                  )}
                 </GlassCard>
               )}
 
@@ -256,7 +299,10 @@ const st = StyleSheet.create({
 
   riskWrap: { paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.border.default },
 
-  summaryText: { fontSize: 14, color: colors.text.secondary, lineHeight: 22 },
+  summaryText:    { fontSize: 14, color: colors.text.secondary, lineHeight: 22 },
+  confluenceRow:  { flexDirection: 'row', gap: 6 },
+  confluenceDot:  { fontSize: 14, color: colors.text.tertiary, lineHeight: 22 },
+  confluenceText: { fontSize: 14, color: colors.text.secondary, lineHeight: 22, flex: 1 },
 
   reasonBox:  { backgroundColor: colors.bg.subtle, borderRadius: 12, padding: 14 },
   reasonLabel: { fontSize: 12, fontWeight: '600', color: colors.text.tertiary, marginBottom: 6 },

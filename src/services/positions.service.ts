@@ -35,14 +35,15 @@ const positionsCache = new Map<string, Position>();
 export const positionsService = {
   /** 특정 계좌의 실제 포지션 조회 */
   getByAccount: async (params: {
-    exchange: ExchangeType;
-    apiKey:   string;
+    id:        string;
+    exchange:  ExchangeType;
+    apiKey:    string;
     apiSecret: string;
   }): Promise<Position[]> => {
     const res = await fetch(`${API_BASE}/api/positions`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(params),
+      body:    JSON.stringify({ accountId: params.id, exchange: params.exchange, apiKey: params.apiKey, apiSecret: params.apiSecret }),
     });
     if (!res.ok) throw new Error('포지션 조회 실패');
     return res.json();
@@ -56,7 +57,7 @@ export const positionsService = {
     const results = await Promise.all(
       accounts.map((acc) =>
         positionsService
-          .getByAccount({ exchange: acc.exchange, apiKey: acc.apiKey, apiSecret: acc.apiSecret })
+          .getByAccount(acc)
           .catch(() => [] as Position[]),
       ),
     );

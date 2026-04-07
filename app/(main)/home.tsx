@@ -87,37 +87,43 @@ function AccountRow({
   isLast:   boolean;
 }) {
   const color    = EXCHANGE_COLORS[account.exchange];
+  const label    = EXCHANGE_LABELS[account.exchange];
   const isProfit = (balance?.profitTotal ?? 0) >= 0;
+
   return (
     <PressableScale
       onPress={() => router.push('/(main)/account/api-accounts')}
       scaleTo={0.99}
     >
       <View style={[accRow.wrap, !isLast && accRow.border]}>
-        {/* 왼쪽: 거래소 뱃지 + 이름 */}
-        <View style={[accRow.badge, { backgroundColor: color + '18' }]}>
-          <View style={[accRow.dot, { backgroundColor: color }]} />
-          <Text style={[accRow.exchange, { color }]} numberOfLines={1}>
-            {EXCHANGE_LABELS[account.exchange]}
+        {/* 거래소 아이콘 */}
+        <View style={[accRow.icon, { backgroundColor: color + '20' }]}>
+          <Text style={[accRow.iconText, { color }]}>
+            {label.slice(0, 2).toUpperCase()}
           </Text>
         </View>
-        <Text style={accRow.name} numberOfLines={1}>
-          {account.name || EXCHANGE_LABELS[account.exchange]}
-        </Text>
 
-        {/* 오른쪽: 잔고 + 손익 */}
-        <View style={accRow.right}>
-          {balance ? (
-            <>
-              <Text style={accRow.balance}>{formatKRW(balance.total)}</Text>
-              <Text style={[accRow.pnl, { color: isProfit ? '#FF4747' : '#246CF9' }]}>
-                {formatKRWSigned(balance.profitTotal)}
-              </Text>
-            </>
-          ) : (
-            <Text style={accRow.loading}>로딩 중…</Text>
-          )}
+        {/* 금액 + 계좌명 */}
+        <View style={{ flex: 1 }}>
+          <Text style={accRow.amount}>
+            {balance ? formatKRW(balance.total) : '—'}
+          </Text>
+          <Text style={accRow.name} numberOfLines={1}>
+            {account.name || label}
+          </Text>
         </View>
+
+        {/* 손익 뱃지 */}
+        {balance && (
+          <View style={[
+            accRow.pnlBadge,
+            { backgroundColor: isProfit ? '#FFF0F0' : '#EFF3FF' },
+          ]}>
+            <Text style={[accRow.pnlText, { color: isProfit ? '#FF4747' : '#246CF9' }]}>
+              {formatKRWSigned(balance.profitTotal)}
+            </Text>
+          </View>
+        )}
       </View>
     </PressableScale>
   );
@@ -369,23 +375,31 @@ const styles = StyleSheet.create({
 
 const accRow = StyleSheet.create({
   wrap: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    paddingVertical: 16,
-    paddingHorizontal: 18,
-    gap: 10,
+    flexDirection:     'row',
+    alignItems:        'center',
+    paddingVertical:   18,
+    paddingHorizontal: 20,
+    gap:               14,
   },
-  border: { borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
-  badge: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4,
+  border: { borderBottomWidth: 1, borderBottomColor: '#F2F2F2' },
+
+  icon: {
+    width: 48, height: 48, borderRadius: 16,
+    alignItems: 'center', justifyContent: 'center',
     flexShrink: 0,
   },
-  dot:      { width: 6, height: 6, borderRadius: 3 },
-  exchange: { fontSize: 11, fontWeight: '700' },
-  name:     { flex: 1, fontSize: 14, fontWeight: '600', color: '#191919' },
-  right:    { alignItems: 'flex-end', flexShrink: 0 },
-  balance:  { fontSize: 14, fontWeight: '700', color: '#191919' },
-  pnl:      { fontSize: 12, fontWeight: '600', marginTop: 2 },
-  loading:  { fontSize: 12, color: '#AEAEB2' },
+  iconText: { fontSize: 14, fontWeight: '800', letterSpacing: -0.5 },
+
+  amount: { fontSize: 20, fontWeight: '700', color: '#191919', letterSpacing: -0.3, marginBottom: 3 },
+  name:   { fontSize: 13, color: '#AEAEB2', fontWeight: '500' },
+
+  pnlBadge: {
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  pnlText: { fontSize: 13, fontWeight: '700' },
 });

@@ -7,13 +7,6 @@
 
 import * as crypto from 'crypto';
 
-// ── CORS headers ──────────────────────────────────────────────────────────────
-const CORS = {
-  'Access-Control-Allow-Origin':  '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-};
-
 interface Balance {
   total:           number;
   invested:        number;
@@ -265,61 +258,85 @@ async function fetchOkxBalance(apiKey: string, apiSecret: string, passphrase: st
   };
 }
 
-// ── Gate.io ───────────────────────────────────────────────────────────────────
+// ── Gate.io HMAC 서명 헬퍼 ───────────────────────────────────────────────────
+function gateSign(apiSecret: string, method: string, path: string, queryStr: string, timestamp: string): string {
+  const bodyHash = crypto.createHash('sha512').update('').digest('hex');
+  const toSign   = `${method}\n${path}\n${queryStr}\n${bodyHash}\n${timestamp}`;
+  return crypto.createHmac('sha512', apiSecret).update(toSign).digest('hex');
+}
+
+function gateHeaders(apiKey: string, sig: string, timestamp: string) {
+  return { KEY: apiKey, SIGN: sig, Timestamp: timestamp };
+}
+
+// ── Gate.io (spot + futures 합산) ─────────────────────────────────────────────
 async function fetchGateBalance(apiKey: string, apiSecret: string): Promise<Balance> {
-  const usdtKrw   = await getUsdtKrwRate();
-  const timestamp = String(Math.floor(Date.now() / 1000));
-  const method    = 'GET';
-  const path      = '/api/v4/spot/accounts';
-  const queryStr  = '';
-  const bodyHash  = crypto.createHash('sha512').update('').digest('hex');
-  const toSign    = `${method}\n${path}\n${queryStr}\n${bodyHash}\n${timestamp}`;
-  const signature = crypto.createHmac('sha512', apiSecret).update(toSign).digest('hex');
+  const usdtKrw = await getUsdtKrwRate();
+  const ts      = String(Math.floor(Date.now() / 1000));
 
-  const res = await fetch(`https://api.gateio.ws${path}`, {
-    headers: {
-      'KEY':       apiKey,
-      'SIGN':      signature,
-      'Timestamp': timestamp,
-    },
-  });
-  if (!res.ok) throw new Error(`Gate.io API error: ${res.status}`);
-  const accounts: any[] = await res.json();
+  // ① Spot 잔고
+  let spotTotalUsdt = 0;
+  let spotAvailUsdt = 0;
+  try {
+    const spotPath = '/api/v4/spot/accounts';
+    const spotSig  = gateSign(apiSecret, 'GET', spotPath, '', ts);
+    const spotRes  = await fetch(`https://api.gateio.ws${spotPath}`, { headers: gateHeaders(apiKey, spotSig, ts) });
+    if (spotRes.ok) {
+      const accounts: any[] = await spotRes.json();
+      const usdtAcct = accounts.find((a) => a.currency === 'USDT');
+      if (usdtAcct) {
+        spotAvailUsdt = parseFloat(usdtAcct.available ?? '0');
+        spotTotalUsdt = spotAvailUsdt + parseFloat(usdtAcct.locked ?? '0');
+      }
+      // 다른 코인 spot 평가
+      const others = accounts.filter(
+        (a) => a.currency !== 'USDT' && (parseFloat(a.available ?? '0') + parseFloat(a.locked ?? '0')) > 0,
+      );
+      if (others.length) {
+        const pairs = others.map((a) => `${a.currency}_USDT`).join(',');
+        const pr = await fetch(`https://api.gateio.ws/api/v4/spot/tickers?currency_pair=${pairs}`).catch(() => null);
+        if (pr?.ok) {
+          const tickers: any[] = await pr.json();
+          const pm: Record<string, number> = {};
+          tickers.forEach((t) => { pm[t.currency_pair] = parseFloat(t.last ?? '0'); });
+          others.forEach((a) => {
+            const amount = parseFloat(a.available ?? '0') + parseFloat(a.locked ?? '0');
+            spotTotalUsdt += amount * (pm[`${a.currency}_USDT`] ?? 0);
+          });
+        }
+      }
+    }
+  } catch {}
 
-  let totalUsdt = 0;
-  let availUsdt = 0;
+  // ② USDT 선물 잔고
+  let futuresAvailUsdt = 0;
+  let futuresTotalUsdt = 0;
+  let futuresPnl       = 0;
+  try {
+    const futPath = '/api/v4/futures/usdt/accounts';
+    const futSig  = gateSign(apiSecret, 'GET', futPath, '', ts);
+    const futRes  = await fetch(`https://api.gateio.ws${futPath}`, { headers: gateHeaders(apiKey, futSig, ts) });
+    if (futRes.ok) {
+      const fut: any = await futRes.json();
+      // total: 총 자산, available: 가용 마진, unrealised_pnl: 미실현 손익
+      futuresTotalUsdt = parseFloat(fut.total         ?? '0');
+      futuresAvailUsdt = parseFloat(fut.available     ?? '0');
+      futuresPnl       = parseFloat(fut.unrealised_pnl ?? '0');
+    }
+  } catch {}
 
-  const usdtAcct = accounts.find((a) => a.currency === 'USDT');
-  if (usdtAcct) {
-    availUsdt += parseFloat(usdtAcct.available ?? '0');
-    totalUsdt += parseFloat(usdtAcct.available ?? '0') + parseFloat(usdtAcct.locked ?? '0');
-  }
-
-  const others = accounts.filter(
-    (a) => a.currency !== 'USDT' &&
-           (parseFloat(a.available ?? '0') + parseFloat(a.locked ?? '0')) > 0,
-  );
-  if (others.length) {
-    const pairs = others.map((a) => `${a.currency}_USDT`).join(',');
-    try {
-      const pr = await fetch(`https://api.gateio.ws/api/v4/spot/tickers?currency_pair=${pairs}`);
-      const tickers: any[] = await pr.json();
-      const priceMap: Record<string, number> = {};
-      tickers.forEach((t) => { priceMap[t.currency_pair] = parseFloat(t.last ?? '0'); });
-      others.forEach((a) => {
-        const price  = priceMap[`${a.currency}_USDT`] ?? 0;
-        const amount = parseFloat(a.available ?? '0') + parseFloat(a.locked ?? '0');
-        totalUsdt += amount * price;
-      });
-    } catch {}
-  }
+  const totalUsdt  = spotTotalUsdt  + futuresTotalUsdt;
+  const availUsdt  = spotAvailUsdt  + futuresAvailUsdt;
+  const investedUsdt = totalUsdt - availUsdt;
 
   return {
-    total:           Math.round(totalUsdt                 * usdtKrw),
-    available:       Math.round(availUsdt                 * usdtKrw),
-    invested:        Math.round((totalUsdt - availUsdt)   * usdtKrw),
-    profitTotal:     0,
-    profitRate:      0,
+    total:           Math.round(totalUsdt    * usdtKrw),
+    available:       Math.round(availUsdt    * usdtKrw),
+    invested:        Math.round(Math.max(0, investedUsdt) * usdtKrw),
+    profitTotal:     Math.round(futuresPnl   * usdtKrw),
+    profitRate:      futuresTotalUsdt > 0
+      ? parseFloat(((futuresPnl / futuresTotalUsdt) * 100).toFixed(2))
+      : 0,
     profitToday:     0,
     profitTodayRate: 0,
   };
@@ -327,17 +344,13 @@ async function fetchGateBalance(apiKey: string, apiSecret: string): Promise<Bala
 
 // ── Handler ───────────────────────────────────────────────────────────────────
 export default async function handler(req: any, res: any) {
-  // CORS preflight
-  if (req.method === 'OPTIONS') {
-    return res.status(200).set(CORS).end();
-  }
-  if (req.method !== 'POST') {
-    return res.status(405).set(CORS).json({ error: 'Method not allowed' });
-  }
+  if (req.method === 'OPTIONS') { res.status(200).end(); return; }
+  if (req.method !== 'POST')   { res.status(405).json({ error: 'Method not allowed' }); return; }
 
   const { exchange, apiKey, apiSecret, passphrase } = req.body ?? {};
   if (!exchange || !apiKey || !apiSecret) {
-    return res.status(400).set(CORS).json({ error: 'exchange, apiKey, apiSecret required' });
+    res.status(400).json({ error: 'exchange, apiKey, apiSecret required' });
+    return;
   }
 
   try {
@@ -359,10 +372,11 @@ export default async function handler(req: any, res: any) {
         balance = await fetchGateBalance(apiKey, apiSecret);
         break;
       default:
-        return res.status(400).set(CORS).json({ error: `Unsupported exchange: ${exchange}` });
+        res.status(400).json({ error: `Unsupported exchange: ${exchange}` });
+        return;
     }
-    return res.status(200).set(CORS).json(balance);
+    res.status(200).json(balance);
   } catch (err: any) {
-    return res.status(502).set(CORS).json({ error: err?.message ?? 'Exchange API error' });
+    res.status(502).json({ error: err?.message ?? 'Exchange API error' });
   }
 }

@@ -17,6 +17,7 @@ export { ScreenTransition }      from './components/ScreenTransition';
 export { PeriodSelector }         from './components/PeriodSelector';
 export { PressableScale }         from './components/PressableScale';
 export { Toggle }                 from './components/Toggle';
+export { CurrencyToggle }         from './components/CurrencyToggle';
 export { FadeTabView }            from './components/FadeTabView';
 export {
   Skeleton, AssetCardSkeleton, TradingListSkeleton, AccountSkeleton,

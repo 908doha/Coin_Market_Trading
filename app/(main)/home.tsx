@@ -3,7 +3,7 @@ import { View, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Svg, { Polyline, Defs, LinearGradient, Stop, Polygon, Path, Rect, Text as SvgText } from 'react-native-svg';
-import { Text, GlassCard, PeriodSelector, PressableScale, FadeTabView, AssetCardSkeleton, PageHeader } from '@/design-system';
+import { Text, GlassCard, PeriodSelector, PressableScale, FadeTabView, AssetCardSkeleton, PageHeader, CurrencyToggle } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { accountService, positionsService, tradesService, githubService } from '@/services';
 import { useApi } from '@/hooks/useApi';
@@ -233,30 +233,6 @@ function ExchangeLogo({ exchange, size = 44 }: { exchange: ExchangeType; size?: 
     </View>
   );
 }
-
-// ── 통화 토글 ────────────────────────────────────────────────────────────────
-function CurrencyToggle({ showUsd, onToggle }: { showUsd: boolean; onToggle: () => void }) {
-  return (
-    <PressableScale onPress={onToggle} scaleTo={0.94}>
-      <View style={toggle.wrap}>
-        <View style={[toggle.pill, !showUsd && toggle.pillActive]}>
-          <Text style={[toggle.label, !showUsd && toggle.labelActive]}>₩</Text>
-        </View>
-        <View style={[toggle.pill, showUsd && toggle.pillActive]}>
-          <Text style={[toggle.label, showUsd && toggle.labelActive]}>$</Text>
-        </View>
-      </View>
-    </PressableScale>
-  );
-}
-
-const toggle = StyleSheet.create({
-  wrap:        { flexDirection: 'row', backgroundColor: colors.bg.default, borderRadius: borderRadius.full, padding: 3, gap: 2 },
-  pill:        { paddingHorizontal: spacing[3], paddingVertical: spacing[1] + 1, borderRadius: borderRadius.full },
-  pillActive:  { backgroundColor: colors.primary.default },
-  label:       { fontSize: 13, fontWeight: '700', color: colors.text.tertiary },
-  labelActive: { color: '#fff' },
-});
 
 // ── 연결된 계정 행 ────────────────────────────────────────────────────────────
 function AccountRow({

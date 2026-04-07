@@ -1,10 +1,10 @@
-import React, { useState, useMemo } from 'react';
-import { View, StyleSheet, ScrollView, TouchableWithoutFeedback } from 'react-native';
+import React, { useState, useMemo, useRef } from 'react';
+import { View, StyleSheet, ScrollView, TouchableWithoutFeedback, Modal, Pressable, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Svg, { Polyline, Defs, LinearGradient, Stop, Polygon, Path, Rect, Text as SvgText, Line, Circle } from 'react-native-svg';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
-import { Text, GlassCard, PeriodSelector, PressableScale, FadeTabView, AssetCardSkeleton, PageHeader, CurrencyToggle } from '@/design-system';
+import { Text, GlassCard, PressableScale, FadeTabView, AssetCardSkeleton, PageHeader, CurrencyToggle } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { accountService, positionsService, tradesService, githubService } from '@/services';
 import { useApi } from '@/hooks/useApi';
@@ -13,7 +13,14 @@ import type { Balance } from '@/services';
 import type { AgentDefinition } from '@/services';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 
-const PERIODS = ['1D', '1W', '1M', '3M', '6M', '1Y'] as const;
+const PERIODS = [
+  { key: '1W',  label: '최근 일주일' },
+  { key: '1M',  label: '최근 한달'   },
+  { key: '6M',  label: '최근 6개월'  },
+  { key: '1Y',  label: '최근 1년'    },
+  { key: 'ALL', label: '전체'        },
+] as const;
+type PeriodKey = typeof PERIODS[number]['key'];
 
 const AGENT_COLORS = ['#3182F6', '#1AC24E', '#FF8A00', '#9B59B6', '#E74C3C', '#16A085'];
 
@@ -81,6 +88,85 @@ function AgentRow({
     </PressableScale>
   );
 }
+
+// ── 기간 드롭다운 ─────────────────────────────────────────────────────────────
+function PeriodDropdown({ period, onChange }: { period: PeriodKey; onChange: (k: PeriodKey) => void }) {
+  const [open, setOpen] = useState(false);
+  const label = PERIODS.find((p) => p.key === period)?.label ?? period;
+
+  return (
+    <View>
+      <Pressable style={drop.trigger} onPress={() => setOpen(true)}>
+        <Text style={drop.triggerText}>{label}</Text>
+        <Text style={drop.chevron}>▾</Text>
+      </Pressable>
+
+      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+        <Pressable style={drop.backdrop} onPress={() => setOpen(false)}>
+          <View style={drop.menu}>
+            {PERIODS.map((p) => (
+              <Pressable
+                key={p.key}
+                style={[drop.item, p.key === period && drop.itemActive]}
+                onPress={() => { onChange(p.key); setOpen(false); }}
+              >
+                <Text style={[drop.itemText, p.key === period && drop.itemTextActive]}>
+                  {p.label}
+                </Text>
+                {p.key === period && <Text style={drop.check}>✓</Text>}
+              </Pressable>
+            ))}
+          </View>
+        </Pressable>
+      </Modal>
+    </View>
+  );
+}
+
+const drop = StyleSheet.create({
+  trigger: {
+    flexDirection:  'row',
+    alignItems:     'center',
+    gap:            6,
+    paddingHorizontal: 14,
+    paddingVertical:    8,
+    borderRadius:   99,
+    borderWidth:    1,
+    borderColor:    colors.border.default,
+    backgroundColor: colors.bg.default,
+    alignSelf:      'flex-start',
+  },
+  triggerText: { fontSize: 13, fontWeight: '600', color: colors.text.secondary },
+  chevron:     { fontSize: 11, color: colors.text.tertiary, marginTop: 1 },
+  backdrop: {
+    flex:            1,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    justifyContent:  'center',
+    alignItems:      'center',
+  },
+  menu: {
+    backgroundColor: colors.bg.default,
+    borderRadius:    16,
+    width:           220,
+    overflow:        'hidden',
+    shadowColor:     '#000',
+    shadowOffset:    { width: 0, height: 8 },
+    shadowOpacity:   0.12,
+    shadowRadius:    20,
+    elevation:       12,
+  },
+  item: {
+    flexDirection:  'row',
+    alignItems:     'center',
+    justifyContent: 'space-between',
+    paddingVertical:   15,
+    paddingHorizontal: 20,
+  },
+  itemActive:     { backgroundColor: colors.bg.subtle },
+  itemText:       { fontSize: 15, fontWeight: '500', color: colors.text.primary },
+  itemTextActive: { fontWeight: '700', color: colors.text.primary },
+  check:          { fontSize: 15, color: colors.primary.default, fontWeight: '700' },
+});
 
 // ── 자산 통계 카드 ────────────────────────────────────────────────────────────
 function StatCard({ label, krw, showUsd, rate }: { label: string; krw: number; showUsd: boolean; rate: number }) {
@@ -429,7 +515,7 @@ function AccountRow({
 }
 
 export default function Home() {
-  const [period, setPeriod]   = useState<typeof PERIODS[number]>('1M');
+  const [period, setPeriod]   = useState<PeriodKey>('1M');
   const [showUsd, setShowUsd] = useState(false);
   const { accounts, balances, balanceErrors, totalBalance, balancesLoading } = useAccounts();
 
@@ -521,7 +607,7 @@ export default function Home() {
                   />
                 </View>
                 <View style={styles.periodRow}>
-                  <PeriodSelector periods={PERIODS} active={period} onChange={setPeriod} />
+                  <PeriodDropdown period={period} onChange={setPeriod} />
                 </View>
               </>
             )}

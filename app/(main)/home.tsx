@@ -82,7 +82,10 @@ function AgentRow({
 }
 
 // ── 자산 통계 카드 ────────────────────────────────────────────────────────────
-function StatCard({ label, value }: { label: string; value: string }) {
+function StatCard({ label, krw, showUsd, rate }: { label: string; krw: number; showUsd: boolean; rate: number }) {
+  const value = showUsd && rate > 0
+    ? `$${(krw / rate).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : formatKRW(krw);
   return (
     <GlassCard style={styles.statCard} intensity="low" radius={20} padding={16}>
       <Text variant="meta" color={colors.text.tertiary} style={{ marginBottom: 4 }}>{label}</Text>
@@ -379,8 +382,8 @@ export default function Home() {
 
           {/* ── 자산 분배 ── */}
           <View style={styles.statsRow}>
-            <StatCard label="가용 자산" value={formatKRW(balance?.available ?? 0)} />
-            <StatCard label="투자 중"   value={formatKRW(balance?.invested ?? 0)} />
+            <StatCard label="가용 자산" krw={balance?.available ?? 0} showUsd={showUsd} rate={balance?.usdtKrw ?? 1350} />
+            <StatCard label="투자 중"   krw={balance?.invested ?? 0} showUsd={showUsd} rate={balance?.usdtKrw ?? 1350} />
           </View>
 
           {/* ── 연결된 계좌 ── */}

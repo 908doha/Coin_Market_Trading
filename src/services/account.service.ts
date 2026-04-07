@@ -1,13 +1,15 @@
 import { client } from './client';
 
 export interface Balance {
-  total:          number;
-  invested:       number;
-  available:      number;
-  profitTotal:    number;
-  profitRate:     number;
-  profitToday:    number;
-  profitTodayRate: number;
+  total:          number;   // KRW
+  invested:       number;   // KRW
+  available:      number;   // KRW
+  profitTotal:    number;   // KRW
+  profitRate:     number;   // %
+  profitToday:    number;   // KRW
+  profitTodayRate: number;  // %
+  totalUsd?:      number;   // USD (optional — populated by exchange API)
+  usdtKrw?:       number;   // 환율
 }
 
 export interface ChartPoint {

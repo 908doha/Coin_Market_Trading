@@ -15,6 +15,8 @@ interface Balance {
   profitRate:      number;
   profitToday:     number;
   profitTodayRate: number;
+  totalUsd:        number;
+  usdtKrw:         number;
 }
 
 // ── KRW exchange rate (fallback if live fetch fails) ─────────────────────────
@@ -339,6 +341,8 @@ async function fetchGateBalance(apiKey: string, apiSecret: string): Promise<Bala
       : 0,
     profitToday:     0,
     profitTodayRate: 0,
+    totalUsd:        parseFloat(totalUsdt.toFixed(2)),
+    usdtKrw,
   };
 }
 
@@ -375,7 +379,15 @@ export default async function handler(req: any, res: any) {
         res.status(400).json({ error: `Unsupported exchange: ${exchange}` });
         return;
     }
-    res.status(200).json(balance);
+
+    // USD 환산 추가 (balance는 이미 KRW 기준)
+    const rate = balance.usdtKrw || await getUsdtKrwRate();
+    const result = {
+      ...balance,
+      totalUsd: rate > 0 ? parseFloat((balance.total / rate).toFixed(2)) : 0,
+      usdtKrw:  rate,
+    };
+    res.status(200).json(result);
   } catch (err: any) {
     res.status(502).json({ error: err?.message ?? 'Exchange API error' });
   }

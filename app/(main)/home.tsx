@@ -173,6 +173,11 @@ function AccountRow({
           <Text style={accRow.amount}>
             {balance ? formatKRW(balance.total) : '—'}
           </Text>
+          {balance && (balance.totalUsd ?? 0) > 0 && (
+            <Text style={accRow.usd}>
+              ${balance.totalUsd!.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </Text>
+          )}
           <Text style={accRow.name} numberOfLines={1}>
             {account.name || label}
           </Text>
@@ -258,6 +263,11 @@ export default function Home() {
               <>
                 <Text variant="meta" color={colors.text.tertiary} style={{ marginBottom: 6 }}>총 자산</Text>
                 <Text style={styles.heroAmount}>{formatKRW(balance?.total ?? 0)}</Text>
+                {(balance?.totalUsd ?? 0) > 0 && (
+                  <Text variant="body2" color={colors.text.tertiary} style={{ marginBottom: 4 }}>
+                    ≈ ${(balance!.totalUsd!).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </Text>
+                )}
                 <View style={styles.heroSubRow}>
                   <Text style={[styles.heroPnl, { color: isProfit ? colors.market.rise : colors.market.fall }]}>
                     {formatKRWSigned(balance?.profitTotal ?? 0)}
@@ -502,8 +512,9 @@ const accRow = StyleSheet.create({
   },
   iconText: { fontSize: 14, fontWeight: '800', letterSpacing: -0.5 },
 
-  amount: { fontSize: 20, fontWeight: '700', color: colors.text.primary, letterSpacing: -0.3, marginBottom: 3 },
-  name:   { fontSize: 13, color: colors.text.tertiary, fontWeight: '500' },
+  amount: { fontSize: 20, fontWeight: '700', color: colors.text.primary, letterSpacing: -0.3, marginBottom: 2 },
+  usd:    { fontSize: 13, fontWeight: '500', color: colors.text.tertiary, marginBottom: 3 },
+  name:   { fontSize: 12, color: colors.text.disabled, fontWeight: '500' },
   error:  { fontSize: 11, color: colors.negative.default, marginTop: 3, lineHeight: 15 },
 
   pnlBadge: {

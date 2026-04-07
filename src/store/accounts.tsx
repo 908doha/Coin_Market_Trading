@@ -87,6 +87,8 @@ function sumBalances(bals: (Balance | null)[]): Balance | null {
       profitRate:      acc.profitRate      + b.profitRate,
       profitToday:     acc.profitToday     + b.profitToday,
       profitTodayRate: acc.profitTodayRate + b.profitTodayRate,
+      totalUsd:        (acc.totalUsd ?? 0) + (b.totalUsd ?? 0),
+      usdtKrw:         b.usdtKrw ?? acc.usdtKrw,
     }),
     { total: 0, invested: 0, available: 0, profitTotal: 0, profitRate: 0, profitToday: 0, profitTodayRate: 0 },
   );

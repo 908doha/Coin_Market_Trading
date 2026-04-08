@@ -6,7 +6,12 @@ const config = {
   apiSecret: process.env.GATEIO_API_SECRET || '',
 
   // Trading
-  tradePair: process.env.TRADE_PAIR || 'BTC_USDT',
+  //   TRADE_PAIRS: 콤마 구분 복수 지원 (예: "BTC_USDT,ETH_USDT,XAG_USDT")
+  //   TRADE_PAIR: 하위 호환 (단일 페어)
+  tradePairs: (process.env.TRADE_PAIRS || process.env.TRADE_PAIR || 'BTC_USDT')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
   leverage: parseInt(process.env.LEVERAGE, 10) || 5,
   maxPositions: parseInt(process.env.MAX_POSITIONS, 10) || 3,
 
@@ -15,15 +20,15 @@ const config = {
   takeProfitPercent: parseFloat(process.env.TAKE_PROFIT_PERCENT) || 4,
   maxDailyLossUsdt: parseFloat(process.env.MAX_DAILY_LOSS_USDT) || 300,
 
-  // Kelly Criterion (포지션 사이징 - 항상 적용)
+  // Kelly Criterion (포지션 사이징 - 항상 적용, 페어별 독립 통계)
   //   f* = p - (1 - p) / R   (p: 승률, R: 평균손익비)
-  //   fractional Kelly 적용 + 상한 캡으로 변동성/추정오차 완충
-  //   표본 부족 시 defaultFraction 으로 폴백 (잔고의 고정 비율)
+  //   multi-pair 운영 시 총 노출 상한으로 과다 레버리지 방지
   kelly: {
     fraction: parseFloat(process.env.KELLY_FRACTION) || 0.5,        // Half-Kelly
-    maxFraction: parseFloat(process.env.KELLY_MAX_FRACTION) || 0.25, // 잔고 대비 최대 25%
-    minTrades: parseInt(process.env.KELLY_MIN_TRADES, 10) || 20,    // 학습 필요 최소 표본
-    defaultFraction: parseFloat(process.env.KELLY_DEFAULT_FRACTION) || 0.02, // 표본 부족 시 폴백 (2%)
+    maxFraction: parseFloat(process.env.KELLY_MAX_FRACTION) || 0.25, // 개별 포지션 상한 (잔고 대비 margin 기준)
+    minTrades: parseInt(process.env.KELLY_MIN_TRADES, 10) || 20,
+    defaultFraction: parseFloat(process.env.KELLY_DEFAULT_FRACTION) || 0.02, // 표본 부족 폴백
+    maxTotalExposure: parseFloat(process.env.KELLY_MAX_TOTAL_EXPOSURE) || 0.5, // 전 페어 합산 leveraged notional 상한 (잔고 대비)
   },
 
   // Multi-Timeframe (HTF → MTF → LTF)

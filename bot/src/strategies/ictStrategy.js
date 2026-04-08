@@ -61,8 +61,18 @@ class IctStrategy {
       if (htfBias.pdhl.pdlSweep) confluence.push(`PDL Sweep (${htfBias.pdhl.pdl.toFixed(2)})`);
     }
 
+    // HTF POI — 현재가가 HTF OB/FVG 내부 또는 ±0.3% 근접 시 가점
+    if (htfBias.activeOBs && htfBias.activeOBs.length > 0) {
+      const ob = htfBias.activeOBs[htfBias.activeOBs.length - 1];
+      confluence.push(`★ HTF OB 진입 [${ob.low.toFixed(2)}-${ob.high.toFixed(2)}]`);
+    }
+    if (htfBias.activeFVGs && htfBias.activeFVGs.length > 0) {
+      const fvg = htfBias.activeFVGs[htfBias.activeFVGs.length - 1];
+      confluence.push(`★ HTF FVG 진입 [${fvg.bottom.toFixed(2)}-${fvg.top.toFixed(2)}] CE:${fvg.ce.toFixed(2)}`);
+    }
+
     // ========== STEP 2: MTF (15m) 구조 확인 ==========
-    const mtfStructure = this._analyzeMTF(mtf, htfBias.direction);
+    const mtfStructure = this._analyzeMTF(mtf, htfBias.direction, htfBias);
     if (!mtfStructure.confirmed) {
       return { signal: null, reason: `MTF 구조 미확인: ${mtfStructure.reason}`, confluence };
     }
@@ -96,12 +106,17 @@ class IctStrategy {
   }
 
   /**
-   * HTF (4h): 방향 판단 + PDH/PDL
+   * HTF (4h): 방향 판단 + PDH/PDL + HTF POI (OB/FVG)
+   *
+   * ICT 탑다운 원칙: HTF POI가 가장 강하다.
+   *  - 방향에 맞고 현재가 기준 지지/저항 위치에 있는 OB/FVG를 모두 수집
+   *  - 현재가가 POI 내부 또는 ±0.3% 근접한 것(active)만 별도로 표시
    */
   _analyzeHTF(candles) {
     const swingHighs = indicators.findSwingHighs(candles, config.ict.structureShiftBars);
     const swingLows = indicators.findSwingLows(candles, config.ict.structureShiftBars);
     const pdhl = indicators.calculatePDHL(candles);
+    const currentPrice = candles[candles.length - 1].close;
 
     if (swingHighs.length < 2 || swingLows.length < 2) {
       return { direction: null, reason: 'HTF 스윙 포인트 부족' };
@@ -140,12 +155,53 @@ class IctStrategy {
       if (pdhl.pdhSweep) { direction = 'bearish'; reason = 'PDH Sweep 반전'; }
     }
 
+    // ===== HTF POI 탐색 (OB + FVG) =====
+    const htfPoiTolerance = 0.003; // ±0.3%
+    const orderBlocks = indicators.findOrderBlocks(candles);
+    const fvgs = indicators.findFairValueGaps(candles);
+
+    let relevantOBs = [];
+    let relevantFVGs = [];
+    let activeOBs = [];
+    let activeFVGs = [];
+
+    if (direction) {
+      const rawOBs = direction === 'bullish' ? orderBlocks.bullish : orderBlocks.bearish;
+      relevantOBs = rawOBs.filter((ob) => {
+        if (direction === 'bullish') return ob.high < currentPrice; // 지지 (아래)
+        return ob.low > currentPrice;                                // 저항 (위)
+      });
+
+      const rawFVGs = direction === 'bullish' ? fvgs.bullish : fvgs.bearish;
+      relevantFVGs = rawFVGs.filter((f) => {
+        if (f.isFilled) return false;
+        if (direction === 'bullish') return f.top <= currentPrice;
+        return f.bottom >= currentPrice;
+      });
+
+      // 현재가가 POI 내부 또는 ±0.3% 근접한 것 = "진입 중"
+      activeOBs = relevantOBs.filter(
+        (ob) =>
+          currentPrice >= ob.low * (1 - htfPoiTolerance) &&
+          currentPrice <= ob.high * (1 + htfPoiTolerance)
+      );
+      activeFVGs = relevantFVGs.filter(
+        (f) =>
+          currentPrice >= f.bottom * (1 - htfPoiTolerance) &&
+          currentPrice <= f.top * (1 + htfPoiTolerance)
+      );
+    }
+
     return {
       direction,
       reason: direction ? reason : '트렌드 불명확',
       swingHighs,
       swingLows,
       pdhl,
+      orderBlocks: relevantOBs,
+      fvgs: relevantFVGs,
+      activeOBs,
+      activeFVGs,
     };
   }
 
@@ -154,8 +210,10 @@ class IctStrategy {
    * HTF 방향에 맞고 현재가 기준 올바른 위치에 있는 OB/FVG만 사용
    *   - Bullish: 진입가보다 아래 (지지 역할)
    *   - Bearish: 진입가보다 위 (저항 역할)
+   *
+   * MTF POI가 HTF POI와 겹치면 ICT 탑다운 원칙상 훨씬 강한 셋업이므로 가점.
    */
-  _analyzeMTF(candles, htfDirection) {
+  _analyzeMTF(candles, htfDirection, htfBias) {
     const confluence = [];
     const currentPrice = candles[candles.length - 1].close;
     const swingHighs = indicators.findSwingHighs(candles, config.ict.structureShiftBars);
@@ -203,6 +261,35 @@ class IctStrategy {
     if (unfilled.length > 0) {
       const fvg = unfilled[unfilled.length - 1];
       confluence.push(`MTF FVG [${fvg.bottom.toFixed(2)}-${fvg.top.toFixed(2)}] CE:${fvg.ce.toFixed(2)}`);
+    }
+
+    // HTF POI와 겹침 검사 (ICT 탑다운 컨플루언스)
+    const rangesOverlap = (aLow, aHigh, bLow, bHigh) => aLow <= bHigh && aHigh >= bLow;
+
+    if (htfBias && htfBias.orderBlocks && htfBias.orderBlocks.length > 0 && relevantOBs.length > 0) {
+      outer: for (const mOB of relevantOBs) {
+        for (const hOB of htfBias.orderBlocks) {
+          if (rangesOverlap(mOB.low, mOB.high, hOB.low, hOB.high)) {
+            const lo = Math.max(mOB.low, hOB.low);
+            const hi = Math.min(mOB.high, hOB.high);
+            confluence.push(`★ HTF+MTF OB 겹침 [${lo.toFixed(2)}-${hi.toFixed(2)}]`);
+            break outer;
+          }
+        }
+      }
+    }
+
+    if (htfBias && htfBias.fvgs && htfBias.fvgs.length > 0 && unfilled.length > 0) {
+      outer: for (const mFVG of unfilled) {
+        for (const hFVG of htfBias.fvgs) {
+          if (rangesOverlap(mFVG.bottom, mFVG.top, hFVG.bottom, hFVG.top)) {
+            const lo = Math.max(mFVG.bottom, hFVG.bottom);
+            const hi = Math.min(mFVG.top, hFVG.top);
+            confluence.push(`★ HTF+MTF FVG 겹침 [${lo.toFixed(2)}-${hi.toFixed(2)}]`);
+            break outer;
+          }
+        }
+      }
     }
 
     const hasStructure = mssAligned || relevantOBs.length > 0;
@@ -327,26 +414,52 @@ class IctStrategy {
 
   /**
    * SL/TP 계산
-   * 방향에 맞지 않는 레벨(예: Long SL이 진입가 위)은 자동 폴백
+   *
+   * SL 후보 우선순위 (정통 ICT 탑다운):
+   *   1순위: HTF OB 경계 (최대 리스크 3% 이내일 때만)
+   *   2순위: MTF OB 경계
+   *   3순위: LTF 스윙 로우/하이
+   *   4순위: PDL/PDH
+   *   5순위: 고정 비율 폴백
+   *
+   * HTF OB는 멀어서 리스크가 maxRiskPct(3%)를 초과하면 안전장치로 MTF OB에 폴백.
    */
   _calculateSLTP(price, direction, mtfStructure, ltfEntry, htfBias) {
     let sl, tp;
     const slPct = config.stopLossPercent / 100;
+    const maxRiskPct = 0.03; // HTF OB SL 최대 허용 리스크 (3%)
 
     if (direction === 'bullish') {
       // Long: SL은 반드시 진입가보다 낮아야 함
       const candidates = [];
 
-      // 1순위: MTF OB 하단 (진입가보다 아래인 경우만)
-      for (let i = mtfStructure.orderBlocks.length - 1; i >= 0; i--) {
-        const ob = mtfStructure.orderBlocks[i];
-        if (ob.low < price) {
-          candidates.push(ob.low * (1 - slPct * 0.3));
-          break;
+      // 1순위: HTF OB 하단 (진입가보다 아래 + 리스크 ≤ 3%)
+      if (htfBias && htfBias.orderBlocks) {
+        for (let i = htfBias.orderBlocks.length - 1; i >= 0; i--) {
+          const ob = htfBias.orderBlocks[i];
+          if (ob.low < price) {
+            const candidate = ob.low * (1 - 0.001);
+            const risk = (price - candidate) / price;
+            if (risk <= maxRiskPct) {
+              candidates.push(candidate);
+              break;
+            }
+          }
         }
       }
 
-      // 2순위: LTF 스윙 로우 (진입가보다 아래)
+      // 2순위: MTF OB 하단 (진입가보다 아래인 경우만)
+      if (candidates.length === 0) {
+        for (let i = mtfStructure.orderBlocks.length - 1; i >= 0; i--) {
+          const ob = mtfStructure.orderBlocks[i];
+          if (ob.low < price) {
+            candidates.push(ob.low * (1 - slPct * 0.3));
+            break;
+          }
+        }
+      }
+
+      // 3순위: LTF 스윙 로우 (진입가보다 아래)
       if (candidates.length === 0 && ltfEntry.swingLows) {
         for (let i = ltfEntry.swingLows.length - 1; i >= 0; i--) {
           const slow = ltfEntry.swingLows[i].price;
@@ -357,7 +470,7 @@ class IctStrategy {
         }
       }
 
-      // 3순위: PDL (진입가보다 아래)
+      // 4순위: PDL (진입가보다 아래)
       if (candidates.length === 0 && htfBias.pdhl && htfBias.pdhl.pdl < price) {
         candidates.push(htfBias.pdhl.pdl * (1 - 0.001));
       }
@@ -378,16 +491,33 @@ class IctStrategy {
       // Short: SL은 반드시 진입가보다 높아야 함
       const candidates = [];
 
-      // 1순위: MTF OB 상단 (진입가보다 위인 경우만)
-      for (let i = mtfStructure.orderBlocks.length - 1; i >= 0; i--) {
-        const ob = mtfStructure.orderBlocks[i];
-        if (ob.high > price) {
-          candidates.push(ob.high * (1 + slPct * 0.3));
-          break;
+      // 1순위: HTF OB 상단 (진입가보다 위 + 리스크 ≤ 3%)
+      if (htfBias && htfBias.orderBlocks) {
+        for (let i = htfBias.orderBlocks.length - 1; i >= 0; i--) {
+          const ob = htfBias.orderBlocks[i];
+          if (ob.high > price) {
+            const candidate = ob.high * (1 + 0.001);
+            const risk = (candidate - price) / price;
+            if (risk <= maxRiskPct) {
+              candidates.push(candidate);
+              break;
+            }
+          }
         }
       }
 
-      // 2순위: LTF 스윙 하이 (진입가보다 위)
+      // 2순위: MTF OB 상단 (진입가보다 위인 경우만)
+      if (candidates.length === 0) {
+        for (let i = mtfStructure.orderBlocks.length - 1; i >= 0; i--) {
+          const ob = mtfStructure.orderBlocks[i];
+          if (ob.high > price) {
+            candidates.push(ob.high * (1 + slPct * 0.3));
+            break;
+          }
+        }
+      }
+
+      // 3순위: LTF 스윙 하이 (진입가보다 위)
       if (candidates.length === 0 && ltfEntry.swingHighs) {
         for (let i = ltfEntry.swingHighs.length - 1; i >= 0; i--) {
           const shigh = ltfEntry.swingHighs[i].price;
@@ -398,7 +528,7 @@ class IctStrategy {
         }
       }
 
-      // 3순위: PDH (진입가보다 위)
+      // 4순위: PDH (진입가보다 위)
       if (candidates.length === 0 && htfBias.pdhl && htfBias.pdhl.pdh > price) {
         candidates.push(htfBias.pdhl.pdh * (1 + 0.001));
       }

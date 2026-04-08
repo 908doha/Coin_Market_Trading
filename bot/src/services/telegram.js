@@ -214,6 +214,35 @@ class TelegramService {
           lines.push(`  PDH: ${pdhl.pdh.toFixed(2)} ${pdhl.pdhSweep ? '🔄 Sweep!' : ''}`);
           lines.push(`  PDL: ${pdhl.pdl.toFixed(2)} ${pdhl.pdlSweep ? '🔄 Sweep!' : ''}`);
         }
+
+        // HTF Order Block / FVG (탑다운 POI)
+        const htfOBs = indicators.findOrderBlocks(htfCandles);
+        lines.push(`  OB: Bull ${htfOBs.bullish.length}개 / Bear ${htfOBs.bearish.length}개`);
+
+        const htfFVGs = indicators.findFairValueGaps(htfCandles);
+        const htfBullUnfilled = htfFVGs.bullish.filter(f => !f.isFilled);
+        const htfBearUnfilled = htfFVGs.bearish.filter(f => !f.isFilled);
+        lines.push(`  FVG(미메움): Bull ${htfBullUnfilled.length}개 / Bear ${htfBearUnfilled.length}개`);
+        if (htfBullUnfilled.length > 0) {
+          const f = htfBullUnfilled[htfBullUnfilled.length - 1];
+          lines.push(`    └ CE: ${f.ce.toFixed(2)} (${f.fillPercent}% filled)`);
+        }
+        if (htfBearUnfilled.length > 0) {
+          const f = htfBearUnfilled[htfBearUnfilled.length - 1];
+          lines.push(`    └ CE: ${f.ce.toFixed(2)} (${f.fillPercent}% filled)`);
+        }
+
+        // 현재가가 HTF POI 내부 또는 ±0.3% 근접 여부 표시
+        const tol = 0.003;
+        const inHtfOB = [...htfOBs.bullish, ...htfOBs.bearish].some(
+          ob => currentPrice >= ob.low * (1 - tol) && currentPrice <= ob.high * (1 + tol)
+        );
+        const inHtfFVG = [...htfBullUnfilled, ...htfBearUnfilled].some(
+          f => currentPrice >= f.bottom * (1 - tol) && currentPrice <= f.top * (1 + tol)
+        );
+        if (inHtfOB || inHtfFVG) {
+          lines.push(`  ⭐ 현재가 HTF POI 진입 중${inHtfOB ? ' (OB)' : ''}${inHtfFVG ? ' (FVG)' : ''}`);
+        }
         lines.push('');
 
         // MTF

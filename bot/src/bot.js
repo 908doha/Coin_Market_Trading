@@ -25,7 +25,9 @@ class TradingBot {
     logger.info('Gate.io ICT Trading Bot 시작');
     logger.info(`거래쌍: ${config.tradePair}`);
     logger.info(`레버리지: x${config.leverage}`);
-    logger.info(`포지션 크기: ${config.positionSizeUsdt} USDT`);
+    logger.info(
+      `포지션 사이징: Kelly (Half=${config.kelly.fraction}, Max=${(config.kelly.maxFraction * 100).toFixed(0)}%, Default=${(config.kelly.defaultFraction * 100).toFixed(1)}%, MinTrades=${config.kelly.minTrades})`
+    );
     logger.info(`타임프레임: HTF=${config.timeframes.htf} MTF=${config.timeframes.mtf} LTF=${config.timeframes.ltf}`);
     logger.info(`스케줄: ${config.cronSchedule}`);
     logger.info('='.repeat(60));

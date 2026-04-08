@@ -8,7 +8,6 @@ const config = {
   // Trading
   tradePair: process.env.TRADE_PAIR || 'BTC_USDT',
   leverage: parseInt(process.env.LEVERAGE, 10) || 5,
-  positionSizeUsdt: parseFloat(process.env.POSITION_SIZE_USDT) || 100,
   maxPositions: parseInt(process.env.MAX_POSITIONS, 10) || 3,
 
   // Risk Management
@@ -16,11 +15,11 @@ const config = {
   takeProfitPercent: parseFloat(process.env.TAKE_PROFIT_PERCENT) || 4,
   maxDailyLossUsdt: parseFloat(process.env.MAX_DAILY_LOSS_USDT) || 300,
 
-  // Kelly Criterion (포지션 사이징)
+  // Kelly Criterion (포지션 사이징 - 항상 적용)
   //   f* = p - (1 - p) / R   (p: 승률, R: 평균손익비)
-  //   실제 사용 시 fractional Kelly 적용 + 상한 캡으로 변동성/추정오차 완충
+  //   fractional Kelly 적용 + 상한 캡으로 변동성/추정오차 완충
+  //   표본 부족 시 defaultFraction 으로 폴백 (잔고의 고정 비율)
   kelly: {
-    enabled: (process.env.KELLY_ENABLED || 'true') === 'true',
     fraction: parseFloat(process.env.KELLY_FRACTION) || 0.5,        // Half-Kelly
     maxFraction: parseFloat(process.env.KELLY_MAX_FRACTION) || 0.25, // 잔고 대비 최대 25%
     minTrades: parseInt(process.env.KELLY_MIN_TRADES, 10) || 20,    // 학습 필요 최소 표본

@@ -41,17 +41,16 @@ class OrderManager {
   }
 
   /**
-   * Kelly Criterion 기반 자본 대비 베팅 비율 계산
+   * Kelly Criterion 기반 자본 대비 베팅 비율 계산 (항상 적용)
    *   f* = p - (1 - p) / R
    *   - p : 승률
    *   - R : 평균 승리 / 평균 패배
    *   - fractional Kelly 적용 후 상한 캡, 음수면 0
    *   - 표본이 minTrades 미만이면 defaultFraction 사용
-   * @returns {number|null} 0 이상 maxFraction 이하의 비율 (Kelly 비활성화 시 null)
+   * @returns {number} 0 이상 maxFraction 이하의 비율
    */
   calculateKellyFraction() {
     const k = config.kelly;
-    if (!k.enabled) return null;
 
     const { wins, losses, totalWinUsdt, totalLossUsdt } = this.tradeStats;
     const total = wins + losses;
@@ -97,10 +96,7 @@ class OrderManager {
   }
 
   /**
-   * 포지션 수량 계산
-   *
-   * Kelly Criterion이 활성화되어 있으면 잔고 × kellyFraction 을 베팅 자본으로,
-   * 아니면 config.positionSizeUsdt 를 베팅 자본으로 사용한다.
+   * 포지션 수량 계산 (Kelly Criterion 기반, 항상 잔고 × f* 사용)
    */
   async calculatePositionSize(contract, price) {
     try {
@@ -108,25 +104,21 @@ class OrderManager {
       const multiplier = contractInfo.quantoMultiplier;
       const contractValue = Math.abs(multiplier) * price;
 
-      let notional = config.positionSizeUsdt;
       const kellyFrac = this.calculateKellyFraction();
-      if (kellyFrac !== null) {
-        try {
-          const balance = await gateClient.getBalance();
-          if (kellyFrac <= 0) {
-            logger.warn('Kelly 비율 0 - 최소 수량으로 폴백');
-            notional = 0;
-          } else {
-            notional = balance.total * kellyFrac;
-            const { wins, losses } = this.tradeStats;
-            logger.info(
-              `[Kelly] f*=${(kellyFrac * 100).toFixed(2)}% | 표본=${wins + losses} (W:${wins}/L:${losses}) | 베팅 자본=${notional.toFixed(2)} USDT`
-            );
-          }
-        } catch (err) {
-          logger.error(`Kelly용 잔고 조회 실패, 기본 사이즈 사용: ${err.message}`);
-        }
+      const balance = await gateClient.getBalance();
+
+      let notional;
+      if (kellyFrac <= 0) {
+        logger.warn('Kelly 비율 0 - defaultFraction 으로 폴백');
+        notional = balance.total * config.kelly.defaultFraction;
+      } else {
+        notional = balance.total * kellyFrac;
       }
+
+      const { wins, losses } = this.tradeStats;
+      logger.info(
+        `[Kelly] f*=${(kellyFrac * 100).toFixed(2)}% | 표본=${wins + losses} (W:${wins}/L:${losses}) | 잔고=${balance.total.toFixed(2)} USDT | 베팅=${notional.toFixed(2)} USDT`
+      );
 
       const size = Math.floor((notional * config.leverage) / contractValue);
       return Math.max(size, contractInfo.orderSizeMin || 1);
@@ -155,10 +147,10 @@ class OrderManager {
       return { executed: false, reason: '기존 포지션 보유 중' };
     }
 
-    // 잔고 확인
+    // 잔고 확인 (Kelly 사이징이 잔고 기반이므로 0보다 크기만 하면 진행)
     const balance = await gateClient.getBalance();
-    if (balance.available < config.positionSizeUsdt) {
-      logger.warn(`잔고 부족: ${balance.available.toFixed(2)} USDT`);
+    if (!balance || balance.available <= 0 || balance.total <= 0) {
+      logger.warn(`잔고 부족: available=${balance?.available ?? 0} total=${balance?.total ?? 0}`);
       return { executed: false, reason: '잔고 부족' };
     }
 

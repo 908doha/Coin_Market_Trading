@@ -184,15 +184,13 @@ export default function PositionDetail() {
                             <Text style={st.confluenceDot}>•</Text>
                             <Text style={st.confluenceText}>{c}</Text>
                           </View>
-                          ))}
-                        </View>
-                      )}
-                    </>
-                  ) : !signalLoading ? (
-                    <Text style={[st.summaryText, { color: colors.text.disabled }]}>
-                      봇이 실행 중이지 않거나 아직 분석 데이터가 없어요
-                    </Text>
-                  ) : null}
+                        ))}
+                      </View>
+                    )}
+                  </>
+                ) : !signalLoading ? (
+                  <Text style={st.summaryText}>{positionSummary}</Text>
+                ) : null}
               </GlassCard>
 
               {/* ── 손익 히어로 카드 ────────────────────── */}
@@ -241,7 +239,7 @@ export default function PositionDetail() {
                   <InfoRow label="목표가" value={fmt$(position.targetPrice!)} valueColor={colors.positive.text} isLast />
                 )}
                 {!position.stopLoss && !position.targetPrice && (
-                  <InfoRow label="계약 수" value={`${p.size ?? 1} 계약`} isLast />
+                  <InfoRow label={`${position.coin} 수량`} value={`${p.quantity ?? p.size ?? '-'} ${position.coin}`} isLast />
                 )}
               </GlassCard>
 
@@ -249,7 +247,7 @@ export default function PositionDetail() {
               <GlassCard intensity="medium" radius={24} padding={20} style={st.section}>
                 <Text style={st.sectionTitle}>포지션 정보</Text>
                 <InfoRow label="레버리지" value={`${position.leverage}x`} />
-                <InfoRow label="계약 수"  value={`${p.size ?? 1} 계약`} />
+                <InfoRow label={`${position.coin} 수량`} value={`${p.quantity ?? p.size ?? '-'} ${position.coin}`} />
                 <InfoRow label="보유 기간" value={position.holdingPeriod ?? '-'} isLast={!(position.riskLevel)} />
                 {position.riskLevel != null && (
                   <View style={st.riskWrap}>

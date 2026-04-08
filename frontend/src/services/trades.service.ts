@@ -24,6 +24,9 @@ const API_BASE =
     ? window.location.origin
     : process.env.EXPO_PUBLIC_APP_URL ?? '';
 
+// 거래 상세 조회용 인메모리 캐시 (id → Trade)
+const cache = new Map<string, Trade>();
+
 export const tradesService = {
   getByAccount: async (params: {
     exchange:  ExchangeType;
@@ -50,10 +53,28 @@ export const tradesService = {
           .catch(() => [] as Trade[]),
       ),
     );
-    return results.flat().sort((a, b) =>
+    const trades = results.flat().sort((a, b) =>
       new Date(b.exitAt).getTime() - new Date(a.exitAt).getTime(),
     );
+    // 캐시 저장
+    trades.forEach((t) => cache.set(t.id, t));
+    return trades;
   },
+
+  /** id로 단건 조회 — 캐시 우선, 없으면 전체 재조회 */
+  getById: async (
+    id: string,
+    accounts?: { id: string; exchange: ExchangeType; apiKey: string; apiSecret: string }[],
+  ): Promise<Trade | null> => {
+    if (cache.has(id)) return cache.get(id)!;
+    // 캐시 미스 → 계좌가 있으면 전체 재로드해서 채움
+    if (accounts?.length) {
+      await tradesService.getAllByAccounts(accounts);
+      return cache.get(id) ?? null;
+    }
+    return null;
+  },
+
   /** accountId → Trade[] 로 묶어서 반환 (에이전트별 통계 계산용) */
   getGroupedByAccount: async (
     accounts: { id: string; exchange: ExchangeType; apiKey: string; apiSecret: string }[],

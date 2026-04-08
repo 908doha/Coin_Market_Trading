@@ -31,6 +31,7 @@ interface Position {
   riskLevel:     1 | 2 | 3 | 4 | 5;
   liqPrice:      number;   // 청산가
   size:          number;   // 계약 수
+  quantity:      number;   // 실제 코인 수량 (BTC 등)
   usdtKrw:       number;
 }
 
@@ -137,6 +138,7 @@ async function fetchGatePositions(apiKey: string, apiSecret: string): Promise<Po
         riskLevel:    riskLevel as 1|2|3|4|5,
         liqPrice:     parseFloat(p.liq_price || '0'),
         size:         Math.abs(size),
+        quantity:     markPrice > 0 ? parseFloat((notionalUsdt / markPrice).toFixed(6)) : 0,
         usdtKrw,
       };
     });

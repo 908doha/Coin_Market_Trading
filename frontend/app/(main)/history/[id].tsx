@@ -8,10 +8,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
-import { Text, Card, Badge, Divider } from '@/design-system';
+import Svg, { Path } from 'react-native-svg';
+import { Text, Card, Badge, Divider, SubPageHeader, GlassCard } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
+import { useAccounts } from '@/store/accounts';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 
 function InfoRow({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
@@ -33,21 +35,16 @@ const rowStyles = StyleSheet.create({
 
 export default function TradeDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { accounts } = useAccounts();
   const { data: trade, isLoading, error } = useApi(
-    () => tradesService.getById(id),
+    () => tradesService.getById(id, accounts),
     [id],
   );
 
   if (isLoading) {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <View style={styles.navBar}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn}>
-            <Text variant="body1">←</Text>
-          </Pressable>
-          <Text variant="heading3">거래 상세</Text>
-          <View style={{ width: 40 }} />
-        </View>
+        <SubPageHeader title="거래 상세" onBack={() => router.back()} />
         <View style={styles.center}>
           <ActivityIndicator color={colors.primary.default} />
         </View>
@@ -58,13 +55,7 @@ export default function TradeDetail() {
   if (error || !trade) {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <View style={styles.navBar}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn}>
-            <Text variant="body1">←</Text>
-          </Pressable>
-          <Text variant="heading3">거래 상세</Text>
-          <View style={{ width: 40 }} />
-        </View>
+        <SubPageHeader title="거래 상세" onBack={() => router.back()} />
         <View style={styles.center}>
           <Text variant="body1" color={colors.text.tertiary}>거래 내역을 찾을 수 없어요</Text>
         </View>
@@ -76,14 +67,7 @@ export default function TradeDetail() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      {/* 헤더 */}
-      <View style={styles.navBar}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
-          <Text variant="body1">←</Text>
-        </Pressable>
-        <Text variant="heading3">거래 상세</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <SubPageHeader title="거래 상세" onBack={() => router.back()} />
 
       <ScrollView
         style={styles.scroll}

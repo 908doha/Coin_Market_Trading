@@ -299,7 +299,7 @@ const gateClient = {
 
   /**
    * Gate.io Price Triggered Order 생성
-   * 지정가(GTC) + reduceOnly 방식으로 포지션 청산 전용
+   * 트리거 발동 시 시장가로 청산 (reduceOnly)
    */
   async _createTriggerOrder(contract, size, triggerPrice, rule, orderType) {
     try {
@@ -308,8 +308,8 @@ const gateClient = {
       const initial = new GateApi.FuturesInitialOrder();
       initial.contract = contract;
       initial.size = size;                   // 청산 방향 (음수: 매도, 양수: 매수)
-      initial.price = triggerPrice.toString(); // 지정가
-      initial.tif = 'gtc';                   // Good Till Cancel
+      initial.price = '0';                   // 0 = 시장가 체결 (SL/TP는 확실한 체결 우선)
+      initial.tif = 'ioc';                   // market order는 IOC 필요
       initial.reduceOnly = true;             // 포지션 감소 전용
 
       const trigger = new GateApi.FuturesPriceTrigger();
@@ -317,6 +317,7 @@ const gateClient = {
       trigger.priceType = 1;                 // mark price
       trigger.price = triggerPrice.toString();
       trigger.rule = rule;                   // 1: >=, 2: <=
+      trigger.expiration = 0;                // 만료 없음
 
       order.initial = initial;
       order.trigger = trigger;
@@ -327,8 +328,10 @@ const gateClient = {
       return body;
     } catch (err) {
       logger.error(`조건부 주문 실패 [${orderType}]: ${err.message}`);
-      if (err.body) {
-        logger.error(`상세: ${JSON.stringify(err.body)}`);
+      // Gate.io SDK 에러 상세 최대한 노출
+      const detail = err.body || (err.response && err.response.body) || err.response || null;
+      if (detail) {
+        logger.error(`상세: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`);
       }
       throw err;
     }

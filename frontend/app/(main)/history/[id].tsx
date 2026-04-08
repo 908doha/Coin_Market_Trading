@@ -139,39 +139,6 @@ export default function TradeDetail() {
           <InfoRow label="보유기간" value={`${trade.holdingDays}일`} />
         </Card>
 
-        {/* ── 에이전트 판단 근거 ⭐️ ── */}
-        <Card variant="outlined" style={styles.section}>
-          <View style={styles.agentHeader}>
-            <Text style={{ fontSize: 20 }}>🤖</Text>
-            <Text variant="heading3">에이전트 판단 근거</Text>
-          </View>
-
-          {/* 진입 이유 */}
-          <View style={styles.block}>
-            <View style={styles.blockLabel}>
-              <View style={[styles.dot, { backgroundColor: colors.informative.default }]} />
-              <Text variant="label1Bold">진입 이유</Text>
-            </View>
-            <Text variant="body2" color={colors.text.secondary} style={{ lineHeight: 24 }}>
-              {trade.agentEntryReason}
-            </Text>
-          </View>
-
-          {/* 청산/손절 이유 */}
-          <View style={[styles.block, { marginTop: spacing[3] }]}>
-            <View style={styles.blockLabel}>
-              <View style={[styles.dot, {
-                backgroundColor: isProfit ? colors.positive.default : colors.negative.default,
-              }]} />
-              <Text variant="label1Bold">
-                {trade.type === 'stop_loss' ? '손절 이유' : '청산 이유'}
-              </Text>
-            </View>
-            <Text variant="body2" color={colors.text.secondary} style={{ lineHeight: 24 }}>
-              {trade.agentExitReason}
-            </Text>
-          </View>
-        </Card>
 
         <View style={{ height: spacing[10] }} />
       </ScrollView>

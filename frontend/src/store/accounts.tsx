@@ -76,8 +76,11 @@ async function backendLoad(): Promise<ExchangeAccount[] | null> {
     const res = await fetch('/api/user-accounts', {
       headers: { Authorization: `Bearer ${token}` },
     });
+    if (res.status === 204) {
+      console.warn('[accounts] backendLoad: DATABASE_URL 미설정 — Vercel 환경변수 확인 필요');
+      return null;
+    }
     console.log('[accounts] backendLoad status:', res.status);
-    if (res.status === 204) return null; // DATABASE_URL 미설정
     if (!res.ok) {
       const body = await res.text().catch(() => '');
       console.error('[accounts] backendLoad 실패:', res.status, body);
@@ -103,11 +106,13 @@ async function backendSave(accounts: ExchangeAccount[]): Promise<void> {
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body:    JSON.stringify(accounts),
     });
-    if (!res.ok) {
+    if (res.status === 204) {
+      console.warn('[accounts] backendSave: DATABASE_URL 미설정 — Vercel 환경변수 확인 필요');
+    } else if (!res.ok) {
       const body = await res.text().catch(() => '');
       console.error('[accounts] backendSave 실패:', res.status, body);
     } else {
-      console.log('[accounts] backendSave 성공 ✓');
+      console.log('[accounts] backendSave 성공 ✓', res.status);
     }
   } catch (e) {
     console.error('[accounts] backendSave 네트워크 오류:', e);

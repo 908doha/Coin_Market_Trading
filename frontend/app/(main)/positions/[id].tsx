@@ -257,26 +257,6 @@ export default function PositionDetail() {
                 )}
               </GlassCard>
 
-              {/* ── 에이전트 판단 근거 ───────────────────── */}
-              {position.agentReason && (
-                <GlassCard intensity="medium" radius={24} padding={20} style={st.section}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-                    <Text style={{ fontSize: 20 }}>🤖</Text>
-                    <Text style={st.sectionTitle}>에이전트 판단 근거</Text>
-                  </View>
-                  <View style={st.reasonBox}>
-                    <Text style={st.reasonLabel}>진입 이유</Text>
-                    <Text style={st.reasonText}>{position.agentReason}</Text>
-                  </View>
-                  {position.agentPlan && (
-                    <View style={[st.reasonBox, { marginTop: 10 }]}>
-                      <Text style={st.reasonLabel}>운용 계획</Text>
-                      <Text style={st.reasonText}>{position.agentPlan}</Text>
-                    </View>
-                  )}
-                </GlassCard>
-              )}
-
               <View style={{ height: 120 }} />
             </>
           )}

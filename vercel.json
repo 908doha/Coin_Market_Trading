@@ -2,7 +2,8 @@
   "buildCommand": "cd api && npm install && cd ../frontend && npm install --legacy-peer-deps && npx expo export -p web",
   "outputDirectory": "frontend/dist",
   "framework": null,
-  "rewrites": [
-    { "source": "/:path*", "destination": "/index.html" }
+  "routes": [
+    { "handle": "filesystem" },
+    { "src": "/(.*)", "dest": "/index.html" }
   ]
 }

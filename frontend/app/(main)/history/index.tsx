@@ -1,10 +1,14 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
-  View, StyleSheet, SectionList, Pressable, ActivityIndicator,
+  View, StyleSheet, SectionList, Pressable, ActivityIndicator, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Text, PageHeader, CurrencyToggle } from '@/design-system';
+import Animated, {
+  useSharedValue, useAnimatedStyle, withTiming, withSpring, Easing, runOnJS,
+} from 'react-native-reanimated';
+import Svg, { Path } from 'react-native-svg';
+import { Text, CurrencyToggle } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
@@ -13,7 +17,6 @@ import { formatKRWSigned, formatRate } from '@/utils/format';
 import type { Trade } from '@/services';
 
 // ── 유틸 ─────────────────────────────────────────────────────────────────────
-
 type Filter = '전체' | '수익' | '손실';
 
 function fmtDate(iso: string): string {
@@ -23,11 +26,16 @@ function fmtDate(iso: string): string {
   } catch { return '-'; }
 }
 
-function fmtLongDate(iso: string): string {
+function monthKey(iso: string): string {
   try {
     const d = new Date(iso);
-    return `${d.getFullYear()}년 ${d.getMonth() + 1}월`;
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   } catch { return ''; }
+}
+
+function monthLabel(key: string): string {
+  const [y, m] = key.split('-');
+  return `${y}년 ${parseInt(m, 10)}월`;
 }
 
 function fmtUsd(krw: number, rate: number): string {
@@ -36,71 +44,132 @@ function fmtUsd(krw: number, rate: number): string {
   return `${sign}$${Math.abs(usd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-// ── 거래 행 (토스 스타일) ─────────────────────────────────────────────────────
-function TradeRow({
-  trade, showDate, isLast, showUsd, rate,
-}: {
-  trade:   Trade;
-  showDate: boolean;
-  isLast:  boolean;
-  showUsd: boolean;
-  rate:    number;
-}) {
-  const isProfit   = trade.profit > 0;
-  const isLoss     = trade.profit < 0;
-  const pnlColor   = isProfit ? colors.market.rise : isLoss ? colors.market.fall : colors.text.tertiary;
+// ── 스태거 페이드인 ───────────────────────────────────────────────────────────
+function AnimatedRow({ index, children }: { index: number; children: React.ReactNode }) {
+  const opacity    = useSharedValue(0);
+  const translateY = useSharedValue(10);
 
-  // 상태 텍스트 & 색상
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      opacity.value    = withTiming(1, { duration: 280, easing: Easing.out(Easing.cubic) });
+      translateY.value = withSpring(0, { damping: 22, stiffness: 260 });
+    }, Math.min(index * 40, 500));
+    return () => clearTimeout(timer);
+  }, [index]);
+
+  const style = useAnimatedStyle(() => ({
+    opacity:   opacity.value,
+    transform: [{ translateY: translateY.value }],
+  }));
+
+  return <Animated.View style={style}>{children}</Animated.View>;
+}
+
+// ── 월 선택 칩 ────────────────────────────────────────────────────────────────
+function MonthSelector({
+  months, selected, onSelect,
+}: {
+  months:   string[];   // ['2026-04', '2026-03', ...]
+  selected: string | null;
+  onSelect: (m: string | null) => void;
+}) {
+  const scrollRef = useRef<ScrollView>(null);
+  return (
+    <ScrollView
+      ref={scrollRef}
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={ms.row}
+      style={ms.wrap}
+    >
+      {/* 전체 */}
+      <Pressable
+        style={[ms.chip, selected === null && ms.chipActive]}
+        onPress={() => onSelect(null)}
+      >
+        <Text style={[ms.chipText, selected === null && ms.chipTextActive]}>전체</Text>
+      </Pressable>
+
+      {months.map((m) => (
+        <Pressable
+          key={m}
+          style={[ms.chip, selected === m && ms.chipActive]}
+          onPress={() => onSelect(m)}
+        >
+          <Text style={[ms.chipText, selected === m && ms.chipTextActive]}>
+            {monthLabel(m)}
+          </Text>
+        </Pressable>
+      ))}
+    </ScrollView>
+  );
+}
+const ms = StyleSheet.create({
+  wrap: { backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
+  row:  { paddingHorizontal: 16, paddingVertical: 12, gap: 8, flexDirection: 'row' },
+  chip: {
+    paddingHorizontal: 14, paddingVertical: 7,
+    borderRadius: 20,
+    backgroundColor: '#F5F5F5',
+  },
+  chipActive:     { backgroundColor: '#191919' },
+  chipText:       { fontSize: 13, fontWeight: '600', color: '#555' },
+  chipTextActive: { color: '#FFFFFF' },
+});
+
+// ── 거래 행 ───────────────────────────────────────────────────────────────────
+function TradeRow({
+  trade, showDate, isLast, showUsd, rate, globalIndex,
+}: {
+  trade:       Trade;
+  showDate:    boolean;
+  isLast:      boolean;
+  showUsd:     boolean;
+  rate:        number;
+  globalIndex: number;
+}) {
+  const isProfit  = trade.profit > 0;
+  const isLoss    = trade.profit < 0;
+  const pnlColor  = isProfit ? colors.market.rise : isLoss ? colors.market.fall : colors.text.tertiary;
+
   const statusText =
     trade.direction === 'Long'
       ? isProfit ? '롱 익절 완료' : isLoss ? '롱 손절' : '롱 수동 청산'
       : isProfit ? '숏 익절 완료' : isLoss ? '숏 손절' : '숏 수동 청산';
 
   const statusColor = isProfit
-    ? colors.informative.text   // 파란색 (토스: 판매완료 = 파랑)
-    : isLoss
-      ? colors.negative.text    // 빨간색 (손절)
-      : colors.text.tertiary;   // 회색 (수동)
+    ? colors.informative.text
+    : isLoss ? colors.negative.text : colors.text.tertiary;
 
-  const amountText = showUsd
-    ? fmtUsd(trade.profit, rate)
-    : formatKRWSigned(trade.profit);
+  const amountText = showUsd ? fmtUsd(trade.profit, rate) : formatKRWSigned(trade.profit);
 
   return (
-    <Pressable
-      style={({ pressed }) => [tr.wrap, !isLast && tr.border, pressed && { backgroundColor: '#F8F8F8' }]}
-      onPress={() => router.push(`/(main)/history/${trade.id}`)}
-    >
-      {/* 날짜 — 같은 날의 첫 항목만 표시 */}
-      <Text style={tr.date}>{showDate ? fmtDate(trade.exitAt) : ''}</Text>
-
-      {/* 코인 이름 + 상태 */}
-      <View style={{ flex: 1, paddingRight: 12 }}>
-        <Text style={[tr.symbol, !isProfit && !isLoss && { color: colors.text.tertiary }]} numberOfLines={1}>
-          {trade.symbol}
-        </Text>
-        <Text style={[tr.status, { color: statusColor }]} numberOfLines={1}>
-          {statusText}
-        </Text>
-      </View>
-
-      {/* 손익 금액 */}
-      {trade.profit !== 0 && (
-        <View style={{ alignItems: 'flex-end' }}>
-          <Text style={[tr.amount, { color: pnlColor }]}>{amountText}</Text>
-          <Text style={[tr.rate, { color: pnlColor }]}>{formatRate(trade.profitRate)}</Text>
+    <AnimatedRow index={globalIndex}>
+      <Pressable
+        style={({ pressed }) => [tr.wrap, !isLast && tr.border, pressed && { backgroundColor: '#F8F8F8' }]}
+        onPress={() => router.push(`/(main)/history/${trade.id}`)}
+      >
+        <Text style={tr.date}>{showDate ? fmtDate(trade.exitAt) : ''}</Text>
+        <View style={{ flex: 1, paddingRight: 12 }}>
+          <Text style={[tr.symbol, !isProfit && !isLoss && { color: colors.text.tertiary }]} numberOfLines={1}>
+            {trade.symbol}
+          </Text>
+          <Text style={[tr.status, { color: statusColor }]} numberOfLines={1}>
+            {statusText}
+          </Text>
         </View>
-      )}
-    </Pressable>
+        {trade.profit !== 0 && (
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text style={[tr.amount, { color: pnlColor }]}>{amountText}</Text>
+            <Text style={[tr.rate, { color: pnlColor }]}>{formatRate(trade.profitRate)}</Text>
+          </View>
+        )}
+      </Pressable>
+    </AnimatedRow>
   );
 }
-
 const tr = StyleSheet.create({
-  wrap:   {
-    flexDirection: 'row', alignItems: 'center',
-    paddingVertical: 14, paddingHorizontal: 20,
-    backgroundColor: '#FFFFFF',
-  },
+  wrap:   { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 20, backgroundColor: '#FFFFFF' },
   border: { borderBottomWidth: 1, borderBottomColor: '#F2F2F2' },
   date:   { width: 34, fontSize: 13, color: colors.text.tertiary, lineHeight: 18 },
   symbol: { fontSize: 15, fontWeight: '700', color: colors.text.primary, lineHeight: 20 },
@@ -109,7 +178,7 @@ const tr = StyleSheet.create({
   rate:   { fontSize: 12, fontWeight: '600', marginTop: 2 },
 });
 
-// ── 섹션 헤더 (월 단위) ────────────────────────────────────────────────────────
+// ── 섹션 헤더 ─────────────────────────────────────────────────────────────────
 function SectionHeader({ title }: { title: string }) {
   return (
     <View style={sec.wrap}>
@@ -122,17 +191,14 @@ const sec = StyleSheet.create({
   text: { fontSize: 16, fontWeight: '700', color: colors.text.primary },
 });
 
-// ── 상단 통계 바 ──────────────────────────────────────────────────────────────
+// ── 통계 바 ───────────────────────────────────────────────────────────────────
 function StatsBar({ trades, showUsd, rate }: { trades: Trade[]; showUsd: boolean; rate: number }) {
   const total    = trades.length;
   const wins     = trades.filter((t) => t.profit > 0).length;
   const winRate  = total ? Math.round((wins / total) * 100) : 0;
   const totalPnl = trades.reduce((s, t) => s + t.profit, 0);
   const pnlColor = totalPnl >= 0 ? colors.market.rise : colors.market.fall;
-
-  const pnlText = showUsd
-    ? fmtUsd(totalPnl, rate)
-    : formatKRWSigned(totalPnl);
+  const pnlText  = showUsd ? fmtUsd(totalPnl, rate) : formatKRWSigned(totalPnl);
 
   return (
     <View style={sb.wrap}>
@@ -171,7 +237,7 @@ function FilterTabs({ filter, onChange }: { filter: Filter; onChange: (f: Filter
   return (
     <View style={tab.wrap}>
       {TABS.map((f) => (
-        <Pressable key={f} style={[tab.item, filter === f && tab.active]} onPress={() => onChange(f)}>
+        <Pressable key={f} style={tab.item} onPress={() => onChange(f)}>
           <Text style={[tab.text, filter === f && tab.activeText]}>{f}</Text>
           {filter === f && <View style={tab.indicator} />}
         </Pressable>
@@ -180,22 +246,20 @@ function FilterTabs({ filter, onChange }: { filter: Filter; onChange: (f: Filter
   );
 }
 const tab = StyleSheet.create({
-  wrap:        { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#F0F0F0', backgroundColor: '#FFFFFF' },
-  item:        { flex: 1, alignItems: 'center', paddingVertical: 13, position: 'relative' },
-  active:      {},
-  text:        { fontSize: 15, fontWeight: '500', color: colors.text.tertiary },
-  activeText:  { fontWeight: '700', color: colors.text.primary },
-  indicator:   {
-    position: 'absolute', bottom: 0, left: 16, right: 16,
-    height: 2, backgroundColor: colors.text.primary, borderRadius: 1,
-  },
+  wrap:       { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#F0F0F0', backgroundColor: '#FFFFFF' },
+  item:       { flex: 1, alignItems: 'center', paddingVertical: 13, position: 'relative' },
+  text:       { fontSize: 15, fontWeight: '500', color: colors.text.tertiary },
+  activeText: { fontWeight: '700', color: colors.text.primary },
+  indicator:  { position: 'absolute', bottom: 0, left: 16, right: 16, height: 2, backgroundColor: colors.text.primary, borderRadius: 1 },
 });
 
 // ── 메인 ─────────────────────────────────────────────────────────────────────
 export default function History() {
-  const [filter, setFilter]   = useState<Filter>('전체');
-  const [showUsd, setShowUsd] = useState(false);
-  const { accounts, totalBalance } = useAccounts();
+  const [filter, setFilter]               = useState<Filter>('전체');
+  const [showUsd, setShowUsd]             = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
+  const { accounts, totalBalance }        = useAccounts();
+  const listOpacity = useSharedValue(1);
 
   const rate = totalBalance?.usdtKrw ?? 1350;
 
@@ -204,26 +268,38 @@ export default function History() {
     [accounts],
   );
 
-  // 필터 적용
+  // 존재하는 월 목록 (최신순)
+  const availableMonths = useMemo(() => {
+    if (!trades) return [];
+    const set = new Set<string>();
+    for (const t of trades) {
+      const k = monthKey(t.exitAt);
+      if (k) set.add(k);
+    }
+    return Array.from(set).sort((a, b) => b.localeCompare(a));
+  }, [trades]);
+
+  // 월 + 수익/손실 필터 적용
   const filtered = useMemo(() => {
     if (!trades) return [];
-    if (filter === '수익') return trades.filter((t) => t.profit > 0);
-    if (filter === '손실') return trades.filter((t) => t.profit < 0);
-    return trades;
-  }, [trades, filter]);
+    let result = trades;
+    if (selectedMonth) result = result.filter((t) => monthKey(t.exitAt) === selectedMonth);
+    if (filter === '수익') result = result.filter((t) => t.profit > 0);
+    if (filter === '손실') result = result.filter((t) => t.profit < 0);
+    return result;
+  }, [trades, filter, selectedMonth]);
 
-  // 월별 섹션으로 그룹핑
+  // 월별 섹션 (월 선택 시 섹션 헤더 숨겨도 되지만 일관성 유지)
   const sections = useMemo(() => {
     const map = new Map<string, Trade[]>();
     for (const t of filtered) {
-      const key = fmtLongDate(t.exitAt);
+      const key = selectedMonth ? fmtDate(t.exitAt) : monthLabel(monthKey(t.exitAt));
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(t);
     }
     return Array.from(map.entries()).map(([title, data]) => ({ title, data }));
-  }, [filtered]);
+  }, [filtered, selectedMonth]);
 
-  // 같은 날 첫 번째 항목인지 계산
   const dateFirstSet = useMemo(() => {
     const seen = new Set<string>();
     const result = new Set<string>();
@@ -234,19 +310,58 @@ export default function History() {
     return result;
   }, [filtered]);
 
+  // 필터/월 변경 시 리스트 페이드
+  const listAnimStyle = useAnimatedStyle(() => ({ opacity: listOpacity.value }));
+
+  function switchFilter(fn: () => void) {
+    listOpacity.value = withTiming(0, { duration: 120 }, () => {
+      runOnJS(fn)();
+    });
+  }
+
+  useEffect(() => {
+    listOpacity.value = withTiming(1, { duration: 200, easing: Easing.out(Easing.cubic) });
+  }, [filter, selectedMonth]);
+
+  // 스태거용 글로벌 인덱스
+  const globalIndexMap = useMemo(() => {
+    const map = new Map<string, number>();
+    let i = 0;
+    for (const s of sections) {
+      for (const t of s.data) { map.set(t.id, i++); }
+    }
+    return map;
+  }, [sections]);
+
   return (
     <SafeAreaView style={st.safe} edges={['top']}>
-      <PageHeader
-        title="거래 내역"
-        rightElement={<CurrencyToggle showUsd={showUsd} onToggle={() => setShowUsd((v) => !v)} />}
-      />
 
-      {/* 필터 탭 */}
-      <FilterTabs filter={filter} onChange={setFilter} />
+      {/* ── 헤더 ── */}
+      <View style={st.header}>
+        <Pressable style={st.backBtn} onPress={() => router.back()} hitSlop={12}>
+          <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+            <Path d="M15 18l-6-6 6-6" stroke="#191919" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+          </Svg>
+        </Pressable>
+        <Text style={st.headerTitle}>거래 내역</Text>
+        <CurrencyToggle showUsd={showUsd} onToggle={() => setShowUsd((v) => !v)} />
+      </View>
 
-      {/* 통계 바 */}
-      {(trades?.length ?? 0) > 0 && (
-        <StatsBar trades={trades!} showUsd={showUsd} rate={rate} />
+      {/* ── 월 선택 ── */}
+      {(availableMonths.length > 0 || !isLoading) && (
+        <MonthSelector
+          months={availableMonths}
+          selected={selectedMonth}
+          onSelect={(m) => switchFilter(() => setSelectedMonth(m))}
+        />
+      )}
+
+      {/* ── 필터 탭 ── */}
+      <FilterTabs filter={filter} onChange={(f) => switchFilter(() => setFilter(f))} />
+
+      {/* ── 통계 바 ── */}
+      {filtered.length > 0 && (
+        <StatsBar trades={filtered} showUsd={showUsd} rate={rate} />
       )}
 
       {isLoading ? (
@@ -264,7 +379,9 @@ export default function History() {
       ) : !filtered.length ? (
         <View style={st.center}>
           <Text style={st.emptyText}>
-            {filter === '전체' ? '거래 내역이 없어요' : '해당하는 거래가 없어요'}
+            {selectedMonth
+              ? `${monthLabel(selectedMonth)} 거래 내역이 없어요`
+              : filter === '전체' ? '거래 내역이 없어요' : '해당하는 거래가 없어요'}
           </Text>
         </View>
       ) : (
@@ -283,6 +400,7 @@ export default function History() {
               isLast={index === section.data.length - 1}
               showUsd={showUsd}
               rate={rate}
+              globalIndex={globalIndexMap.get(item.id) ?? 0}
             />
           )}
           ListFooterComponent={<View style={{ height: 120 }} />}
@@ -293,7 +411,15 @@ export default function History() {
 }
 
 const st = StyleSheet.create({
-  safe:        { flex: 1, backgroundColor: '#FFFFFF' },
+  safe: { flex: 1, backgroundColor: '#FFFFFF' },
+
+  header: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 12, gap: 4,
+  },
+  backBtn:     { padding: 4, marginRight: 4 },
+  headerTitle: { flex: 1, fontSize: 18, fontWeight: '700', color: '#191919' },
+
   center:      { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
   loadingText: { fontSize: 14, color: colors.text.tertiary, marginTop: 8 },
   emptyText:   { fontSize: 15, color: colors.text.tertiary },

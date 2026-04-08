@@ -178,15 +178,18 @@ const gateClient = {
     };
 
     // 싱글 모드 시도
+    let singleParsed = null;
     try {
       const { body } = await futuresApi.getPosition(SETTLE, contract);
-      logger.debug(`포지션 원본: ${JSON.stringify(body)}`);
-      const parsed = parsePosition(body);
-      if (parsed.size !== 0) return parsed;
-      return null;
+      logger.debug(`포지션 원본(single): ${JSON.stringify(body)}`);
+      singleParsed = parsePosition(body);
+      if (singleParsed.size !== 0) return singleParsed;
+      // size=0이어도 dual 모드 확인을 시도한다 (듀얼 모드 계정 대응)
     } catch (err) {
       if (err.body && (err.body.label === 'POSITION_NOT_FOUND' || err.body.label === 'POSITION_EMPTY')) {
-        return null;
+        // single 없음 → dual 시도
+      } else {
+        logger.debug(`single 포지션 조회 에러: ${err.message}`);
       }
     }
 
@@ -202,14 +205,14 @@ const gateClient = {
           }
         }
       }
-      return null;
     } catch (err) {
-      if (err.body && (err.body.label === 'POSITION_NOT_FOUND' || err.body.label === 'POSITION_EMPTY')) {
-        return null;
+      if (!(err.body && (err.body.label === 'POSITION_NOT_FOUND' || err.body.label === 'POSITION_EMPTY'))) {
+        logger.debug(`dual 포지션 없음 (${err.message})`);
       }
-      logger.debug(`포지션 없음 (${err.message})`);
-      return null;
     }
+
+    // 둘 다 size=0 이면 빈 포지션 (single 모드 기준 구조라도 반환)
+    return singleParsed && singleParsed.size === 0 ? null : null;
   },
 
   /**

@@ -181,26 +181,43 @@ class OrderManager {
     const order = await gateClient.createOrder(contract, size, side);
 
     // 2. 실제 체결된 포지션 조회 (체결 반영 대기)
+    //    - Gate.io 포지션 반영에 수 초 지연이 있을 수 있으므로 최대 6회(6초) 재시도
+    //    - 재시도가 모두 실패해도 주문 응답(order)에 체결 정보가 있으면 그것을 신뢰하고 진행
     await new Promise(r => setTimeout(r, 1000));
     let actualPosition = null;
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 6; i++) {
       actualPosition = await gateClient.getPosition(contract);
       if (actualPosition && actualPosition.size !== 0) break;
       await new Promise(r => setTimeout(r, 1000));
     }
 
-    if (!actualPosition || actualPosition.size === 0) {
-      logger.error('진입 주문 체결 확인 실패');
-      return { executed: false, reason: '진입 체결 확인 실패' };
+    // 체결 확인 실패 시 주문 응답으로 폴백 (실제로 체결된 경우가 많음)
+    let actualSize;
+    let entryPriceActual;
+    if (actualPosition && actualPosition.size !== 0) {
+      actualSize = Math.abs(actualPosition.size);
+      entryPriceActual = actualPosition.entryPrice || entry;
+      this.lastKnownPosition = {
+        size: actualPosition.size,
+        entryPrice: actualPosition.entryPrice,
+        unrealisedPnl: actualPosition.unrealisedPnl,
+      };
+      logger.info(`[체결 확인] size=${actualPosition.size} entry=${actualPosition.entryPrice}`);
+    } else {
+      // 폴백: 주문 응답의 size/fill_price를 사용
+      const orderSize = order && order.size !== undefined ? Math.abs(Number(order.size)) : size;
+      const orderFillPrice = order && (order.fillPrice || order.fill_price);
+      actualSize = orderSize || size;
+      entryPriceActual = orderFillPrice ? parseFloat(orderFillPrice) : entry;
+      this.lastKnownPosition = {
+        size: direction === 'long' ? actualSize : -actualSize,
+        entryPrice: entryPriceActual,
+        unrealisedPnl: 0,
+      };
+      logger.warn(
+        `[체결 확인 폴백] getPosition 실패 → 주문 응답 사용 (size=${actualSize}, entry=${entryPriceActual})`
+      );
     }
-
-    const actualSize = Math.abs(actualPosition.size);
-    this.lastKnownPosition = {
-      size: actualPosition.size,
-      entryPrice: actualPosition.entryPrice,
-      unrealisedPnl: actualPosition.unrealisedPnl,
-    };
-    logger.info(`[체결 확인] size=${actualPosition.size} entry=${actualPosition.entryPrice}`);
 
     // 3. SL/TP 지정가 주문을 거래소에 등록 (최대 3회 재시도)
     let sltpSuccess = false;

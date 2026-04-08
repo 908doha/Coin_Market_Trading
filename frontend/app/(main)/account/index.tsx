@@ -1,198 +1,105 @@
 import React from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
+import { View, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Text, GlassCard, PressableScale, FadeTabView, AccountSkeleton, PageHeader, AssetCardSkeleton } from '@/design-system';
-import { accountService } from '@/services';
-import { useApi } from '@/hooks/useApi';
+import Svg, { Path } from 'react-native-svg';
+import { Text, FadeTabView } from '@/design-system';
 import { useAuth } from '@/store/auth';
-import { formatKRW } from '@/utils/format';
 
 export default function Account() {
-  const { user, logout }                             = useAuth();
-  const { data: balance, isLoading: balanceLoading } = useApi(() => accountService.getBalance(), []);
-
-  const isLoading = balanceLoading;
+  const { user, logout } = useAuth();
 
   return (
-    <FadeTabView style={styles.root}>
+    <FadeTabView style={st.root}>
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
-          <PageHeader title="계정" />
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
-          {isLoading ? (
-            <AccountSkeleton />
-          ) : (
-          <>
-          {/* 프로필 카드 */}
-          <GlassCard intensity="medium" radius={24} padding={20} style={styles.section}>
-            <View style={styles.profileRow}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>{user?.name?.[0]?.toUpperCase() ?? '?'}</Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.userName}>{user?.name ?? '-'}</Text>
-                <Text variant="meta" color="#AEAEB2">{user?.email ?? '-'}</Text>
-              </View>
+        {/* ── 헤더 ── */}
+        <View style={st.header}>
+          <Text style={st.headerTitle}>계정</Text>
+        </View>
+
+        <ScrollView showsVerticalScrollIndicator={false}>
+
+          {/* ── 프로필 행 ── */}
+          <View style={st.profileSection}>
+            <View style={st.avatar}>
+              <Text style={st.avatarText}>{user?.name?.[0]?.toUpperCase() ?? '?'}</Text>
             </View>
-          </GlassCard>
+            <View style={{ flex: 1 }}>
+              <Text style={st.userName}>{user?.name ?? '-'}</Text>
+              <Text style={st.userEmail}>{user?.email ?? '-'}</Text>
+            </View>
+          </View>
 
-          {/* 자산 카드 */}
-          <GlassCard intensity="medium" radius={24} style={styles.section}>
-            {balanceLoading ? (
-              <AssetCardSkeleton />
-            ) : (
-              <>
-                <Text variant="meta" color="#AEAEB2" style={{ marginBottom: 6 }}>총 자산</Text>
-                <Text style={styles.heroAmount}>{formatKRW(balance?.total ?? 0)}</Text>
-                {balance?.totalUsdt != null && (
-                  <Text variant="meta" color="#AEAEB2" style={{ marginTop: 4 }}>
-                    ≈ {balance.totalUsdt.toFixed(2)} USDT
-                  </Text>
-                )}
+          {/* ── 메뉴 ── */}
+          <View style={st.menuSection}>
+            <Pressable
+              style={({ pressed }) => [st.menuRow, pressed && { backgroundColor: '#F8F8F8' }]}
+              onPress={() => router.push('/(main)/account/api-accounts')}
+            >
+              <Text style={st.menuText}>계좌 연결</Text>
+              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                <Path d="M9 18l6-6-6-6" stroke="#C4C4C4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </Svg>
+            </Pressable>
+            <View style={st.menuDivider} />
+            <Pressable
+              style={({ pressed }) => [st.menuRow, pressed && { backgroundColor: '#F8F8F8' }]}
+              onPress={() => router.push('/(main)/account/notifications')}
+            >
+              <Text style={st.menuText}>알림 설정</Text>
+              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                <Path d="M9 18l6-6-6-6" stroke="#C4C4C4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </Svg>
+            </Pressable>
+          </View>
 
-                {/* 가용/투자중 */}
-                <View style={styles.balanceRow}>
-                  <View>
-                    <Text variant="meta" color="#AEAEB2">가용 자산</Text>
-                    <Text style={styles.statValue}>{formatKRW(balance?.available ?? 0)}</Text>
-                  </View>
-                  <View style={styles.balDivider} />
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <Text variant="meta" color="#AEAEB2">투자 중</Text>
-                    <Text style={styles.statValue}>{formatKRW(balance?.invested ?? 0)}</Text>
-                  </View>
-                </View>
-
-                {/* 충전/출금 버튼 */}
-                <View style={styles.fundBtns}>
-                  <PressableScale
-                    style={[styles.fundBtn, { backgroundColor: '#191919' }]}
-                    onPress={() => router.push('/(main)/account/deposit')}
-                  >
-                    <View style={styles.fundBtnInner}>
-                      <Text style={styles.fundBtnText}>충전하기</Text>
-                    </View>
-                  </PressableScale>
-                  <PressableScale
-                    style={[styles.fundBtn, { backgroundColor: '#F0F0F0' }]}
-                    onPress={() => router.push('/(main)/account/withdraw')}
-                  >
-                    <View style={styles.fundBtnInner}>
-                      <Text style={[styles.fundBtnText, { color: '#191919' }]}>출금하기</Text>
-                    </View>
-                  </PressableScale>
-                </View>
-              </>
-            )}
-          </GlassCard>
-
-          {/* 메뉴 */}
-          <GlassCard intensity="low" radius={24} padding={0} style={styles.section}>
-            <PressableScale onPress={() => router.push('/(main)/account/api-accounts')} scaleTo={0.98}>
-              <View style={styles.menuRow}>
-                <View style={styles.menuIcon}><Text style={{ fontSize: 18 }}>🔌</Text></View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.menuLabel}>계좌 연결</Text>
-                  <Text variant="meta" color="#AEAEB2">거래소 계좌 등록·관리</Text>
-                </View>
-                <Text style={styles.menuArrow}>›</Text>
-              </View>
-            </PressableScale>
-            <View style={styles.menuDivider} />
-            <PressableScale onPress={() => router.push('/(main)/account/transactions')} scaleTo={0.98}>
-              <View style={styles.menuRow}>
-                <View style={styles.menuIcon}><Text style={{ fontSize: 18 }}>📋</Text></View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.menuLabel}>입출금 내역</Text>
-                  <Text variant="meta" color="#AEAEB2">충전·출금 기록</Text>
-                </View>
-                <Text style={styles.menuArrow}>›</Text>
-              </View>
-            </PressableScale>
-            <View style={styles.menuDivider} />
-            <PressableScale onPress={() => router.push('/(main)/account/notifications')} scaleTo={0.98}>
-              <View style={styles.menuRow}>
-                <View style={styles.menuIcon}><Text style={{ fontSize: 18 }}>🔔</Text></View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.menuLabel}>알림 설정</Text>
-                  <Text variant="meta" color="#AEAEB2">거래 알림, 리포트</Text>
-                </View>
-                <Text style={styles.menuArrow}>›</Text>
-              </View>
-            </PressableScale>
-          </GlassCard>
-
-          {/* 로그아웃 */}
-          <GlassCard intensity="low" radius={24} padding={0} style={styles.section}>
-            <PressableScale scaleTo={0.98} onPress={async () => {
-              await logout();
-              router.replace('/(auth)/login');
-            }}>
-              <View style={styles.menuRow}>
-                <View style={styles.menuIcon}><Text style={{ fontSize: 18 }}>🚪</Text></View>
-                <Text style={[styles.menuLabel, { color: '#FF4747', flex: 1 }]}>로그아웃</Text>
-              </View>
-            </PressableScale>
-          </GlassCard>
+          {/* ── 로그아웃 ── */}
+          <View style={[st.menuSection, { marginTop: 8, borderTopWidth: 8, borderTopColor: '#F5F5F5' }]}>
+            <Pressable
+              style={({ pressed }) => [st.menuRow, pressed && { backgroundColor: '#FFF5F5' }]}
+              onPress={async () => {
+                await logout();
+                router.replace('/(auth)/login');
+              }}
+            >
+              <Text style={[st.menuText, { color: '#FF4747' }]}>로그아웃</Text>
+            </Pressable>
+          </View>
 
           <View style={{ height: 120 }} />
-          </>
-          )}
         </ScrollView>
       </SafeAreaView>
     </FadeTabView>
   );
 }
 
-const styles = StyleSheet.create({
-  root:    { flex: 1, backgroundColor: '#F5F5F5' },
-  content: { paddingHorizontal: 20 },
+const st = StyleSheet.create({
+  root: { flex: 1, backgroundColor: '#FFFFFF' },
 
-  section:     { marginBottom: 12 },
-  profileRow:  { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  header:      { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16 },
+  headerTitle: { fontSize: 24, fontWeight: '700', color: '#191919' },
+
+  profileSection: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    paddingHorizontal: 20, paddingVertical: 20,
+    borderTopWidth: 1, borderTopColor: '#F5F5F5',
+    borderBottomWidth: 1, borderBottomColor: '#F5F5F5',
+  },
   avatar: {
-    width: 52, height: 52, borderRadius: 26,
+    width: 48, height: 48, borderRadius: 24,
     backgroundColor: '#F0F0F0',
     alignItems: 'center', justifyContent: 'center',
   },
-  avatarText:  { fontSize: 22, fontWeight: '700', color: '#191919' },
-  userName:    { fontSize: 17, fontWeight: '700', color: '#191919' },
-  statusBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5,
-  },
-  statusDot:  { width: 6, height: 6, borderRadius: 3 },
+  avatarText: { fontSize: 20, fontWeight: '700', color: '#191919' },
+  userName:   { fontSize: 16, fontWeight: '700', color: '#191919' },
+  userEmail:  { fontSize: 13, color: '#AEAEB2', marginTop: 3 },
 
-  // 홈 히어로 카드와 동일한 스타일
-  heroAmount:  { fontSize: 26, fontWeight: '700', color: '#191919', letterSpacing: -0.5, marginTop: 8, marginBottom: 8 },
-  heroSubRow:  { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
-  heroPnl:     { fontSize: 15, fontWeight: '600' },
-  pnlBadge:    { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
-  pnlBadgeText: { fontSize: 13, fontWeight: '600' },
-
-  balanceRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#F0F0F0',
-  },
-  balDivider: { width: 1, height: 36, backgroundColor: '#F0F0F0' },
-  statValue:  { fontSize: 15, fontWeight: '700', color: '#191919', marginTop: 4 },
-
-  fundBtns:    { flexDirection: 'row', gap: 10, marginTop: 16 },
-  fundBtn:     { flex: 1, height: 46, borderRadius: 14, overflow: 'hidden' },
-  fundBtnInner: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  fundBtnText: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
-
+  menuSection: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8 },
   menuRow: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingVertical: 16, paddingHorizontal: 18, gap: 14,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: 20,
   },
-  menuIcon: {
-    width: 40, height: 40, borderRadius: 12,
-    backgroundColor: '#F0F0F0',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  menuLabel:   { fontSize: 15, fontWeight: '600', color: '#191919' },
-  menuArrow:   { fontSize: 20, color: '#C4C4C4', lineHeight: 24 },
-  menuDivider: { height: 1, backgroundColor: '#F5F5F5', marginHorizontal: 18 },
+  menuText:    { fontSize: 17, fontWeight: '600', color: '#191919' },
+  menuDivider: { height: 1, backgroundColor: '#F5F5F5' },
 });

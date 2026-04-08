@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
 import {
-  View, StyleSheet, ScrollView, Pressable, Modal,
+  View, StyleSheet, ScrollView, Pressable, Modal, LayoutAnimation, Platform, UIManager,
 } from 'react-native';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Animated, {
@@ -269,6 +273,7 @@ const pr = StyleSheet.create({
 export default function Trading() {
   const [showSheet, setShowSheet]           = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  const [posExpanded, setPosExpanded]       = useState(true);
   const { accounts, balances, totalBalance, balancesLoading } = useAccounts();
 
   const selectedAccounts = selectedAccountId
@@ -293,9 +298,6 @@ export default function Trading() {
 
   const krwAvail = displayBalance?.available ?? 0;
   const usdTotal = displayBalance?.totalUsd  ?? 0;
-  const isProfit = (displayBalance?.profitTotal ?? 0) >= 0;
-  const pnlColor = isProfit ? colors.market.rise : colors.market.fall;
-
   const posCount = positions?.length ?? 0;
 
   return (
@@ -304,15 +306,7 @@ export default function Trading() {
 
         {/* ── 헤더 ── */}
         <View style={st.header}>
-          <View>
-            <Text style={st.headerTitle}>트레이딩</Text>
-            {(displayBalance?.profitTotal ?? 0) !== 0 && (
-              <Text style={[st.headerSub, { color: pnlColor }]}>
-                {formatKRWSigned(displayBalance?.profitTotal ?? 0)}
-                {'  '}{formatRate(displayBalance?.profitRate ?? 0)}
-              </Text>
-            )}
-          </View>
+          <Text style={st.headerTitle}>트레이딩</Text>
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false}>
@@ -355,50 +349,59 @@ export default function Trading() {
             </View>
           </View>
 
-          {/* ── 메뉴 리스트 ── */}
+          {/* ── 메뉴: 거래 내역 ── */}
           <View style={st.menuSection}>
-            {[
-              {
-                label: '포지션 현황',
-                onPress: () => {},
-                right: posCount > 0 ? (
+            <Pressable
+              style={({ pressed }) => [st.menuRow, pressed && { backgroundColor: '#F8F8F8' }]}
+              onPress={() => router.push('/(main)/history')}
+            >
+              <Text style={st.menuText}>거래 내역</Text>
+              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                <Path d="M9 18l6-6-6-6" stroke="#C4C4C4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </Svg>
+            </Pressable>
+          </View>
+
+          {/* ── 포지션 현황 (접기/펼치기) ── */}
+          <View style={st.posSection}>
+            <Pressable
+              style={st.posSectionHeader}
+              onPress={() => {
+                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                setPosExpanded((v) => !v);
+              }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={st.posSectionTitle}>포지션 현황</Text>
+                {posCount > 0 && (
                   <View style={st.menuBadge}>
                     <Text style={st.menuBadgeText}>{posCount}</Text>
                   </View>
-                ) : null,
-              },
-              { label: '거래 내역',   onPress: () => router.push('/(main)/history'), right: null },
-            ].map((item, i, arr) => (
-              <React.Fragment key={item.label}>
-                <Pressable
-                  style={({ pressed }) => [st.menuRow, pressed && { backgroundColor: '#F8F8F8' }]}
-                  onPress={item.onPress}
-                >
-                  <Text style={st.menuText}>{item.label}</Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    {item.right}
-                    <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                      <Path d="M9 18l6-6-6-6" stroke="#C4C4C4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                    </Svg>
-                  </View>
-                </Pressable>
-                {i < arr.length - 1 && <View style={st.menuDivider} />}
-              </React.Fragment>
-            ))}
-          </View>
-
-          {/* ── 활성 포지션 ── */}
-          {(positions?.length ?? 0) > 0 && (
-            <View style={st.posSection}>
-              <View style={st.posSectionHeader}>
-                <Text style={st.posSectionTitle}>활성 포지션</Text>
-                <Text style={st.posSectionCount}>{positions!.length}개</Text>
+                )}
               </View>
-              {positions!.map((pos, i) => (
-                <PositionRow key={pos.id} pos={pos} isLast={i === positions!.length - 1} />
-              ))}
-            </View>
-          )}
+              <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+                <Path
+                  d={posExpanded ? 'M18 15l-6-6-6 6' : 'M6 9l6 6 6-6'}
+                  stroke="#AEAEB2"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </Svg>
+            </Pressable>
+
+            {posExpanded && (
+              positions && positions.length > 0 ? (
+                positions.map((pos, i) => (
+                  <PositionRow key={pos.id} pos={pos} isLast={i === positions.length - 1} />
+                ))
+              ) : (
+                <View style={st.emptyPos}>
+                  <Text style={st.emptyPosText}>활성 포지션이 없어요</Text>
+                </View>
+              )
+            )}
+          </View>
 
           <View style={{ height: 120 }} />
         </ScrollView>
@@ -420,9 +423,8 @@ export default function Trading() {
 
 const st = StyleSheet.create({
   // 헤더
-  header:      { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 16 },
+  header:      { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16 },
   headerTitle: { fontSize: 24, fontWeight: '700', color: '#191919' },
-  headerSub:   { fontSize: 14, fontWeight: '600', marginTop: 4 },
 
   // 계좌 선택 행
   accountRow:   { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingVertical: 14, borderTopWidth: 1, borderTopColor: '#F5F5F5' },
@@ -448,8 +450,12 @@ const st = StyleSheet.create({
   menuBadgeText: { fontSize: 11, fontWeight: '700', color: '#FFFFFF' },
 
   // 포지션 섹션
-  posSection:       { marginTop: 8, borderTopWidth: 8, borderTopColor: '#F5F5F5' },
-  posSectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16 },
-  posSectionTitle:  { fontSize: 16, fontWeight: '700', color: '#191919' },
-  posSectionCount:  { fontSize: 14, color: colors.text.tertiary },
+  posSection:       { borderTopWidth: 8, borderTopColor: '#F5F5F5' },
+  posSectionHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingVertical: 18,
+  },
+  posSectionTitle:  { fontSize: 17, fontWeight: '700', color: '#191919' },
+  emptyPos:         { paddingHorizontal: 20, paddingVertical: 28, alignItems: 'center' },
+  emptyPosText:     { fontSize: 14, color: colors.text.tertiary },
 });

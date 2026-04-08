@@ -123,6 +123,8 @@ async function fetchGateTrades(apiKey: string, apiSecret: string): Promise<Trade
       holdingDays: 0,
       entryAt:    exitAt,
       exitAt,
+      entryPrice,
+      exitPrice:  fillPrice > 0 ? fillPrice : entryPrice,
     };
   });
 }

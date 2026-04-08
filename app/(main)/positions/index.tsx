@@ -3,7 +3,7 @@ import { View, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Animated, {
-  useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing,
+  useSharedValue, useAnimatedStyle, withTiming, withSpring, runOnJS, Easing,
 } from 'react-native-reanimated';
 import {
   Text, GlassCard, Chip, PressableScale, FadeTabView, TradingListSkeleton, PageHeader, CurrencyToggle,
@@ -60,6 +60,27 @@ function PortfolioSummary({ positions, showUsd, rate }: { positions: Position[];
       </View>
     </GlassCard>
   );
+}
+
+// ─────────────────────────────────────────────
+//  Animated list item (stagger entrance)
+// ─────────────────────────────────────────────
+function AnimatedRow({ index, children }: { index: number; children: React.ReactNode }) {
+  const opacity    = useSharedValue(0);
+  const translateY = useSharedValue(16);
+  React.useEffect(() => {
+    const delay = index * 60;
+    const timer = setTimeout(() => {
+      opacity.value    = withTiming(1, { duration: 300, easing: Easing.out(Easing.cubic) });
+      translateY.value = withSpring(0, { damping: 20, stiffness: 220 });
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [index]);
+  const style = useAnimatedStyle(() => ({
+    opacity:   opacity.value,
+    transform: [{ translateY: translateY.value }],
+  }));
+  return <Animated.View style={style}>{children}</Animated.View>;
 }
 
 // ─────────────────────────────────────────────
@@ -221,7 +242,9 @@ function HistoryContent({ trades, showUsd, rate }: { trades: Trade[] | null; sho
         ) : (
           <GlassCard intensity="medium" radius={20} padding={0} style={{ overflow: 'hidden' }}>
             {filtered.map((trade, i) => (
-              <TradeRow key={trade.id} trade={trade} isLast={i === filtered.length - 1} showUsd={showUsd} rate={rate} />
+              <AnimatedRow key={trade.id} index={i}>
+                <TradeRow trade={trade} isLast={i === filtered.length - 1} showUsd={showUsd} rate={rate} />
+              </AnimatedRow>
             ))}
           </GlassCard>
         )}
@@ -233,6 +256,36 @@ function HistoryContent({ trades, showUsd, rate }: { trades: Trade[] | null; sho
 // ─────────────────────────────────────────────
 //  Account Selector
 // ─────────────────────────────────────────────
+function AccountChip({
+  label, selected, color, dotColor, onPress,
+}: {
+  label: string; selected: boolean; color?: string; dotColor?: string; onPress: () => void;
+}) {
+  const scale = useSharedValue(1);
+  const chipStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  return (
+    <Pressable
+      onPressIn={() => { scale.value = withSpring(0.94, { damping: 20, stiffness: 400 }); }}
+      onPressOut={() => { scale.value = withSpring(1,    { damping: 20, stiffness: 400 }); }}
+      onPress={onPress}
+    >
+      <Animated.View style={[
+        styles.accountChip,
+        chipStyle,
+        selected && (color
+          ? { backgroundColor: color + '18', borderColor: color }
+          : styles.accountChipActive),
+      ]}>
+        {dotColor && <View style={[styles.accountDot, { backgroundColor: dotColor }]} />}
+        <Text style={[styles.accountChipText, selected && (color ? { color } : styles.accountChipTextActive)]}
+          numberOfLines={1}>
+          {label}
+        </Text>
+      </Animated.View>
+    </Pressable>
+  );
+}
+
 function AccountSelector({
   selectedId,
   onSelect,
@@ -250,40 +303,21 @@ function AccountSelector({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.accountScrollContent}
       >
-        {/* 모든 계좌 */}
-        <Pressable
-          style={[styles.accountChip, selectedId === null && styles.accountChipActive]}
+        <AccountChip
+          label="모든 계좌"
+          selected={selectedId === null}
           onPress={() => onSelect(null)}
-        >
-          <Text style={[styles.accountChipText, selectedId === null && styles.accountChipTextActive]}>
-            모든 계좌
-          </Text>
-        </Pressable>
-
-        {accounts.map((acc) => {
-          const selected = selectedId === acc.id;
-          const color    = EXCHANGE_COLORS[acc.exchange];
-          return (
-            <Pressable
-              key={acc.id}
-              style={[
-                styles.accountChip,
-                selected
-                  ? { backgroundColor: color + '18', borderColor: color }
-                  : {},
-              ]}
-              onPress={() => onSelect(acc.id)}
-            >
-              <View style={[styles.accountDot, { backgroundColor: color }]} />
-              <Text
-                style={[styles.accountChipText, selected && { color }]}
-                numberOfLines={1}
-              >
-                {acc.name || EXCHANGE_LABELS[acc.exchange]}
-              </Text>
-            </Pressable>
-          );
-        })}
+        />
+        {accounts.map((acc) => (
+          <AccountChip
+            key={acc.id}
+            label={acc.name || EXCHANGE_LABELS[acc.exchange]}
+            selected={selectedId === acc.id}
+            color={EXCHANGE_COLORS[acc.exchange]}
+            dotColor={EXCHANGE_COLORS[acc.exchange]}
+            onPress={() => onSelect(acc.id)}
+          />
+        ))}
       </ScrollView>
     </View>
   );
@@ -394,7 +428,9 @@ export default function Trading() {
                   <PortfolioSummary positions={filteredPositions} showUsd={showUsd} rate={rate} />
                   <GlassCard intensity="medium" radius={20} padding={0} style={{ overflow: 'hidden' }}>
                     {filteredPositions.map((pos, i) => (
-                      <PositionCard key={pos.id} pos={pos} isLast={i === filteredPositions.length - 1} showUsd={showUsd} rate={rate} />
+                      <AnimatedRow key={pos.id} index={i}>
+                        <PositionCard pos={pos} isLast={i === filteredPositions.length - 1} showUsd={showUsd} rate={rate} />
+                      </AnimatedRow>
                     ))}
                   </GlassCard>
                 </>

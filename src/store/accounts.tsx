@@ -1,8 +1,8 @@
 /**
  * Exchange Accounts Store
- * - localStorage를 주 저장소로 사용 (즉시 작동)
- * - 백엔드 /exchange-accounts/ 가 있으면 자동 동기화
- * - 백엔드 없어도 정상 동작
+ * - localStorage / SecureStore 를 즉시 캐시로 사용
+ * - /api/user-accounts (Railway PostgreSQL) 와 자동 동기화
+ * - DB 없어도 로컬 스토리지만으로 정상 동작
  */
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
@@ -25,19 +25,25 @@ export interface ExchangeAccount {
 }
 
 const STORAGE_KEY = 'exchange_accounts_v1';
+const TOKEN_KEY   = 'jwt_access';
+
+// ── 토큰 읽기 ─────────────────────────────────────────────────────────────────
+async function getToken(): Promise<string | null> {
+  if (Platform.OS === 'web') return localStorage.getItem(TOKEN_KEY);
+  return SecureStore.getItemAsync(TOKEN_KEY);
+}
 
 // ── 로컬 저장소 ───────────────────────────────────────────────────────────────
-
 async function localLoad(): Promise<ExchangeAccount[]> {
   try {
     const raw = Platform.OS === 'web'
       ? localStorage.getItem(STORAGE_KEY)
       : await SecureStore.getItemAsync(STORAGE_KEY);
     const result = raw ? (JSON.parse(raw) as ExchangeAccount[]) : [];
-    console.log(`[accounts] loaded ${result.length} accounts`);
+    console.log(`[accounts] local: ${result.length}개 로드`);
     return result;
   } catch (e) {
-    console.error('[accounts] load error:', e);
+    console.error('[accounts] localLoad 오류:', e);
     return [];
   }
 }
@@ -46,12 +52,43 @@ async function localSave(accounts: ExchangeAccount[]): Promise<void> {
   const raw = JSON.stringify(accounts);
   if (Platform.OS === 'web') {
     localStorage.setItem(STORAGE_KEY, raw);
-    const check = localStorage.getItem(STORAGE_KEY);
-    if (!check) throw new Error('localStorage 저장 실패 — 브라우저가 저장을 차단했을 수 있어요');
   } else {
     await SecureStore.setItemAsync(STORAGE_KEY, raw);
   }
-  console.log(`[accounts] saved ${accounts.length} accounts`);
+}
+
+// ── 백엔드 동기화 ─────────────────────────────────────────────────────────────
+async function backendLoad(): Promise<ExchangeAccount[] | null> {
+  try {
+    const token = await getToken();
+    if (!token) return null;
+    const res = await fetch('/api/user-accounts', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status === 204) return null;  // DB 미설정
+    if (!res.ok) return null;
+    const data = await res.json();
+    return Array.isArray(data) ? data : null;
+  } catch (e) {
+    console.warn('[accounts] backendLoad 실패:', e);
+    return null;
+  }
+}
+
+async function backendSave(accounts: ExchangeAccount[]): Promise<void> {
+  try {
+    const token = await getToken();
+    if (!token) return;
+    const res = await fetch('/api/user-accounts', {
+      method:  'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body:    JSON.stringify(accounts),
+    });
+    if (!res.ok) console.warn('[accounts] backendSave 실패:', res.status);
+    else console.log(`[accounts] backend: ${accounts.length}개 저장`);
+  } catch (e) {
+    console.warn('[accounts] backendSave 오류:', e);
+  }
 }
 
 function makeId(): string {
@@ -103,15 +140,31 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
   const accountsRef = useRef(accounts);
   accountsRef.current = accounts;
 
-  // 앱 시작 시 로컬에서 로드
+  // ── 시작 시: 로컬 즉시 로드 → 백엔드 동기화 ──────────────────────────────────
   useEffect(() => {
-    localLoad().then((data) => {
-      setAccounts(data);
+    (async () => {
+      // 1) 로컬 즉시 로드 (빠름)
+      const local = await localLoad();
+      setAccounts(local);
       setIsLoading(false);
-    });
+
+      // 2) 백엔드에서 최신 데이터 가져오기
+      const remote = await backendLoad();
+
+      if (remote !== null && remote.length > 0) {
+        // 백엔드에 데이터 있음 → 백엔드 우선
+        await localSave(remote);
+        setAccounts(remote);
+        console.log(`[accounts] 백엔드 동기화: ${remote.length}개`);
+      } else if (remote !== null && remote.length === 0 && local.length > 0) {
+        // 백엔드 비어있고 로컬에 데이터 있음 → 로컬 → 백엔드 업로드
+        await backendSave(local);
+        console.log('[accounts] 로컬 데이터 백엔드 업로드');
+      }
+    })();
   }, []);
 
-  // 잔고 자동 fetch
+  // ── 잔고 자동 fetch ───────────────────────────────────────────────────────────
   const refreshBalances = useCallback(async () => {
     const list = accountsRef.current;
     if (!list.length) return;
@@ -126,9 +179,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
           });
           return { id: acc.id, bal, err: null };
         } catch (e: any) {
-          const msg = e?.message ?? '잔고 조회 실패';
-          console.error(`[balance:${acc.id}]`, msg);
-          return { id: acc.id, bal: null, err: msg };
+          return { id: acc.id, bal: null, err: e?.message ?? '잔고 조회 실패' };
         }
       }),
     );
@@ -148,7 +199,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     ? sumBalances(accounts.map((a) => balances[a.id] ?? null))
     : null;
 
-  // ── CRUD — 로컬 우선 저장 ────────────────────────────────────────────────────
+  // ── CRUD ─────────────────────────────────────────────────────────────────────
 
   const addAccount = useCallback(async (
     input: Omit<ExchangeAccount, 'id' | 'createdAt'>,
@@ -159,8 +210,9 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
       createdAt: new Date().toISOString(),
     };
     const next = [...accountsRef.current, account];
-    await localSave(next);   // 먼저 로컬 저장
+    await localSave(next);
     setAccounts(next);
+    backendSave(next);  // fire-and-forget
     return account;
   }, []);
 
@@ -171,6 +223,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     const next = accountsRef.current.map((a) => a.id === id ? { ...a, ...updates } : a);
     await localSave(next);
     setAccounts(next);
+    backendSave(next);
   }, []);
 
   const removeAccount = useCallback(async (id: string): Promise<void> => {
@@ -178,6 +231,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     await localSave(next);
     setAccounts(next);
     setBalances((prev) => { const n = { ...prev }; delete n[id]; return n; });
+    backendSave(next);
   }, []);
 
   return (

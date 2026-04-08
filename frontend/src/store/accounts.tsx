@@ -1,8 +1,8 @@
 /**
  * Exchange Accounts Store
- * - localStorage를 주 저장소로 사용 (즉시 작동)
- * - 백엔드 /exchange-accounts/ 가 있으면 자동 동기화
- * - 백엔드 없어도 정상 동작
+ * - localStorage를 주 저장소로 사용 (즉시 작동, 오프라인 지원)
+ * - 로그인 상태일 때 /api/user-accounts 와 자동 동기화 (기기 간 유지)
+ * - 백엔드 없어도 localStorage로 정상 동작
  */
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
@@ -25,6 +25,7 @@ export interface ExchangeAccount {
 }
 
 const STORAGE_KEY = 'exchange_accounts_v1';
+const TOKEN_KEY   = 'jwt_access';
 
 // ── 로컬 저장소 ───────────────────────────────────────────────────────────────
 
@@ -34,7 +35,7 @@ async function localLoad(): Promise<ExchangeAccount[]> {
       ? localStorage.getItem(STORAGE_KEY)
       : await SecureStore.getItemAsync(STORAGE_KEY);
     const result = raw ? (JSON.parse(raw) as ExchangeAccount[]) : [];
-    console.log(`[accounts] loaded ${result.length} accounts`);
+    console.log(`[accounts] loaded ${result.length} accounts from local`);
     return result;
   } catch (e) {
     console.error('[accounts] load error:', e);
@@ -51,11 +52,44 @@ async function localSave(accounts: ExchangeAccount[]): Promise<void> {
   } else {
     await SecureStore.setItemAsync(STORAGE_KEY, raw);
   }
-  console.log(`[accounts] saved ${accounts.length} accounts`);
+  console.log(`[accounts] saved ${accounts.length} accounts to local`);
 }
 
 function makeId(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+// ── 백엔드 동기화 ─────────────────────────────────────────────────────────────
+
+function getToken(): string | null {
+  if (Platform.OS !== 'web') return null;
+  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
+}
+
+async function backendLoad(): Promise<ExchangeAccount[] | null> {
+  const token = getToken();
+  if (!token) return null;
+  try {
+    const res = await fetch('/api/user-accounts', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status === 204) return null; // Supabase 미설정
+    if (!res.ok) return null;
+    const data = await res.json();
+    return Array.isArray(data) ? data : null;
+  } catch { return null; }
+}
+
+async function backendSave(accounts: ExchangeAccount[]): Promise<void> {
+  const token = getToken();
+  if (!token) return;
+  try {
+    await fetch('/api/user-accounts', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body:    JSON.stringify(accounts),
+    });
+  } catch { /* best-effort */ }
 }
 
 // ── Context ───────────────────────────────────────────────────────────────────
@@ -103,12 +137,27 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
   const accountsRef = useRef(accounts);
   accountsRef.current = accounts;
 
-  // 앱 시작 시 로컬에서 로드
+  // 앱 시작: 로컬 → 백엔드 순서로 로드
   useEffect(() => {
-    localLoad().then((data) => {
-      setAccounts(data);
+    (async () => {
+      // ① 로컬 즉시 로드 (빠름)
+      const local = await localLoad();
+      setAccounts(local);
       setIsLoading(false);
-    });
+
+      // ② 백엔드에서 최신 데이터 가져오기 (기기 간 동기화)
+      const remote = await backendLoad();
+      if (remote && remote.length > 0) {
+        // 원격 데이터를 로컬보다 우선시 (서버가 source-of-truth)
+        setAccounts(remote);
+        await localSave(remote);
+        console.log(`[accounts] synced ${remote.length} accounts from backend`);
+      } else if (local.length > 0 && remote !== null) {
+        // 서버에 없고 로컬에 있을 때 → 서버로 업로드
+        await backendSave(local);
+        console.log('[accounts] uploaded local accounts to backend');
+      }
+    })();
   }, []);
 
   // 잔고 자동 fetch
@@ -148,7 +197,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     ? sumBalances(accounts.map((a) => balances[a.id] ?? null))
     : null;
 
-  // ── CRUD — 로컬 우선 저장 ────────────────────────────────────────────────────
+  // ── CRUD — 로컬 우선, 백엔드 background sync ─────────────────────────────────
 
   const addAccount = useCallback(async (
     input: Omit<ExchangeAccount, 'id' | 'createdAt'>,
@@ -159,8 +208,9 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
       createdAt: new Date().toISOString(),
     };
     const next = [...accountsRef.current, account];
-    await localSave(next);   // 먼저 로컬 저장
+    await localSave(next);
     setAccounts(next);
+    backendSave(next);   // background
     return account;
   }, []);
 
@@ -171,6 +221,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     const next = accountsRef.current.map((a) => a.id === id ? { ...a, ...updates } : a);
     await localSave(next);
     setAccounts(next);
+    backendSave(next);   // background
   }, []);
 
   const removeAccount = useCallback(async (id: string): Promise<void> => {
@@ -178,6 +229,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     await localSave(next);
     setAccounts(next);
     setBalances((prev) => { const n = { ...prev }; delete n[id]; return n; });
+    backendSave(next);   // background
   }, []);
 
   return (

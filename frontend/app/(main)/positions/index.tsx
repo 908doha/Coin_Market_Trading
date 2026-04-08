@@ -1,500 +1,470 @@
-import React, { useState, useCallback } from 'react';
-import { View, StyleSheet, ScrollView, Pressable } from 'react-native';
+import React, { useState } from 'react';
+import {
+  View, StyleSheet, ScrollView, Pressable, Modal,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Animated, {
-  useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easing,
+  useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS,
 } from 'react-native-reanimated';
-import {
-  Text, GlassCard, Chip, PressableScale, FadeTabView, TradingListSkeleton, PageHeader, CurrencyToggle,
-} from '@/design-system';
-import { positionsService, tradesService } from '@/services';
+import Svg, { Path, Polygon, Rect, Text as SvgText, Circle } from 'react-native-svg';
+import { Text, FadeTabView, PressableScale } from '@/design-system';
+import { colors } from '@/design-system/tokens';
+import { positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
-import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS } from '@/store/accounts';
-import type { Trade, Position } from '@/services';
+import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType, ExchangeAccount } from '@/store/accounts';
+import type { Balance } from '@/services/account.service';
 
-type MainTab      = 'positions' | 'history';
-type HistoryFilter = '전체' | '수익' | '손실';
-const HISTORY_FILTERS: HistoryFilter[] = ['전체', '수익', '손실'];
-
-const EASE_OUT = Easing.out(Easing.cubic);
-
-// ─────────────────────────────────────────────
-//  Portfolio Summary Card
-// ─────────────────────────────────────────────
-function fmtAmt(krw: number, showUsd: boolean, rate: number) {
-  if (!showUsd) return formatKRW(krw);
-  return `$${(krw / rate).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-function fmtSigned(krw: number, showUsd: boolean, rate: number) {
-  if (!showUsd) return formatKRWSigned(krw);
-  const usd  = krw / rate;
-  const sign = usd >= 0 ? '+' : '';
-  return `${sign}$${Math.abs(usd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function PortfolioSummary({ positions, showUsd, rate }: { positions: Position[]; showUsd: boolean; rate: number }) {
-  const totalInvested   = positions.reduce((s, p) => s + p.amount, 0);
-  const totalProfit     = positions.reduce((s, p) => s + p.profit, 0);
-  const totalProfitRate = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
-  const pnlColor = totalProfit > 0 ? '#FF4747' : totalProfit < 0 ? '#246CF9' : '#AEAEB2';
-
-  return (
-    <GlassCard intensity="medium" radius={20} padding={24} style={styles.mb12}>
-      <View style={styles.summaryRow}>
-        <View style={{ flex: 1 }}>
-          <Text variant="meta" color="#AEAEB2" style={styles.mb6}>총 투자금</Text>
-          <Text style={styles.summaryMain}>{fmtAmt(totalInvested, showUsd, rate)}</Text>
-        </View>
-        <View style={styles.summaryDivider} />
-        <View style={{ flex: 1, alignItems: 'flex-end' }}>
-          <Text variant="meta" color="#AEAEB2" style={styles.mb6}>평가 손익</Text>
-          <Text style={[styles.summaryMain, { color: pnlColor }]}>
-            {fmtSigned(totalProfit, showUsd, rate)}
-          </Text>
-          <Text style={[styles.summaryRate, { color: pnlColor }]}>
-            {totalProfitRate >= 0 ? '+' : ''}{totalProfitRate.toFixed(2)}%
-          </Text>
-        </View>
+// ── 거래소 로고 ───────────────────────────────────────────────────────────────
+function ExchangeLogo({ exchange, size = 40 }: { exchange: ExchangeType; size?: number }) {
+  const s = size;
+  const color = EXCHANGE_COLORS[exchange];
+  if (exchange === 'gate') {
+    return (
+      <View style={{ width: s, height: s, borderRadius: s / 2, backgroundColor: '#2354E6', alignItems: 'center', justifyContent: 'center' }}>
+        <Svg width={s} height={s} viewBox="0 0 48 48">
+          <Path d="M36 22 L24 22 L24 27 L31 27 Q30 33 24 33 Q17 33 17 24 Q17 15 24 15 Q29 15 31 19 L37 17 Q33 9 24 9 Q13 9 13 24 Q13 39 24 39 Q35 39 36 28 Z" fill="white" />
+        </Svg>
       </View>
-    </GlassCard>
-  );
-}
-
-// ─────────────────────────────────────────────
-//  Position Card Row
-// ─────────────────────────────────────────────
-function PositionCard({ pos, isLast, showUsd, rate }: { pos: Position; isLast: boolean; showUsd: boolean; rate: number }) {
-  const up = pos.profit >= 0;
-  return (
-    <PressableScale onPress={() => router.push(`/(main)/positions/${pos.id}`)} scaleTo={0.98}>
-      <View style={[card.row, !isLast && card.rowBorder]}>
-        <View style={card.icon}>
-          <Text style={card.iconText}>{pos.coin.slice(0, 2)}</Text>
-        </View>
-        <View style={{ flex: 1 }}>
-          <View style={card.symbolRow}>
-            <Text style={card.symbol}>{pos.symbol}</Text>
-            <View style={[card.badge, { backgroundColor: pos.direction === 'Long' ? '#F0F0F0' : '#FFF0F0' }]}>
-              <Text style={[card.badgeText, { color: pos.direction === 'Long' ? '#555555' : '#D93025' }]}>
-                {pos.direction === 'Long' ? '롱' : '숏'}
-              </Text>
-            </View>
-          </View>
-          <Text variant="meta" color="#AEAEB2" style={{ marginTop: 3 }}>
-            {fmtAmt(pos.amount, showUsd, rate)}
-          </Text>
-        </View>
-        <View style={{ alignItems: 'flex-end' }}>
-          <Text style={[card.profit, { color: up ? '#FF4747' : '#246CF9' }]}>
-            {fmtSigned(pos.profit, showUsd, rate)}
-          </Text>
-          <Text style={[card.rate, { color: up ? '#FF4747' : '#246CF9' }]}>
-            {formatRate(pos.profitRate)}
-          </Text>
-        </View>
+    );
+  }
+  if (exchange === 'binance') {
+    return (
+      <View style={{ width: s, height: s, borderRadius: s / 2, backgroundColor: '#F0B90B', alignItems: 'center', justifyContent: 'center' }}>
+        <Svg width={s} height={s} viewBox="0 0 48 48">
+          <Polygon points="24,18 30,24 24,30 18,24" fill="white" />
+          <Polygon points="24,7 28,11 24,15 20,11" fill="white" />
+          <Polygon points="24,33 28,37 24,41 20,37" fill="white" />
+          <Polygon points="7,24 11,20 15,24 11,28" fill="white" />
+          <Polygon points="41,24 37,20 33,24 37,28" fill="white" />
+        </Svg>
       </View>
-      {pos.agentReason ? (
-        <View style={card.hint}>
-          <Text variant="meta" color="#AEAEB2" numberOfLines={1}>🤖 {pos.agentReason}</Text>
-        </View>
-      ) : null}
-    </PressableScale>
-  );
-}
-
-// ─────────────────────────────────────────────
-//  Trade History Row
-// ─────────────────────────────────────────────
-function TradeRow({ trade, isLast, showUsd, rate }: { trade: Trade; isLast: boolean; showUsd: boolean; rate: number }) {
-  const up      = trade.profit >= 0;
-  const dateStr = (() => {
-    const d = new Date(trade.exitAt);
-    if (isNaN(d.getTime())) return trade.exitAt?.slice(5, 10)?.replace('-', '.') ?? '';
-    return `${d.getMonth() + 1}.${String(d.getDate()).padStart(2, '0')}`;
-  })();
-  const typeLabel = trade.type === 'stop_loss' ? '손절' : (trade.direction === 'Long' ? '롱 청산' : '숏 청산');
-
-  return (
-    <PressableScale onPress={() => router.push(`/(main)/history/${trade.id}`)} scaleTo={0.98}>
-      <View style={[hist.row, !isLast && hist.rowBorder]}>
-        <Text style={hist.date}>{dateStr}</Text>
-        <View style={{ flex: 1 }}>
-          <Text style={hist.symbol}>{trade.symbol}</Text>
-          <Text variant="meta" color="#AEAEB2" style={{ marginTop: 3 }}>
-            {typeLabel} · {trade.holdingDays}일
-          </Text>
-        </View>
-        <View style={{ alignItems: 'flex-end' }}>
-          <Text style={[hist.amount, { color: up ? '#FF4747' : '#246CF9' }]}>
-            {fmtSigned(trade.profit, showUsd, rate)}
-          </Text>
-          <Text style={[hist.rate, { color: up ? '#FF4747' : '#246CF9' }]}>
-            {formatRate(trade.profitRate)}
-          </Text>
-        </View>
+    );
+  }
+  if (exchange === 'upbit') {
+    return (
+      <View style={{ width: s, height: s, borderRadius: s / 2, backgroundColor: '#0062FF', alignItems: 'center', justifyContent: 'center' }}>
+        <Svg width={s} height={s} viewBox="0 0 48 48">
+          <Path d="M15 12 L15 30 Q15 38 24 38 Q33 38 33 30 L33 12" stroke="white" strokeWidth="5" fill="none" strokeLinecap="round" />
+        </Svg>
       </View>
-    </PressableScale>
-  );
-}
-
-// ─────────────────────────────────────────────
-//  History Tab Content (with filter animation)
-// ─────────────────────────────────────────────
-function HistoryContent({ trades, showUsd, rate }: { trades: Trade[] | null; showUsd: boolean; rate: number }) {
-  const [filter, setFilter] = useState<HistoryFilter>('전체');
-
-  const listOpacity    = useSharedValue(1);
-  const listTranslateY = useSharedValue(0);
-
-  const animateFilterChange = (newFilter: HistoryFilter) => {
-    if (newFilter === filter) return;
-    // Fade out
-    listOpacity.value    = withTiming(0, { duration: 100, easing: Easing.in(Easing.ease) }, () => {
-      runOnJS(setFilter)(newFilter);
-      listTranslateY.value = 10;
-      // Fade in
-      listOpacity.value    = withTiming(1, { duration: 200, easing: EASE_OUT });
-      listTranslateY.value = withTiming(0, { duration: 200, easing: EASE_OUT });
-    });
-  };
-
-  const listAnimStyle = useAnimatedStyle(() => ({
-    opacity:   listOpacity.value,
-    transform: [{ translateY: listTranslateY.value }],
-  }));
-
-  const list     = trades ?? [];
-  const filtered = list.filter((t) =>
-    filter === '수익' ? t.profit >= 0 : filter === '손실' ? t.profit < 0 : true
-  );
-  const wins    = list.filter((t) => t.profit >= 0).length;
-  const total   = list.reduce((s, t) => s + t.profit, 0);
-  const winRate = list.length ? Math.round((wins / list.length) * 100) : 0;
-
-  const winRateColor = !list.length ? '#AEAEB2' : winRate >= 50 ? '#FF4747' : '#246CF9';
-  const totalColor   = !list.length ? '#AEAEB2' : total > 0 ? '#FF4747' : total < 0 ? '#246CF9' : '#AEAEB2';
-
-  const stats = [
-    { label: '총 거래', value: `${list.length}건`,        color: '#191919'    },
-    { label: '승률',    value: `${winRate}%`,              color: winRateColor },
-    { label: '총 손익', value: fmtSigned(total, showUsd, rate), color: totalColor },
-  ];
-
+    );
+  }
   return (
-    <>
-      {/* ── Summary ── */}
-      <GlassCard intensity="medium" radius={20} padding={24} style={styles.mb14}>
-        <View style={styles.statsRow}>
-          {stats.map((s, i) => (
-            <React.Fragment key={s.label}>
-              {i > 0 && <View style={styles.statsDivider} />}
-              <View style={{ flex: 1, alignItems: 'center' }}>
-                <Text variant="meta" color="#AEAEB2" style={styles.mb6}>{s.label}</Text>
-                <Text style={[styles.statsValue, { color: s.color }]}>{s.value}</Text>
-              </View>
-            </React.Fragment>
-          ))}
-        </View>
-      </GlassCard>
-
-      {/* ── Filter Chips ── */}
-      <View style={styles.filterRow}>
-        {HISTORY_FILTERS.map((f) => (
-          <Chip
-            key={f}
-            label={f}
-            size="md"
-            selected={filter === f}
-            onPress={() => animateFilterChange(f)}
-          />
-        ))}
-      </View>
-
-      {/* ── List (animated) ── */}
-      <Animated.View style={listAnimStyle}>
-        {filtered.length === 0 ? (
-          <GlassCard intensity="low" radius={20} padding={40} style={{ alignItems: 'center' }}>
-            <Text variant="body2" color="#AEAEB2">해당하는 거래 내역이 없어요</Text>
-          </GlassCard>
-        ) : (
-          <GlassCard intensity="medium" radius={20} padding={0} style={{ overflow: 'hidden' }}>
-            {filtered.map((trade, i) => (
-              <TradeRow key={trade.id} trade={trade} isLast={i === filtered.length - 1} showUsd={showUsd} rate={rate} />
-            ))}
-          </GlassCard>
-        )}
-      </Animated.View>
-    </>
-  );
-}
-
-// ─────────────────────────────────────────────
-//  Account Selector
-// ─────────────────────────────────────────────
-function AccountSelector({
-  selectedId,
-  onSelect,
-}: {
-  selectedId: string | null;
-  onSelect: (id: string | null) => void;
-}) {
-  const { accounts } = useAccounts();
-  if (!accounts.length) return null;
-
-  return (
-    <View style={styles.accountSelectorWrap}>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.accountScrollContent}
-      >
-        {/* 모든 계좌 */}
-        <Pressable
-          style={[styles.accountChip, selectedId === null && styles.accountChipActive]}
-          onPress={() => onSelect(null)}
-        >
-          <Text style={[styles.accountChipText, selectedId === null && styles.accountChipTextActive]}>
-            모든 계좌
-          </Text>
-        </Pressable>
-
-        {accounts.map((acc) => {
-          const selected = selectedId === acc.id;
-          const color    = EXCHANGE_COLORS[acc.exchange];
-          return (
-            <Pressable
-              key={acc.id}
-              style={[
-                styles.accountChip,
-                selected
-                  ? { backgroundColor: color + '18', borderColor: color }
-                  : {},
-              ]}
-              onPress={() => onSelect(acc.id)}
-            >
-              <View style={[styles.accountDot, { backgroundColor: color }]} />
-              <Text
-                style={[styles.accountChipText, selected && { color }]}
-                numberOfLines={1}
-              >
-                {acc.name || EXCHANGE_LABELS[acc.exchange]}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
+    <View style={{ width: s, height: s, borderRadius: s / 2, backgroundColor: color + '25', alignItems: 'center', justifyContent: 'center' }}>
+      <Svg width={s} height={s} viewBox="0 0 48 48">
+        <SvgText x="24" y="30" textAnchor="middle" fontSize="14" fontWeight="800" fill={color}>
+          {EXCHANGE_LABELS[exchange].slice(0, 2).toUpperCase()}
+        </SvgText>
+      </Svg>
     </View>
   );
 }
 
-// ─────────────────────────────────────────────
-//  Main Screen
-// ─────────────────────────────────────────────
-export default function Trading() {
-  const [tab, setTab]               = useState<MainTab>('positions');
-  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
-  const [showUsd, setShowUsd]       = useState(false);
-  const { accounts, totalBalance }  = useAccounts();
-  const rate = totalBalance?.usdtKrw ?? 1350;
+// ── 계좌 선택 바텀시트 (토스 스타일) ──────────────────────────────────────────
+function AccountBottomSheet({
+  visible, selectedId, onSelect, onClose,
+  accounts, balances, totalBalance,
+}: {
+  visible:      boolean;
+  selectedId:   string | null;
+  onSelect:     (id: string | null) => void;
+  onClose:      () => void;
+  accounts:     ExchangeAccount[];
+  balances:     Record<string, Balance | null>;
+  totalBalance: Balance | null;
+}) {
+  const translateY = useSharedValue(600);
+  const [mounted, setMounted] = React.useState(false);
 
-  // 선택된 계좌 (null = 전체)
+  React.useEffect(() => {
+    if (visible) {
+      setMounted(true);
+      translateY.value = withSpring(0, { damping: 28, stiffness: 300, mass: 0.9 });
+    } else {
+      translateY.value = withTiming(600, { duration: 260 }, () => runOnJS(setMounted)(false));
+    }
+  }, [visible]);
+
+  const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: translateY.value }] }));
+  if (!mounted) return null;
+
+  const totalKrw = totalBalance?.total ?? 0;
+
+  return (
+    <Modal visible transparent animationType="none" onRequestClose={onClose}>
+      <Pressable style={bs.overlay} onPress={onClose}>
+        <Animated.View style={[bs.sheet, sheetStyle]}>
+          <Pressable>
+            {/* 핸들 */}
+            <View style={bs.handle} />
+
+            {/* 헤더 */}
+            <View style={bs.header}>
+              <Text style={bs.title}>계좌 선택</Text>
+              <Pressable style={bs.closeBtn} onPress={onClose} hitSlop={12}>
+                <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+                  <Path d="M18 6L6 18M6 6l12 12" stroke="#AEAEB2" strokeWidth="2.2" strokeLinecap="round" />
+                </Svg>
+              </Pressable>
+            </View>
+
+            {/* 내 계좌 헤더 */}
+            <View style={bs.sectionRow}>
+              <Text style={bs.sectionLabel}>내 계좌</Text>
+              <Pressable style={bs.totalRow} onPress={() => { onClose(); router.push('/(main)/account/api-accounts'); }}>
+                <Text style={bs.totalText}>총 자산 {formatKRW(totalKrw)}</Text>
+                <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
+                  <Path d="M9 18l6-6-6-6" stroke="#AEAEB2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </Svg>
+              </Pressable>
+            </View>
+
+            {/* 모든 계좌 행 */}
+            <Pressable
+              style={({ pressed }) => [bs.accRow, pressed && { backgroundColor: '#F8F8F8' }]}
+              onPress={() => { onSelect(null); onClose(); }}
+            >
+              <View style={bs.accIcon}>
+                <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+                  <Rect x="3" y="6" width="18" height="13" rx="2" stroke="#555" strokeWidth="1.8" />
+                  <Path d="M3 10h18" stroke="#555" strokeWidth="1.8" strokeLinecap="round" />
+                </Svg>
+              </View>
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={bs.accName}>모든 계좌</Text>
+                <Text style={bs.accBalance}>{formatKRW(totalKrw)}</Text>
+              </View>
+              {selectedId === null && (
+                <View style={bs.checkCircle}>
+                  <Svg width={22} height={22} viewBox="0 0 24 24">
+                    <Circle cx="12" cy="12" r="12" fill="#246CF9" />
+                    <Path d="M7 12.5l3.5 3.5 6.5-7" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                  </Svg>
+                </View>
+              )}
+            </Pressable>
+
+            {/* 개별 계좌들 */}
+            {accounts.map((acc) => {
+              const bal = balances[acc.id];
+              const isSelected = selectedId === acc.id;
+              return (
+                <Pressable
+                  key={acc.id}
+                  style={({ pressed }) => [bs.accRow, pressed && { backgroundColor: '#F8F8F8' }]}
+                  onPress={() => { onSelect(acc.id); onClose(); }}
+                >
+                  <ExchangeLogo exchange={acc.exchange} size={40} />
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={bs.accName}>{acc.name || EXCHANGE_LABELS[acc.exchange]}</Text>
+                    <Text style={bs.accBalance}>
+                      {bal ? formatKRW(bal.total) : '—'}
+                    </Text>
+                  </View>
+                  {isSelected && (
+                    <View style={bs.checkCircle}>
+                      <Svg width={22} height={22} viewBox="0 0 24 24">
+                        <Circle cx="12" cy="12" r="12" fill="#246CF9" />
+                        <Path d="M7 12.5l3.5 3.5 6.5-7" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                      </Svg>
+                    </View>
+                  )}
+                </Pressable>
+              );
+            })}
+
+            {/* 구분선 + 계좌 추가 */}
+            <View style={bs.divider} />
+            <Pressable
+              style={({ pressed }) => [bs.addRow, pressed && { backgroundColor: '#F8F8F8' }]}
+              onPress={() => { onClose(); router.push('/(main)/account/add-api'); }}
+            >
+              <View style={bs.addIcon}>
+                <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+                  <Path d="M12 5v14M5 12h14" stroke="#555" strokeWidth="2.2" strokeLinecap="round" />
+                </Svg>
+              </View>
+              <Text style={bs.addText}>API 연결하기</Text>
+            </Pressable>
+
+            <View style={{ height: 32 }} />
+          </Pressable>
+        </Animated.View>
+      </Pressable>
+    </Modal>
+  );
+}
+
+const bs = StyleSheet.create({
+  overlay:  { flex: 1, backgroundColor: 'rgba(0,0,0,0.40)', justifyContent: 'flex-end' },
+  sheet:    { backgroundColor: '#FFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 10 },
+  handle:   { width: 32, height: 4, borderRadius: 2, backgroundColor: '#E5E5EA', alignSelf: 'center', marginBottom: 12 },
+  header:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 20 },
+  title:    { fontSize: 20, fontWeight: '700', color: '#191919' },
+  closeBtn: { padding: 4 },
+
+  sectionRow:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 8 },
+  sectionLabel: { fontSize: 13, color: colors.text.tertiary, fontWeight: '500' },
+  totalRow:     { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  totalText:    { fontSize: 13, color: colors.text.tertiary },
+
+  accRow:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14 },
+  accIcon:    { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F5F5F5', alignItems: 'center', justifyContent: 'center' },
+  accName:    { fontSize: 16, fontWeight: '600', color: '#191919', marginBottom: 3 },
+  accBalance: { fontSize: 13, color: colors.text.tertiary },
+  checkCircle: {},
+
+  divider: { height: 1, backgroundColor: '#F2F2F2', marginVertical: 8, marginHorizontal: 20 },
+  addRow:  { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, gap: 12 },
+  addIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F5F5F5', alignItems: 'center', justifyContent: 'center' },
+  addText: { fontSize: 16, fontWeight: '500', color: '#555' },
+});
+
+// ── 포지션 미리보기 행 ─────────────────────────────────────────────────────────
+function PositionRow({ pos, isLast }: { pos: any; isLast: boolean }) {
+  const up = pos.profit >= 0;
+  const pnlColor = up ? colors.market.rise : colors.market.fall;
+  return (
+    <Pressable
+      style={({ pressed }) => [pr.row, !isLast && pr.border, pressed && { backgroundColor: '#F8F8F8' }]}
+      onPress={() => router.push(`/(main)/positions/${pos.id}`)}
+    >
+      <View style={[pr.icon, { backgroundColor: up ? colors.market.riseSubtle : colors.market.fallSubtle }]}>
+        <Text style={[pr.iconText, { color: pnlColor }]}>{pos.coin?.slice(0, 2) ?? 'BT'}</Text>
+      </View>
+      <View style={{ flex: 1 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Text style={pr.symbol}>{pos.symbol}</Text>
+          <View style={[pr.badge, { backgroundColor: pos.direction === 'Long' ? '#EAF6F0' : '#FFF0F0' }]}>
+            <Text style={[pr.badgeText, { color: pos.direction === 'Long' ? '#1AC24E' : '#FF4747' }]}>
+              {pos.direction === 'Long' ? '롱' : '숏'}
+            </Text>
+          </View>
+        </View>
+        <Text style={pr.sub}>{formatKRW(pos.amount)} 투자</Text>
+      </View>
+      <View style={{ alignItems: 'flex-end' }}>
+        <Text style={[pr.profit, { color: pnlColor }]}>{formatKRWSigned(pos.profit)}</Text>
+        <Text style={[pr.rate, { color: pnlColor }]}>{formatRate(pos.profitRate)}</Text>
+      </View>
+    </Pressable>
+  );
+}
+const pr = StyleSheet.create({
+  row:      { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16 },
+  border:   { borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
+  icon:     { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  iconText: { fontSize: 13, fontWeight: '700' },
+  symbol:   { fontSize: 15, fontWeight: '700', color: '#191919' },
+  badge:    { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  badgeText:{ fontSize: 11, fontWeight: '700' },
+  sub:      { fontSize: 13, color: colors.text.tertiary, marginTop: 3 },
+  profit:   { fontSize: 15, fontWeight: '700' },
+  rate:     { fontSize: 13, fontWeight: '600', marginTop: 2 },
+});
+
+// ── 메인 ──────────────────────────────────────────────────────────────────────
+export default function Trading() {
+  const [showSheet, setShowSheet]           = useState(false);
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  const { accounts, balances, totalBalance, balancesLoading } = useAccounts();
+
   const selectedAccounts = selectedAccountId
     ? accounts.filter((a) => a.id === selectedAccountId)
     : accounts;
 
-  const fetchPositions = useCallback(async () => {
-    if (!selectedAccounts.length) return [];
-    return positionsService.getAllByAccounts(selectedAccounts);
-  }, [selectedAccountId, accounts.length]);
+  const { data: positions } = useApi(
+    () => positionsService.getAllByAccounts(selectedAccounts),
+    [selectedAccountId, accounts.length],
+  );
 
-  const fetchTrades = useCallback(async () => {
-    if (!selectedAccounts.length) return [];
-    return tradesService.getAllByAccounts(selectedAccounts);
-  }, [selectedAccountId, accounts.length]);
+  const selectedAccount = accounts.find((a) => a.id === selectedAccountId) ?? null;
+  const displayBalance  = selectedAccountId
+    ? (balances[selectedAccountId] ?? null)
+    : totalBalance;
 
-  const { data: positions, isLoading: posLoading }  = useApi(fetchPositions, [selectedAccountId, accounts.length]);
-  const { data: trades,    isLoading: tradeLoading } = useApi(fetchTrades,    [selectedAccountId, accounts.length]);
+  const selectedLabel = selectedAccount
+    ? (selectedAccount.name || EXCHANGE_LABELS[selectedAccount.exchange])
+    : accounts.length === 1
+      ? (accounts[0].name || EXCHANGE_LABELS[accounts[0].exchange])
+      : '모든 계좌';
 
-  // Tab content animation
-  const tabOpacity    = useSharedValue(1);
-  const tabTranslateX = useSharedValue(0);
+  const krwAvail = displayBalance?.available ?? 0;
+  const usdTotal = displayBalance?.totalUsd  ?? 0;
+  const isProfit = (displayBalance?.profitTotal ?? 0) >= 0;
+  const pnlColor = isProfit ? colors.market.rise : colors.market.fall;
 
-  const switchTab = (newTab: MainTab) => {
-    if (newTab === tab) return;
-    const dir = newTab === 'history' ? 1 : -1;
-    // Fade + slide out
-    tabOpacity.value    = withTiming(0, { duration: 120, easing: Easing.in(Easing.ease) }, () => {
-      runOnJS(setTab)(newTab);
-      tabTranslateX.value = 24 * dir;
-      // Fade + slide in from opposite side
-      tabOpacity.value    = withTiming(1, { duration: 220, easing: EASE_OUT });
-      tabTranslateX.value = withTiming(0, { duration: 220, easing: EASE_OUT });
-    });
-  };
-
-  const tabAnimStyle = useAnimatedStyle(() => ({
-    opacity:   tabOpacity.value,
-    transform: [{ translateX: tabTranslateX.value }],
-  }));
-
-  const isLoading = tab === 'positions' ? posLoading : tradeLoading;
-
-  const filteredPositions = positions ?? [];
-  const filteredTrades    = trades    ?? [];
+  const posCount = positions?.length ?? 0;
 
   return (
-    <FadeTabView style={styles.root}>
+    <FadeTabView style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
 
-        <PageHeader
-          title="트레이딩"
-          rightElement={<CurrencyToggle showUsd={showUsd} onToggle={() => setShowUsd((v) => !v)} />}
-        />
-
-        {/* ── Account Selector ── */}
-        <AccountSelector selectedId={selectedAccountId} onSelect={setSelectedAccountId} />
-
-        {/* ── Segment Control ── */}
-        <View style={styles.segWrap}>
-          <GlassCard intensity="medium" radius={16} padding={4} style={styles.seg}>
-            {(['positions', 'history'] as MainTab[]).map((t) => (
-              <PressableScale
-                key={t}
-                style={[styles.segBtn, tab === t && styles.segBtnActive]}
-                onPress={() => switchTab(t)}
-                scaleTo={0.97}
-              >
-                <View style={styles.segBtnInner}>
-                  <Text style={[styles.segText, { color: tab === t ? '#191919' : '#AEAEB2' }]}>
-                    {t === 'positions' ? '보유 포지션' : '거래 내역'}
-                  </Text>
-                </View>
-              </PressableScale>
-            ))}
-          </GlassCard>
+        {/* ── 헤더 ── */}
+        <View style={st.header}>
+          <View>
+            <Text style={st.headerTitle}>트레이딩</Text>
+            {(displayBalance?.profitTotal ?? 0) !== 0 && (
+              <Text style={[st.headerSub, { color: pnlColor }]}>
+                {formatKRWSigned(displayBalance?.profitTotal ?? 0)}
+                {'  '}{formatRate(displayBalance?.profitRate ?? 0)}
+              </Text>
+            )}
+          </View>
         </View>
 
-        {/* ── Content (animated) ── */}
-        <ScrollView
-          contentContainerStyle={styles.content}
-          showsVerticalScrollIndicator={false}
-        >
-          <Animated.View style={tabAnimStyle}>
-            {isLoading ? (
-              <TradingListSkeleton />
-            ) : tab === 'positions' ? (
-              !filteredPositions.length ? (
-                <GlassCard intensity="low" radius={20} padding={48} style={{ alignItems: 'center' }}>
-                  <Text variant="body2" color="#AEAEB2">활성 포지션이 없어요</Text>
-                </GlassCard>
-              ) : (
-                <>
-                  <PortfolioSummary positions={filteredPositions} showUsd={showUsd} rate={rate} />
-                  <GlassCard intensity="medium" radius={20} padding={0} style={{ overflow: 'hidden' }}>
-                    {filteredPositions.map((pos, i) => (
-                      <PositionCard key={pos.id} pos={pos} isLast={i === filteredPositions.length - 1} showUsd={showUsd} rate={rate} />
-                    ))}
-                  </GlassCard>
-                </>
-              )
+        <ScrollView showsVerticalScrollIndicator={false}>
+
+          {/* ── 계좌 선택 행 ── */}
+          <Pressable style={st.accountRow} onPress={() => setShowSheet(true)}>
+            {selectedAccount ? (
+              <ExchangeLogo exchange={selectedAccount.exchange} size={28} />
             ) : (
-              <HistoryContent trades={filteredTrades} showUsd={showUsd} rate={rate} />
+              <View style={st.allIcon}>
+                <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
+                  <Rect x="3" y="6" width="18" height="13" rx="2" stroke="#555" strokeWidth="1.8" />
+                  <Path d="M3 10h18" stroke="#555" strokeWidth="1.8" strokeLinecap="round" />
+                </Svg>
+              </View>
             )}
-          </Animated.View>
+            <Text style={st.accountLabel}>{selectedLabel}</Text>
+            <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
+              <Path d="M7 10l5-5 5 5M7 14l5 5 5-5" stroke="#AEAEB2" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </Svg>
+            <View style={{ flex: 1 }} />
+            <Pressable onPress={() => router.push('/(main)/account/api-accounts')}>
+              <Text style={st.accountViewAll}>계좌 보기</Text>
+            </Pressable>
+          </Pressable>
+
+          {/* ── 잔고 카드 2열 ── */}
+          <View style={st.balanceGrid}>
+            <View style={st.balanceCard}>
+              <Text style={st.balanceCardLabel}>원화</Text>
+              <Text style={st.balanceCardValue}>
+                {balancesLoading ? '—' : formatKRW(krwAvail)}
+              </Text>
+            </View>
+            <View style={st.balanceCard}>
+              <Text style={st.balanceCardLabel}>달러</Text>
+              <Text style={st.balanceCardValue}>
+                {balancesLoading ? '—' : `$${usdTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+              </Text>
+            </View>
+          </View>
+
+          {/* ── 메뉴 리스트 ── */}
+          <View style={st.menuSection}>
+            <PressableScale
+              style={st.menuRow}
+              onPress={() => {}}
+              scaleTo={0.98}
+            >
+              <Text style={st.menuText}>포지션 현황</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                {posCount > 0 && (
+                  <View style={st.menuBadge}>
+                    <Text style={st.menuBadgeText}>{posCount}</Text>
+                  </View>
+                )}
+                <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                  <Path d="M9 18l6-6-6-6" stroke="#C4C4C4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </Svg>
+              </View>
+            </PressableScale>
+
+            <View style={st.menuDivider} />
+
+            <PressableScale
+              style={st.menuRow}
+              onPress={() => router.push('/(main)/history')}
+              scaleTo={0.98}
+            >
+              <Text style={st.menuText}>거래 내역</Text>
+              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                <Path d="M9 18l6-6-6-6" stroke="#C4C4C4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </Svg>
+            </PressableScale>
+
+            <View style={st.menuDivider} />
+
+            <PressableScale
+              style={st.menuRow}
+              onPress={() => router.push('/(main)/account/agent-settings')}
+              scaleTo={0.98}
+            >
+              <Text style={st.menuText}>에이전트 설정</Text>
+              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                <Path d="M9 18l6-6-6-6" stroke="#C4C4C4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </Svg>
+            </PressableScale>
+          </View>
+
+          {/* ── 활성 포지션 ── */}
+          {(positions?.length ?? 0) > 0 && (
+            <View style={st.posSection}>
+              <View style={st.posSectionHeader}>
+                <Text style={st.posSectionTitle}>활성 포지션</Text>
+                <Text style={st.posSectionCount}>{positions!.length}개</Text>
+              </View>
+              {positions!.map((pos, i) => (
+                <PositionRow key={pos.id} pos={pos} isLast={i === positions!.length - 1} />
+              ))}
+            </View>
+          )}
+
           <View style={{ height: 120 }} />
         </ScrollView>
+
+        {/* ── 계좌 선택 바텀시트 ── */}
+        <AccountBottomSheet
+          visible={showSheet}
+          selectedId={selectedAccountId}
+          onSelect={setSelectedAccountId}
+          onClose={() => setShowSheet(false)}
+          accounts={accounts}
+          balances={balances}
+          totalBalance={totalBalance}
+        />
       </SafeAreaView>
     </FadeTabView>
   );
 }
 
-// ─────────────────────────────────────────────
-//  Styles
-// ─────────────────────────────────────────────
-const styles = StyleSheet.create({
-  root:    { flex: 1, backgroundColor: '#F5F5F5' },
+const st = StyleSheet.create({
+  // 헤더
+  header:      { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 16 },
+  headerTitle: { fontSize: 24, fontWeight: '700', color: '#191919' },
+  headerSub:   { fontSize: 14, fontWeight: '600', marginTop: 4 },
 
-  accountSelectorWrap: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#EBEBEB',
-    marginBottom: 16,
+  // 계좌 선택 행
+  accountRow:   { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingVertical: 14, borderTopWidth: 1, borderTopColor: '#F5F5F5' },
+  allIcon:      { width: 28, height: 28, borderRadius: 14, backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center' },
+  accountLabel: { fontSize: 15, fontWeight: '600', color: '#191919' },
+  accountViewAll: { fontSize: 14, color: colors.text.tertiary },
+
+  // 잔고 카드
+  balanceGrid: { flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingVertical: 16 },
+  balanceCard: {
+    flex: 1, backgroundColor: '#F5F5F5', borderRadius: 16,
+    paddingVertical: 18, paddingHorizontal: 16,
   },
-  accountScrollContent: {
-    paddingHorizontal: 20,
-    paddingVertical:   12,
-    gap:               8,
-  },
-  accountChip: {
-    flexDirection:     'row',
-    alignItems:        'center',
-    gap:               6,
-    paddingHorizontal: 14,
-    paddingVertical:   8,
-    borderRadius:      999,
-    borderWidth:       1.5,
-    borderColor:       '#E2E2E2',
-    backgroundColor:   '#FFFFFF',
-  },
-  accountChipActive: {
-    backgroundColor: '#191919',
-    borderColor:     '#191919',
-  },
-  accountDot: {
-    width: 7, height: 7, borderRadius: 4,
-  },
-  accountChipText: {
-    fontSize: 13, fontWeight: '600', color: '#AEAEB2', maxWidth: 120,
-  },
-  accountChipTextActive: {
-    color: '#FFFFFF',
-  },
+  balanceCardLabel: { fontSize: 13, color: colors.text.tertiary, marginBottom: 8 },
+  balanceCardValue: { fontSize: 18, fontWeight: '700', color: '#191919' },
 
-  segWrap: { paddingHorizontal: 20, paddingBottom: 20 },
-  seg:     { flexDirection: 'row' },
-  segBtn:  { flex: 1, borderRadius: 12, overflow: 'hidden' },
-  segBtnActive: { backgroundColor: '#F0F0F0' },
-  segBtnInner:  { paddingVertical: 13, alignItems: 'center', justifyContent: 'center' },
-  segText:      { fontSize: 14, fontWeight: '600' },
+  // 메뉴
+  menuSection: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8 },
+  menuRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 20 },
+  menuText:    { fontSize: 17, fontWeight: '600', color: '#191919' },
+  menuDivider: { height: 1, backgroundColor: '#F5F5F5' },
+  menuBadge:   { backgroundColor: '#FF4747', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2 },
+  menuBadgeText: { fontSize: 11, fontWeight: '700', color: '#FFFFFF' },
 
-  content:  { paddingHorizontal: 20, paddingTop: 4 },
-
-  summaryRow:     { flexDirection: 'row', alignItems: 'center' },
-  summaryDivider: { width: 1, height: 48, backgroundColor: '#F0F0F0', marginHorizontal: 20 },
-  summaryMain:    { fontSize: 20, fontWeight: '700', color: '#191919' },
-  summaryRate:    { fontSize: 13, fontWeight: '600', marginTop: 3 },
-
-  statsRow:     { flexDirection: 'row', alignItems: 'center' },
-  statsDivider: { width: 1, height: 40, backgroundColor: '#F0F0F0' },
-  statsValue:   { fontSize: 17, fontWeight: '700' },
-
-  filterRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
-
-  mb6:  { marginBottom: 6 },
-  mb12: { marginBottom: 12 },
-  mb14: { marginBottom: 14 },
-});
-
-const card = StyleSheet.create({
-  row:       { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 20, paddingHorizontal: 20 },
-  rowBorder: { borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
-  icon:      { width: 48, height: 48, borderRadius: 24, backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center' },
-  iconText:  { fontSize: 15, fontWeight: '700', color: '#555555' },
-  symbolRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  symbol:    { fontSize: 16, fontWeight: '700', color: '#191919' },
-  badge:     { borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3 },
-  badgeText: { fontSize: 11, fontWeight: '600' },
-  profit:    { fontSize: 16, fontWeight: '700' },
-  rate:      { fontSize: 13, fontWeight: '600', marginTop: 3 },
-  hint:      { paddingHorizontal: 20, paddingBottom: 14, paddingTop: 0 },
-});
-
-const hist = StyleSheet.create({
-  row:       { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 18, paddingHorizontal: 20 },
-  rowBorder: { borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
-  date:      { fontSize: 12, fontWeight: '600', color: '#AEAEB2', width: 36, flexShrink: 0 },
-  symbol:    { fontSize: 15, fontWeight: '600', color: '#191919' },
-  amount:    { fontSize: 15, fontWeight: '700' },
-  rate:      { fontSize: 12, fontWeight: '600', marginTop: 3 },
+  // 포지션 섹션
+  posSection:       { marginTop: 8, borderTopWidth: 8, borderTopColor: '#F5F5F5' },
+  posSectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16 },
+  posSectionTitle:  { fontSize: 16, fontWeight: '700', color: '#191919' },
+  posSectionCount:  { fontSize: 14, color: colors.text.tertiary },
 });

@@ -68,28 +68,50 @@ function getToken(): string | null {
 
 async function backendLoad(): Promise<ExchangeAccount[] | null> {
   const token = getToken();
-  if (!token) return null;
+  if (!token) {
+    console.warn('[accounts] backendLoad: 토큰 없음 — 로그인 상태 확인 필요');
+    return null;
+  }
   try {
     const res = await fetch('/api/user-accounts', {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (res.status === 204) return null; // Supabase 미설정
-    if (!res.ok) return null;
+    console.log('[accounts] backendLoad status:', res.status);
+    if (res.status === 204) return null; // DATABASE_URL 미설정
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.error('[accounts] backendLoad 실패:', res.status, body);
+      return null;
+    }
     const data = await res.json();
     return Array.isArray(data) ? data : null;
-  } catch { return null; }
+  } catch (e) {
+    console.error('[accounts] backendLoad 네트워크 오류:', e);
+    return null;
+  }
 }
 
 async function backendSave(accounts: ExchangeAccount[]): Promise<void> {
   const token = getToken();
-  if (!token) return;
+  if (!token) {
+    console.warn('[accounts] backendSave: 토큰 없음 — DB 동기화 건너뜀');
+    return;
+  }
   try {
-    await fetch('/api/user-accounts', {
+    const res = await fetch('/api/user-accounts', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body:    JSON.stringify(accounts),
     });
-  } catch { /* best-effort */ }
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.error('[accounts] backendSave 실패:', res.status, body);
+    } else {
+      console.log('[accounts] backendSave 성공 ✓');
+    }
+  } catch (e) {
+    console.error('[accounts] backendSave 네트워크 오류:', e);
+  }
 }
 
 // ── Context ───────────────────────────────────────────────────────────────────

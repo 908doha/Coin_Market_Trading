@@ -357,49 +357,35 @@ export default function Trading() {
 
           {/* ── 메뉴 리스트 ── */}
           <View style={st.menuSection}>
-            <PressableScale
-              style={st.menuRow}
-              onPress={() => {}}
-              scaleTo={0.98}
-            >
-              <Text style={st.menuText}>포지션 현황</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                {posCount > 0 && (
+            {[
+              {
+                label: '포지션 현황',
+                onPress: () => {},
+                right: posCount > 0 ? (
                   <View style={st.menuBadge}>
                     <Text style={st.menuBadgeText}>{posCount}</Text>
                   </View>
-                )}
-                <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                  <Path d="M9 18l6-6-6-6" stroke="#C4C4C4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </Svg>
-              </View>
-            </PressableScale>
-
-            <View style={st.menuDivider} />
-
-            <PressableScale
-              style={st.menuRow}
-              onPress={() => router.push('/(main)/history')}
-              scaleTo={0.98}
-            >
-              <Text style={st.menuText}>거래 내역</Text>
-              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                <Path d="M9 18l6-6-6-6" stroke="#C4C4C4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </Svg>
-            </PressableScale>
-
-            <View style={st.menuDivider} />
-
-            <PressableScale
-              style={st.menuRow}
-              onPress={() => router.push('/(main)/account/agent-settings')}
-              scaleTo={0.98}
-            >
-              <Text style={st.menuText}>에이전트 설정</Text>
-              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                <Path d="M9 18l6-6-6-6" stroke="#C4C4C4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </Svg>
-            </PressableScale>
+                ) : null,
+              },
+              { label: '거래 내역',   onPress: () => router.push('/(main)/history'), right: null },
+              { label: '에이전트 설정', onPress: () => router.push('/(main)/account/agent-settings'), right: null },
+            ].map((item, i, arr) => (
+              <React.Fragment key={item.label}>
+                <Pressable
+                  style={({ pressed }) => [st.menuRow, pressed && { backgroundColor: '#F8F8F8' }]}
+                  onPress={item.onPress}
+                >
+                  <Text style={st.menuText}>{item.label}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    {item.right}
+                    <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                      <Path d="M9 18l6-6-6-6" stroke="#C4C4C4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </Svg>
+                  </View>
+                </Pressable>
+                {i < arr.length - 1 && <View style={st.menuDivider} />}
+              </React.Fragment>
+            ))}
           </View>
 
           {/* ── 활성 포지션 ── */}

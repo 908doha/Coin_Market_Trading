@@ -27,9 +27,7 @@ function getPool(): Pool {
   if (!pool) {
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,
-      ssl:              process.env.DATABASE_URL?.includes('railway.app')
-        ? { rejectUnauthorized: false }
-        : false,
+      ssl:              { rejectUnauthorized: false },
       max:              3,
       idleTimeoutMillis: 10_000,
     });

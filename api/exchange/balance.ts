@@ -15,8 +15,8 @@ interface Balance {
   profitRate:      number;
   profitToday:     number;
   profitTodayRate: number;
-  totalUsd:        number;
-  usdtKrw:         number;
+  totalUsd?:       number;
+  usdtKrw?:        number;
 }
 
 // ── KRW exchange rate (fallback if live fetch fails) ─────────────────────────

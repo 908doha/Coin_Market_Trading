@@ -239,6 +239,101 @@ export function PositionDetailSkeleton() {
   );
 }
 
+// ─── 거래 내역 목록 ───────────────────────────────────────────────────────────
+
+export function TradeRowSkeleton() {
+  return (
+    <View style={[s.row, { paddingVertical: 14, paddingHorizontal: 20 }]}>
+      <Skeleton width={28} height={13} radius={5} style={{ marginRight: 12 }} />
+      <View style={{ flex: 1, gap: 7 }}>
+        <Skeleton width={110} height={15} radius={6} />
+        <Skeleton width={76} height={13} radius={5} />
+      </View>
+      <View style={{ alignItems: 'flex-end', gap: 7 }}>
+        <Skeleton width={72} height={15} radius={6} />
+        <Skeleton width={44} height={13} radius={5} />
+      </View>
+    </View>
+  );
+}
+
+export function TradeHistoryListSkeleton() {
+  return (
+    <View>
+      {/* 통계 바 */}
+      <View style={[s.row, { justifyContent: 'space-around', paddingVertical: 14, backgroundColor: '#FAFAFA', borderBottomWidth: 1, borderBottomColor: '#F0F0F0' }]}>
+        {[38, 28, 60].map((w, i) => (
+          <View key={i} style={{ alignItems: 'center', gap: 6 }}>
+            <Skeleton width={w - 10} height={12} radius={4} />
+            <Skeleton width={w} height={18} radius={6} />
+          </View>
+        ))}
+      </View>
+      {/* 섹션 헤더 */}
+      <View style={{ paddingHorizontal: 20, paddingTop: 24, paddingBottom: 10 }}>
+        <Skeleton width={80} height={18} radius={6} />
+      </View>
+      {/* 행 */}
+      {[1, 2, 3, 4, 5, 6].map((i) => (
+        <View key={i}>
+          <TradeRowSkeleton />
+          {i < 6 && <View style={{ height: 1, backgroundColor: '#F2F2F2' }} />}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// ─── 거래 상세 ────────────────────────────────────────────────────────────────
+
+export function TradeDetailSkeleton() {
+  return (
+    <View style={{ paddingHorizontal: 20, paddingTop: 20, gap: 24 }}>
+      {/* 코인 헤더 */}
+      <View style={[s.row, { gap: 16 }]}>
+        <Skeleton width={56} height={56} radius={28} />
+        <View style={{ flex: 1, gap: 10 }}>
+          <Skeleton width={120} height={20} radius={7} />
+          <Skeleton width={72} height={22} radius={11} />
+        </View>
+      </View>
+      {/* 가격 정보 */}
+      <View style={{ gap: 14 }}>
+        {[1, 2, 3].map((i) => (
+          <View key={i} style={[s.row, { justifyContent: 'space-between' }]}>
+            <Skeleton width={80} height={14} radius={5} />
+            <Skeleton width={100} height={14} radius={5} />
+          </View>
+        ))}
+      </View>
+      {/* 기간 정보 */}
+      <View style={{ gap: 14 }}>
+        {[1, 2, 3, 4].map((i) => (
+          <View key={i} style={[s.row, { justifyContent: 'space-between' }]}>
+            <Skeleton width={64} height={14} radius={5} />
+            <Skeleton width={110} height={14} radius={5} />
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+// ─── 트레이딩: 잔고 카드 2열 ──────────────────────────────────────────────────
+
+export function BalanceCardsSkeleton() {
+  return (
+    <View style={[s.row, { paddingHorizontal: 20, paddingVertical: 16, gap: 10 }]}>
+      {[1, 2].map((i) => (
+        <View key={i} style={{ flex: 1, backgroundColor: '#F5F5F5', borderRadius: 16, paddingVertical: 18, paddingHorizontal: 16, gap: 10 }}>
+          <Skeleton width={30} height={13} radius={5} />
+          <Skeleton width="75%" height={22} radius={6} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
 // ─── 에이전트 설정 ────────────────────────────────────────────────────────────
 
 export function AgentSettingsSkeleton() {

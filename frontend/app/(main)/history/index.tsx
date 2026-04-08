@@ -1,14 +1,14 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
-  View, StyleSheet, SectionList, Pressable, ActivityIndicator, ScrollView,
+  View, StyleSheet, SectionList, Pressable, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Animated, {
   useSharedValue, useAnimatedStyle, withTiming, withSpring, Easing, runOnJS,
 } from 'react-native-reanimated';
-import Svg, { Path } from 'react-native-svg';
-import { Text, CurrencyToggle } from '@/design-system';
+import Svg, { Path, Circle } from 'react-native-svg';
+import { Text, CurrencyToggle, TradeHistoryListSkeleton } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
@@ -65,56 +65,102 @@ function AnimatedRow({ index, children }: { index: number; children: React.React
   return <Animated.View style={style}>{children}</Animated.View>;
 }
 
-// ── 월 선택 칩 ────────────────────────────────────────────────────────────────
-function MonthSelector({
+// ── 월 선택 드롭다운 ──────────────────────────────────────────────────────────
+function MonthDropdown({
   months, selected, onSelect,
 }: {
-  months:   string[];   // ['2026-04', '2026-03', ...]
+  months:   string[];
   selected: string | null;
   onSelect: (m: string | null) => void;
 }) {
-  const scrollRef = useRef<ScrollView>(null);
+  const [open, setOpen]    = useState(false);
+  const translateY = useSharedValue(300);
+  const [mounted, setMounted] = React.useState(false);
+
+  React.useEffect(() => {
+    if (open) {
+      setMounted(true);
+      translateY.value = withSpring(0, { damping: 26, stiffness: 280, mass: 0.8 });
+    } else {
+      translateY.value = withTiming(300, { duration: 220 }, () => runOnJS(setMounted)(false));
+    }
+  }, [open]);
+
+  const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: translateY.value }] }));
+  const label = selected ? monthLabel(selected) : '전체 기간';
+
   return (
-    <ScrollView
-      ref={scrollRef}
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={ms.row}
-      style={ms.wrap}
-    >
-      {/* 전체 */}
+    <>
       <Pressable
-        style={[ms.chip, selected === null && ms.chipActive]}
-        onPress={() => onSelect(null)}
+        style={({ pressed }) => [md.btn, pressed && { backgroundColor: '#F0F0F0' }]}
+        onPress={() => setOpen(true)}
       >
-        <Text style={[ms.chipText, selected === null && ms.chipTextActive]}>전체</Text>
+        <Text style={md.btnText}>{label}</Text>
+        <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
+          <Path d="M7 10l5 5 5-5" stroke="#555" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </Svg>
       </Pressable>
 
-      {months.map((m) => (
-        <Pressable
-          key={m}
-          style={[ms.chip, selected === m && ms.chipActive]}
-          onPress={() => onSelect(m)}
-        >
-          <Text style={[ms.chipText, selected === m && ms.chipTextActive]}>
-            {monthLabel(m)}
-          </Text>
-        </Pressable>
-      ))}
-    </ScrollView>
+      {mounted && (
+        <Modal visible transparent animationType="none" onRequestClose={() => setOpen(false)}>
+          <Pressable style={md.overlay} onPress={() => setOpen(false)}>
+            <Animated.View style={[md.sheet, sheetStyle]}>
+              <Pressable>
+                <View style={md.handle} />
+                <View style={md.sheetHeader}>
+                  <Text style={md.sheetTitle}>기간 선택</Text>
+                </View>
+
+                {/* 전체 */}
+                <Pressable
+                  style={({ pressed }) => [md.row, pressed && { backgroundColor: '#F8F8F8' }]}
+                  onPress={() => { onSelect(null); setOpen(false); }}
+                >
+                  <Text style={[md.rowText, selected === null && md.rowTextActive]}>전체 기간</Text>
+                  {selected === null && (
+                    <Svg width={20} height={20} viewBox="0 0 24 24">
+                      <Circle cx="12" cy="12" r="12" fill="#191919" />
+                      <Path d="M7 12.5l3.5 3.5 6.5-7" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                    </Svg>
+                  )}
+                </Pressable>
+
+                {months.map((m) => (
+                  <Pressable
+                    key={m}
+                    style={({ pressed }) => [md.row, pressed && { backgroundColor: '#F8F8F8' }]}
+                    onPress={() => { onSelect(m); setOpen(false); }}
+                  >
+                    <Text style={[md.rowText, selected === m && md.rowTextActive]}>{monthLabel(m)}</Text>
+                    {selected === m && (
+                      <Svg width={20} height={20} viewBox="0 0 24 24">
+                        <Circle cx="12" cy="12" r="12" fill="#191919" />
+                        <Path d="M7 12.5l3.5 3.5 6.5-7" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                      </Svg>
+                    )}
+                  </Pressable>
+                ))}
+
+                <View style={{ height: 34 }} />
+              </Pressable>
+            </Animated.View>
+          </Pressable>
+        </Modal>
+      )}
+    </>
   );
 }
-const ms = StyleSheet.create({
-  wrap: { backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
-  row:  { paddingHorizontal: 16, paddingVertical: 12, gap: 8, flexDirection: 'row' },
-  chip: {
-    paddingHorizontal: 14, paddingVertical: 7,
-    borderRadius: 20,
-    backgroundColor: '#F5F5F5',
-  },
-  chipActive:     { backgroundColor: '#191919' },
-  chipText:       { fontSize: 13, fontWeight: '600', color: '#555' },
-  chipTextActive: { color: '#FFFFFF' },
+const md = StyleSheet.create({
+  btn:     { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
+  btnText: { fontSize: 15, fontWeight: '600', color: '#191919', flex: 1 },
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-end' },
+  sheet:   { backgroundColor: '#FFF', borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingTop: 10 },
+  handle:  { width: 32, height: 4, borderRadius: 2, backgroundColor: '#E5E5EA', alignSelf: 'center', marginBottom: 8 },
+  sheetHeader: { paddingHorizontal: 20, paddingBottom: 12, paddingTop: 4 },
+  sheetTitle:  { fontSize: 18, fontWeight: '700', color: '#191919' },
+  row:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 17, paddingHorizontal: 20 },
+  rowText:     { fontSize: 16, fontWeight: '400', color: '#191919' },
+  rowTextActive: { fontWeight: '700' },
 });
 
 // ── 거래 행 ───────────────────────────────────────────────────────────────────
@@ -194,11 +240,16 @@ const sec = StyleSheet.create({
 // ── 통계 바 ───────────────────────────────────────────────────────────────────
 function StatsBar({ trades, showUsd, rate }: { trades: Trade[]; showUsd: boolean; rate: number }) {
   const total    = trades.length;
-  const wins     = trades.filter((t) => t.profit > 0).length;
-  const winRate  = total ? Math.round((wins / total) * 100) : 0;
   const totalPnl = trades.reduce((s, t) => s + t.profit, 0);
   const pnlColor = totalPnl >= 0 ? colors.market.rise : colors.market.fall;
   const pnlText  = showUsd ? fmtUsd(totalPnl, rate) : formatKRWSigned(totalPnl);
+
+  // 손익비 = 평균 수익 / 평균 손실 (절댓값)
+  const winTrades  = trades.filter((t) => t.profit > 0);
+  const lossTrades = trades.filter((t) => t.profit < 0);
+  const avgWin     = winTrades.length  ? winTrades.reduce((s, t) => s + t.profit, 0) / winTrades.length : 0;
+  const avgLoss    = lossTrades.length ? Math.abs(lossTrades.reduce((s, t) => s + t.profit, 0) / lossTrades.length) : 0;
+  const plRatio    = avgLoss > 0 ? (avgWin / avgLoss).toFixed(2) : null;
 
   return (
     <View style={sb.wrap}>
@@ -208,11 +259,11 @@ function StatsBar({ trades, showUsd, rate }: { trades: Trade[]; showUsd: boolean
       </View>
       <View style={sb.divider} />
       <View style={sb.item}>
-        <Text style={sb.label}>승률</Text>
+        <Text style={sb.label}>손익비</Text>
         <Text style={[sb.value, {
-          color: winRate >= 60 ? colors.market.rise : winRate >= 40 ? colors.text.primary : colors.market.fall,
+          color: plRatio && parseFloat(plRatio) >= 1 ? colors.market.rise : plRatio ? colors.market.fall : colors.text.primary,
         }]}>
-          {total ? `${winRate}%` : '—'}
+          {plRatio ? `${plRatio}` : '—'}
         </Text>
       </View>
       <View style={sb.divider} />
@@ -349,7 +400,7 @@ export default function History() {
 
       {/* ── 월 선택 ── */}
       {(availableMonths.length > 0 || !isLoading) && (
-        <MonthSelector
+        <MonthDropdown
           months={availableMonths}
           selected={selectedMonth}
           onSelect={(m) => switchFilter(() => setSelectedMonth(m))}
@@ -365,10 +416,7 @@ export default function History() {
       )}
 
       {isLoading ? (
-        <View style={st.center}>
-          <ActivityIndicator color={colors.text.tertiary} />
-          <Text style={st.loadingText}>거래 내역 불러오는 중...</Text>
-        </View>
+        <TradeHistoryListSkeleton />
       ) : error ? (
         <View style={st.center}>
           <Text style={st.emptyText}>{error}</Text>
@@ -420,9 +468,8 @@ const st = StyleSheet.create({
   backBtn:     { padding: 4, marginRight: 4 },
   headerTitle: { flex: 1, fontSize: 18, fontWeight: '700', color: '#191919' },
 
-  center:      { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
-  loadingText: { fontSize: 14, color: colors.text.tertiary, marginTop: 8 },
-  emptyText:   { fontSize: 15, color: colors.text.tertiary },
+  center:    { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
+  emptyText: { fontSize: 15, color: colors.text.tertiary },
   retryBtn:    { marginTop: 8, paddingHorizontal: 20, paddingVertical: 10, backgroundColor: '#F5F5F5', borderRadius: 10 },
   retryText:   { fontSize: 14, fontWeight: '600', color: colors.text.primary },
 });

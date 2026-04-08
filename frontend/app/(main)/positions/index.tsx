@@ -12,7 +12,7 @@ import Animated, {
   useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS,
 } from 'react-native-reanimated';
 import Svg, { Path, Polygon, Rect, Text as SvgText, Circle } from 'react-native-svg';
-import { Text, FadeTabView, PressableScale } from '@/design-system';
+import { Text, FadeTabView, PressableScale, BalanceCardsSkeleton } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
@@ -334,20 +334,22 @@ export default function Trading() {
           </Pressable>
 
           {/* ── 잔고 카드 2열 ── */}
-          <View style={st.balanceGrid}>
-            <View style={st.balanceCard}>
-              <Text style={st.balanceCardLabel}>원화</Text>
-              <Text style={st.balanceCardValue}>
-                {balancesLoading ? '—' : formatKRW(krwAvail)}
-              </Text>
+          {balancesLoading ? (
+            <BalanceCardsSkeleton />
+          ) : (
+            <View style={st.balanceGrid}>
+              <View style={st.balanceCard}>
+                <Text style={st.balanceCardLabel}>원화</Text>
+                <Text style={st.balanceCardValue}>{formatKRW(krwAvail)}</Text>
+              </View>
+              <View style={st.balanceCard}>
+                <Text style={st.balanceCardLabel}>달러</Text>
+                <Text style={st.balanceCardValue}>
+                  {`$${usdTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                </Text>
+              </View>
             </View>
-            <View style={st.balanceCard}>
-              <Text style={st.balanceCardLabel}>달러</Text>
-              <Text style={st.balanceCardValue}>
-                {balancesLoading ? '—' : `$${usdTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-              </Text>
-            </View>
-          </View>
+          )}
 
           {/* ── 메뉴: 거래 내역 ── */}
           <View style={st.menuSection}>

@@ -4,12 +4,11 @@ import {
   StyleSheet,
   ScrollView,
   Pressable,
-  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import Svg, { Path } from 'react-native-svg';
-import { Text, Card, Badge, Divider, SubPageHeader, GlassCard } from '@/design-system';
+import { Text, Card, Badge, Divider, SubPageHeader, GlassCard, TradeDetailSkeleton } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
@@ -45,9 +44,9 @@ export default function TradeDetail() {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
         <SubPageHeader title="거래 상세" onBack={() => router.back()} />
-        <View style={styles.center}>
-          <ActivityIndicator color={colors.primary.default} />
-        </View>
+        <ScrollView showsVerticalScrollIndicator={false}>
+          <TradeDetailSkeleton />
+        </ScrollView>
       </SafeAreaView>
     );
   }

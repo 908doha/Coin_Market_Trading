@@ -368,7 +368,6 @@ export default function Trading() {
                 ) : null,
               },
               { label: '거래 내역',   onPress: () => router.push('/(main)/history'), right: null },
-              { label: '에이전트 설정', onPress: () => router.push('/(main)/account/agent-settings'), right: null },
             ].map((item, i, arr) => (
               <React.Fragment key={item.label}>
                 <Pressable

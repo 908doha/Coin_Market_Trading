@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { View, StyleSheet, ScrollView, TouchableWithoutFeedback, Modal, Pressable, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -6,7 +6,7 @@ import Svg, { Polyline, Defs, LinearGradient, Stop, Polygon, Path, Rect, Text as
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS } from 'react-native-reanimated';
 import { Text, GlassCard, PressableScale, FadeTabView, AssetCardSkeleton, PageHeader, CurrencyToggle } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
-import { accountService, positionsService, tradesService } from '@/services';
+import { accountService, positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeAccount, ExchangeType } from '@/store/accounts';
 import type { Balance } from '@/services';
@@ -20,73 +20,6 @@ const PERIODS = [
   { key: 'ALL', label: '전체'        },
 ] as const;
 type PeriodKey = typeof PERIODS[number]['key'];
-
-const AGENT_COLORS = ['#3182F6', '#1AC24E', '#FF8A00', '#9B59B6', '#E74C3C', '#16A085'];
-
-// ── 에이전트 행 ──────────────────────────────────────────────────────────────
-function AgentRow({
-  agent, color, isActive, winRate, tradeCount, isLast,
-}: {
-  agent: { id: string; name: string; description: string; version: string }; color: string; isActive: boolean;
-  winRate: number; tradeCount: number; isLast: boolean;
-}) {
-  const abbr = agent.name.replace(/[^가-힣A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || 'AI';
-  const winColor = winRate >= 60
-    ? colors.market.rise
-    : winRate >= 40
-      ? colors.text.primary
-      : colors.market.fall;
-
-  return (
-    <PressableScale
-      onPress={() => router.push('/(main)/account/agent-settings')}
-      scaleTo={0.99}
-    >
-      <View style={[agentSt.wrap, !isLast && agentSt.border]}>
-        {/* 아이콘 */}
-        <View style={[agentSt.icon, { backgroundColor: color + '20' }]}>
-          <Text style={[agentSt.iconText, { color }]}>{abbr}</Text>
-        </View>
-
-        {/* 이름 + 상태 */}
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text variant="label1Bold" numberOfLines={1}>{agent.name}</Text>
-          <View style={agentSt.statusRow}>
-            <View style={[agentSt.dot, {
-              backgroundColor: isActive ? colors.positive.default : colors.text.disabled,
-            }]} />
-            <Text variant="caption1" style={{
-              color: isActive ? colors.positive.default : colors.text.disabled,
-              fontWeight: '600',
-            }}>
-              {isActive ? '운용중' : '대기중'}
-            </Text>
-            {agent.version && (
-              <Text variant="caption1" color={colors.text.tertiary}>
-                {' '}v{agent.version}
-              </Text>
-            )}
-          </View>
-        </View>
-
-        {/* 승률 | 거래 */}
-        <View style={agentSt.stats}>
-          <View style={agentSt.statItem}>
-            <Text variant="label1Bold" style={{ color: tradeCount > 0 ? winColor : colors.text.disabled }}>
-              {tradeCount > 0 ? `${winRate}%` : '—'}
-            </Text>
-            <Text variant="caption1" color={colors.text.tertiary} style={{ marginTop: 2 }}>30일 승률</Text>
-          </View>
-          <View style={agentSt.divider} />
-          <View style={agentSt.statItem}>
-            <Text variant="label1Bold">{tradeCount}</Text>
-            <Text variant="caption1" color={colors.text.tertiary} style={{ marginTop: 2 }}>총 거래</Text>
-          </View>
-        </View>
-      </View>
-    </PressableScale>
-  );
-}
 
 // ── 기간 선택 바텀시트 ────────────────────────────────────────────────────────
 function PeriodBottomSheet({
@@ -582,58 +515,9 @@ export default function Home() {
   const { data: positions } = useApi(
     () => positionsService.getAllByAccounts(accounts), [accounts],
   );
-  const { data: groupedTrades } = useApi(
-    () => tradesService.getGroupedByAccount(accounts), [accounts],
-  );
-
   const balance    = accounts.length > 0 ? totalBalance : singleBalance;
   const balLoading = accounts.length > 0 ? balancesLoading : singleLoading;
   const isProfit   = (balance?.profitTotal ?? 0) >= 0;
-
-  // 계좌에 실제 할당된 agentId 기반으로 에이전트 목록 구성
-  const activeAgents = useMemo(() => {
-    const seen = new Map<string, { id: string; name: string; winRate: number; tradeCount: number }>();
-    for (const acc of accounts) {
-      if (!acc.agentId) continue;
-      const trades   = groupedTrades?.[acc.id] ?? [];
-      const wins     = trades.filter((t) => t.profit > 0).length;
-      const winRate  = trades.length > 0 ? Math.round((wins / trades.length) * 100) : 0;
-      const existing = seen.get(acc.agentId);
-      if (existing) {
-        // 같은 agentId가 여러 계좌에 할당된 경우 합산
-        seen.set(acc.agentId, {
-          ...existing,
-          tradeCount: existing.tradeCount + trades.length,
-          winRate:    existing.tradeCount + trades.length > 0
-            ? Math.round(((existing.winRate * existing.tradeCount / 100 + wins) / (existing.tradeCount + trades.length)) * 100)
-            : 0,
-        });
-      } else {
-        seen.set(acc.agentId, {
-          id:         acc.agentId,
-          name:       acc.agentId,   // 이름은 아래 botAgents 로드 후 대체
-          winRate,
-          tradeCount: trades.length,
-        });
-      }
-    }
-    return Array.from(seen.values());
-  }, [accounts, groupedTrades]);
-
-  // /api/agents 에서 실제 이름/설명 로드
-  const { data: botAgents } = useApi(
-    () => fetch('/api/agents').then((r) => r.json()).catch(() => []),
-    [],
-  );
-
-  // agentId → 표시 이름 매핑
-  const agentNameMap = useMemo(() => {
-    const map: Record<string, string> = {};
-    if (Array.isArray(botAgents)) {
-      for (const a of botAgents) map[a.id] = a.name;
-    }
-    return map;
-  }, [botAgents]);
 
   return (
     <FadeTabView style={styles.root}>
@@ -738,40 +622,6 @@ export default function Home() {
               ))}
             </GlassCard>
           )}
-
-          {/* ── AI 에이전트 ── */}
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>AI 에이전트</Text>
-            <PressableScale onPress={() => router.push('/(main)/account/agent-settings')} scaleTo={0.96}>
-              <View style={styles.manageBtn}>
-                <Text style={styles.manageBtnText}>설정</Text>
-              </View>
-            </PressableScale>
-          </View>
-          <GlassCard intensity="medium" radius={20} padding={0} style={[styles.section, { overflow: 'hidden' }]}>
-            {!activeAgents.length ? (
-              <View style={{ paddingVertical: 24, alignItems: 'center' }}>
-                <Text variant="body2" color={colors.text.tertiary}>
-                  {accounts.length ? '에이전트가 설정되지 않았어요' : '계좌를 연결하면 에이전트를 설정할 수 있어요'}
-                </Text>
-              </View>
-            ) : (
-              activeAgents.map((agent, i) => {
-                const displayName = agentNameMap[agent.id] ?? agent.id;
-                return (
-                  <AgentRow
-                    key={agent.id}
-                    agent={{ id: agent.id, name: displayName, description: '', version: '' }}
-                    color={AGENT_COLORS[i % AGENT_COLORS.length]}
-                    isActive={true}
-                    winRate={agent.winRate}
-                    tradeCount={agent.tradeCount}
-                    isLast={i === activeAgents.length - 1}
-                  />
-                );
-              })
-            )}
-          </GlassCard>
 
           {/* ── 활성 포지션 ── */}
           <GlassCard intensity="low" radius={20} padding={20} style={styles.section}>
@@ -880,27 +730,6 @@ const styles = StyleSheet.create({
   dirBadge:     { borderRadius: borderRadius.xs + 2, paddingHorizontal: spacing[1] + 2, paddingVertical: 2 },
   dirText:      { fontSize: 11, fontWeight: '600' },
   emptyText:    { fontSize: 14, color: colors.text.tertiary },
-});
-
-const agentSt = StyleSheet.create({
-  wrap: {
-    flexDirection:     'row',
-    alignItems:        'center',
-    paddingVertical:   spacing[4],
-    paddingHorizontal: spacing[5],
-    gap:               spacing[3] + 2,
-  },
-  border:    { borderBottomWidth: 1, borderBottomColor: colors.border.default },
-  icon:      {
-    width: 48, height: 48, borderRadius: borderRadius.lg,
-    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-  },
-  iconText:  { fontSize: 13, fontWeight: '800', letterSpacing: -0.5 },
-  statusRow: { flexDirection: 'row', alignItems: 'center', gap: spacing[1], marginTop: spacing[1] },
-  dot:       { width: 6, height: 6, borderRadius: borderRadius.full },
-  stats:     { flexDirection: 'row', alignItems: 'center', gap: spacing[3], flexShrink: 0 },
-  statItem:  { alignItems: 'center', minWidth: 42 },
-  divider:   { width: 1, height: 32, backgroundColor: colors.border.default },
 });
 
 const accRow = StyleSheet.create({

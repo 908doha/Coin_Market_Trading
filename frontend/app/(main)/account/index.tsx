@@ -3,24 +3,16 @@ import { View, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Text, GlassCard, PressableScale, FadeTabView, AccountSkeleton, PageHeader, AssetCardSkeleton } from '@/design-system';
-import { accountService, agentService } from '@/services';
+import { accountService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAuth } from '@/store/auth';
 import { formatKRW } from '@/utils/format';
 
-const agentStatusMap = {
-  running: { label: '운용중',   color: '#1AC24E', bg: '#EDFBF3' },
-  paused:  { label: '일시정지', color: '#FF8A00', bg: '#FFF8E8' },
-  waiting: { label: '대기중',   color: '#AEAEB2', bg: '#F5F5F5' },
-};
-
 export default function Account() {
   const { user, logout }                             = useAuth();
   const { data: balance, isLoading: balanceLoading } = useApi(() => accountService.getBalance(), []);
-  const { data: agentStats }                         = useApi(() => agentService.getStats(), []);
 
-  const agentStatus = agentStatusMap[agentStats?.status ?? 'waiting'];
-  const isLoading   = balanceLoading && !agentStats;
+  const isLoading = balanceLoading;
 
   return (
     <FadeTabView style={styles.root}>
@@ -41,10 +33,6 @@ export default function Account() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.userName}>{user?.name ?? '-'}</Text>
                 <Text variant="meta" color="#AEAEB2">{user?.email ?? '-'}</Text>
-              </View>
-              <View style={[styles.statusBadge, { backgroundColor: agentStatus.bg }]}>
-                <View style={[styles.statusDot, { backgroundColor: agentStatus.color }]} />
-                <Text variant="meta" style={{ color: agentStatus.color }}>{agentStatus.label}</Text>
               </View>
             </View>
           </GlassCard>
@@ -107,19 +95,6 @@ export default function Account() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.menuLabel}>계좌 연결</Text>
                   <Text variant="meta" color="#AEAEB2">거래소 계좌 등록·관리</Text>
-                </View>
-                <Text style={styles.menuArrow}>›</Text>
-              </View>
-            </PressableScale>
-            <View style={styles.menuDivider} />
-            <PressableScale onPress={() => router.push('/(main)/account/agent-settings')} scaleTo={0.98}>
-              <View style={styles.menuRow}>
-                <View style={styles.menuIcon}><Text style={{ fontSize: 18 }}>🤖</Text></View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.menuLabel}>AI 에이전트 설정</Text>
-                  <Text variant="meta" color="#AEAEB2">
-                    {agentStats?.status === 'running' ? '운용 중' : agentStatus.label}
-                  </Text>
                 </View>
                 <Text style={styles.menuArrow}>›</Text>
               </View>

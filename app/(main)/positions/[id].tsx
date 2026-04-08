@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { View, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
@@ -10,15 +10,6 @@ import { positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 
-interface BotSignal {
-  signal:     string;
-  reason:     string;
-  confluence: string[];
-  entry:      number;
-  sl?:        number;
-  tp?:        number;
-  entryAt?:   string;
-}
 
 // ─── 플랫 정보 행 ──────────────────────────────────────────────────────────────
 function InfoRow({
@@ -54,32 +45,6 @@ export default function PositionDetail() {
     [id],
   );
 
-  // 봇 ICT 분석 조회
-  const [botSignal, setBotSignal]         = useState<BotSignal | null>(null);
-  const [signalLoading, setSignalLoading] = useState(false);
-  useEffect(() => {
-    if (!position) return;
-    const accountId = (position as any).accountId;
-    if (!accountId) return;
-    const contract = (position.symbol ?? '').replace('/', '_');
-    setSignalLoading(true);
-    fetch(`/api/bot/analyze?accountId=${encodeURIComponent(accountId)}&contract=${encodeURIComponent(contract)}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data?.reason && data.reason !== '봇이 실행 중이지 않습니다' && !data.error) {
-          setBotSignal(data);
-          return;
-        }
-        return fetch(`/api/bot/status?accountId=${encodeURIComponent(accountId)}`)
-          .then((r) => r.json())
-          .then((status) => {
-            const sig = status?.entrySignals?.[contract];
-            if (sig) setBotSignal(sig);
-          });
-      })
-      .catch(() => {})
-      .finally(() => setSignalLoading(false));
-  }, [position]);
 
   // ── 컨텐츠 등장 애니메이션 ──────────────────────────────────────────────────
   const contentOpacity    = useSharedValue(0);
@@ -103,15 +68,6 @@ export default function PositionDetail() {
   const fmt$ = (v: number) =>
     `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-  const positionSummary = position ? (() => {
-    const dir      = direction === 'Long' ? '롱(매수)' : '숏(매도)';
-    const profitSign = isProfit ? '수익' : '손실';
-    const pctAbs   = Math.abs(position.profitRate).toFixed(2);
-    const pnlAbs   = Math.abs(position.profit);
-    const since    = p.entryAt ? `${p.entryAt}에 진입한 ` : '';
-    const holding  = position.holdingPeriod ? ` ${position.holdingPeriod} 보유 중이며,` : '';
-    return `${since}${position.symbol} ${dir} 포지션입니다. ${position.leverage}배 레버리지로${holding} 현재 ${pctAbs}% (${Math.round(pnlAbs / 10000).toLocaleString('ko-KR')}만원) ${profitSign} 중입니다.${p.liqPrice > 0 ? ` 청산가는 $${p.liqPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}입니다.` : ''}`;
-  })() : null;
 
   return (
     <SafeAreaView style={st.safe} edges={['top']}>
@@ -220,37 +176,6 @@ export default function PositionDetail() {
 
             <SectionDivider />
 
-            {/* ── ICT 분석 ── */}
-            <View style={st.flatSection}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                <Text style={st.sectionLabel}>ICT 분석</Text>
-                {signalLoading && (
-                  <Text style={{ fontSize: 12, color: '#C7C7CC' }}>분석 중...</Text>
-                )}
-              </View>
-              {botSignal ? (
-                <>
-                  <Text style={st.analysisText}>{botSignal.reason}</Text>
-                  {botSignal.confluence?.length > 0 && (
-                    <View style={{ marginTop: 12, gap: 8 }}>
-                      {botSignal.confluence.map((c, i) => (
-                        <View key={i} style={{ flexDirection: 'row', gap: 8 }}>
-                          <Text style={{ fontSize: 13, color: '#C7C7CC', lineHeight: 20 }}>•</Text>
-                          <Text style={st.confluenceText}>{c}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-                </>
-              ) : !signalLoading ? (
-                <Text style={[st.analysisText, { color: '#C7C7CC' }]}>
-                  {positionSummary ?? '분석 데이터가 없어요'}
-                </Text>
-              ) : null}
-            </View>
-
-            <SectionDivider />
-
             {/* ── 포지션 정보 ── */}
             <View style={st.flatSection}>
               <Text style={st.sectionLabel}>포지션 정보</Text>
@@ -261,25 +186,6 @@ export default function PositionDetail() {
               <InfoRow label="보유 기간" value={position.holdingPeriod ?? '-'} isLast />
             </View>
 
-            {/* ── 에이전트 판단 근거 ── */}
-            {position.agentReason && (
-              <>
-                <SectionDivider />
-                <View style={st.flatSection}>
-                  <Text style={st.sectionLabel}>에이전트 판단</Text>
-                  <View style={st.reasonBox}>
-                    <Text style={st.reasonLabel}>진입 이유</Text>
-                    <Text style={st.reasonText}>{position.agentReason}</Text>
-                  </View>
-                  {position.agentPlan && (
-                    <View style={[st.reasonBox, { marginTop: 10 }]}>
-                      <Text style={st.reasonLabel}>운용 계획</Text>
-                      <Text style={st.reasonText}>{position.agentPlan}</Text>
-                    </View>
-                  )}
-                </View>
-              </>
-            )}
 
             <View style={{ height: 120 }} />
           </Animated.View>

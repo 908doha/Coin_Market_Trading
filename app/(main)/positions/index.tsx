@@ -116,11 +116,6 @@ function PositionCard({ pos, isLast, showUsd, rate }: { pos: Position; isLast: b
           </Text>
         </View>
       </View>
-      {pos.agentReason ? (
-        <View style={card.hint}>
-          <Text variant="meta" color="#AEAEB2" numberOfLines={1}>🤖 {pos.agentReason}</Text>
-        </View>
-      ) : null}
     </PressableScale>
   );
 }

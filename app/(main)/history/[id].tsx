@@ -6,7 +6,6 @@ import { Text, SubPageHeader, GlassCard, ScreenTransition } from '@/design-syste
 import { colors } from '@/design-system/tokens';
 import { tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
-import { useAccounts } from '@/store/accounts';
 import { formatKRWSigned, formatRate } from '@/utils/format';
 
 function fmt$(v?: number) {
@@ -33,9 +32,8 @@ const row = StyleSheet.create({
 
 export default function TradeDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { accounts } = useAccounts();
   const { data: trade, isLoading, error } = useApi(
-    () => tradesService.getById(id, accounts),
+    () => tradesService.getById(id),
     [id],
   );
 
@@ -148,27 +146,6 @@ export default function TradeDetail() {
             <InfoRow label="보유기간" value={trade.holdingDays > 0 ? `${trade.holdingDays}일` : '-'} isLast />
           </GlassCard>
 
-          {/* ── 에이전트 판단 ── */}
-          {((trade as any).agentEntryReason || (trade as any).agentExitReason) && (
-            <GlassCard intensity="medium" radius={24} padding={20} style={st.section}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-                <Text style={{ fontSize: 18 }}>🤖</Text>
-                <Text style={st.sectionTitle}>에이전트 판단</Text>
-              </View>
-              {(trade as any).agentEntryReason && (
-                <View style={[st.reasonBox, { marginBottom: 10 }]}>
-                  <Text style={st.reasonLabel}>진입 이유</Text>
-                  <Text style={st.reasonText}>{(trade as any).agentEntryReason}</Text>
-                </View>
-              )}
-              {(trade as any).agentExitReason && (
-                <View style={st.reasonBox}>
-                  <Text style={st.reasonLabel}>{exitLabel} 이유</Text>
-                  <Text style={st.reasonText}>{(trade as any).agentExitReason}</Text>
-                </View>
-              )}
-            </GlassCard>
-          )}
 
           <View style={{ height: 120 }} />
         </ScrollView>

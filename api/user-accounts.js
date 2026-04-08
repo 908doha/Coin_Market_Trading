@@ -30,6 +30,14 @@ function getPool() {
       ssl: { rejectUnauthorized: false },
       max: 3,
       idleTimeoutMillis: 10_000,
+      connectionTimeoutMillis: 10_000,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 5_000,
+    });
+    // 연결 에러 시 풀을 리셋하여 ECONNRESET 후 재연결 가능하게 함
+    pool.on('error', (err) => {
+      console.error('[user-accounts] pool idle client error:', err.message);
+      pool = null;
     });
   }
   return pool;
@@ -98,15 +106,16 @@ async function dbUpsert(userId, encryptedData) {
 
 // ── Handler ──────────────────────────────────────────────────────────────────
 module.exports = async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin',  '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  const allowedOrigin = process.env.FRONTEND_URL || '*';
+  res.setHeader('Access-Control-Allow-Origin',      allowedOrigin);
+  res.setHeader('Access-Control-Allow-Headers',     'Authorization, Content-Type');
+  res.setHeader('Access-Control-Allow-Methods',     'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
 
   if (req.method === 'OPTIONS') { res.status(200).end(); return; }
 
-  // DATABASE_URL 미설정이면 204 (기능 비활성화, 로컬만 사용)
   if (!process.env.DATABASE_URL) {
-    res.status(204).end();
+    res.status(500).json({ error: 'DATABASE_URL 환경변수가 설정되지 않았습니다. Vercel 환경변수를 확인해주세요.' });
     return;
   }
 

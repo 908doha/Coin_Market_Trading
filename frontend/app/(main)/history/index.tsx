@@ -285,12 +285,36 @@ const sb = StyleSheet.create({
 // ── 필터 탭 ───────────────────────────────────────────────────────────────────
 function FilterTabs({ filter, onChange }: { filter: Filter; onChange: (f: Filter) => void }) {
   const TABS: Filter[] = ['전체', '수익', '손실'];
+  const [tabWidth, setTabWidth] = useState(0);
+  const translateX = useSharedValue(0);
+
+  useEffect(() => {
+    if (tabWidth === 0) return;
+    translateX.value = withTiming(
+      TABS.indexOf(filter) * tabWidth,
+      { duration: 200, easing: Easing.out(Easing.cubic) },
+    );
+  }, [filter, tabWidth]);
+
+  const indicatorStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }],
+  }));
+
   return (
-    <View style={tab.wrap}>
+    <View
+      style={tab.wrap}
+      onLayout={(e) => {
+        const w = e.nativeEvent.layout.width / 3;
+        setTabWidth(w);
+        translateX.value = TABS.indexOf(filter) * w; // 초기 위치 즉시 설정
+      }}
+    >
+      {tabWidth > 0 && (
+        <Animated.View style={[tab.indicator, { width: tabWidth - 32 }, indicatorStyle]} />
+      )}
       {TABS.map((f) => (
         <Pressable key={f} style={tab.item} onPress={() => onChange(f)}>
           <Text style={[tab.text, filter === f && tab.activeText]}>{f}</Text>
-          {filter === f && <View style={tab.indicator} />}
         </Pressable>
       ))}
     </View>
@@ -298,10 +322,10 @@ function FilterTabs({ filter, onChange }: { filter: Filter; onChange: (f: Filter
 }
 const tab = StyleSheet.create({
   wrap:       { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#F0F0F0', backgroundColor: '#FFFFFF' },
-  item:       { flex: 1, alignItems: 'center', paddingVertical: 13, position: 'relative' },
+  item:       { flex: 1, alignItems: 'center', paddingVertical: 13 },
   text:       { fontSize: 15, fontWeight: '500', color: colors.text.tertiary },
   activeText: { fontWeight: '700', color: colors.text.primary },
-  indicator:  { position: 'absolute', bottom: 0, left: 16, right: 16, height: 2, backgroundColor: colors.text.primary, borderRadius: 1 },
+  indicator:  { position: 'absolute', bottom: 0, left: 16, height: 2, backgroundColor: colors.text.primary, borderRadius: 1 },
 });
 
 // ── 메인 ─────────────────────────────────────────────────────────────────────

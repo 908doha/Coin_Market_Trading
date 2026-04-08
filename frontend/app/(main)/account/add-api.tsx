@@ -43,7 +43,7 @@ export default function AddApi() {
   return (
     <ScreenTransition>
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <SubPageHeader title="API 키 추가" onBack={() => router.navigate('/(main)/account/api-accounts')} />
+        <SubPageHeader title="API 키 추가" onBack={() => router.back()} />
 
         <KeyboardAvoidingView
           style={{ flex: 1 }}

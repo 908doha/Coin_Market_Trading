@@ -1,9 +1,9 @@
 import React, { useState, useMemo } from 'react';
-import { View, StyleSheet, ScrollView, Pressable, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import Svg, { Path, Polygon, Rect, Text as SvgText } from 'react-native-svg';
-import { Text, SubPageHeader, ScreenTransition } from '@/design-system';
+import { Text, SubPageHeader, ScreenTransition, TradingListSkeleton } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType } from '@/store/accounts';
 import { tradesService } from '@/services';
@@ -79,10 +79,11 @@ const chip = StyleSheet.create({
   activeText: { color: '#FFFFFF' },
 });
 
-// ── 거래 행 (은행 앱 스타일) ──────────────────────────────────────────────────
+// ── 거래 행 (history/index.tsx 와 동일한 스타일) ──────────────────────────────
 function TradeRow({ trade, isLast }: { trade: Trade; isLast: boolean }) {
-  const isProfit  = trade.profit >= 0;
-  const pnlColor  = isProfit ? colors.market.rise : colors.market.fall;
+  const isProfit = trade.profit > 0;
+  const isLoss   = trade.profit < 0;
+  const pnlColor = isProfit ? colors.market.rise : isLoss ? colors.market.fall : colors.text.tertiary;
 
   const date = (() => {
     try {
@@ -91,51 +92,42 @@ function TradeRow({ trade, isLast }: { trade: Trade; isLast: boolean }) {
     } catch { return '-'; }
   })();
 
-  const typeLabel =
-    trade.type === 'take_profit' ? '익절' :
-    trade.type === 'stop_loss'   ? '손절' : '수동';
+  const statusText =
+    trade.direction === 'Long'
+      ? isProfit ? '롱 익절 완료' : isLoss ? '롱 손절' : '롱 수동 청산'
+      : isProfit ? '숏 익절 완료' : isLoss ? '숏 손절' : '숏 수동 청산';
 
-  const dirLabel = trade.direction === 'Long' ? '롱▲' : '숏▼';
-  const dirColor = trade.direction === 'Long' ? colors.market.rise : colors.market.fall;
+  const statusColor = isProfit
+    ? colors.informative.text
+    : isLoss ? colors.negative.text : colors.text.tertiary;
 
   return (
     <Pressable
-      style={[row.wrap, !isLast && row.border]}
+      style={({ pressed }) => [row.wrap, !isLast && row.border, pressed && { backgroundColor: '#F8F8F8' }]}
       onPress={() => router.push(`/(main)/history/${trade.id}`)}
     >
-      {/* 날짜 */}
       <Text style={row.date}>{date}</Text>
-
-      {/* 코인 + 방향/유형 */}
-      <View style={{ flex: 1, paddingHorizontal: 12 }}>
+      <View style={{ flex: 1, paddingRight: 12 }}>
         <Text style={row.symbol} numberOfLines={1}>{trade.symbol}</Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 }}>
-          <Text style={[row.dir, { color: dirColor }]}>{dirLabel}</Text>
-          <Text style={row.type}>{typeLabel}</Text>
+        <Text style={[row.status, { color: statusColor }]} numberOfLines={1}>{statusText}</Text>
+      </View>
+      {trade.profit !== 0 && (
+        <View style={{ alignItems: 'flex-end' }}>
+          <Text style={[row.profit, { color: pnlColor }]}>{formatKRWSigned(trade.profit)}</Text>
+          <Text style={[row.rate, { color: pnlColor }]}>{formatRate(trade.profitRate)}</Text>
         </View>
-      </View>
-
-      {/* 손익 */}
-      <View style={{ alignItems: 'flex-end' }}>
-        <Text style={[row.profit, { color: pnlColor }]}>
-          {formatKRWSigned(trade.profit)}
-        </Text>
-        <Text style={[row.rate, { color: pnlColor }]}>
-          {formatRate(trade.profitRate)}
-        </Text>
-      </View>
+      )}
     </Pressable>
   );
 }
 const row = StyleSheet.create({
-  wrap:   { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 20 },
-  border: { borderBottomWidth: 1, borderBottomColor: colors.border.default },
-  date:   { fontSize: 13, color: colors.text.tertiary, width: 36, lineHeight: 18 },
-  symbol: { fontSize: 15, fontWeight: '700', color: colors.text.primary },
-  dir:    { fontSize: 12, fontWeight: '700' },
-  type:   { fontSize: 12, color: colors.text.tertiary, fontWeight: '500' },
+  wrap:   { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 20, backgroundColor: '#FFFFFF' },
+  border: { borderBottomWidth: 1, borderBottomColor: '#F2F2F2' },
+  date:   { width: 34, fontSize: 13, color: colors.text.tertiary, lineHeight: 18 },
+  symbol: { fontSize: 15, fontWeight: '700', color: colors.text.primary, lineHeight: 20 },
+  status: { fontSize: 13, fontWeight: '500', marginTop: 2, lineHeight: 18 },
   profit: { fontSize: 15, fontWeight: '700' },
-  rate:   { fontSize: 13, fontWeight: '600', marginTop: 2 },
+  rate:   { fontSize: 12, fontWeight: '600', marginTop: 2 },
 });
 
 // ── 메인 ──────────────────────────────────────────────────────────────────────
@@ -171,9 +163,14 @@ export default function AccountDetail() {
     () => (trades ?? []).reduce((s, t) => s + t.profit, 0),
     [trades],
   );
-  const winRate = useMemo(() => {
-    if (!trades?.length) return 0;
-    return Math.round((trades.filter((t) => t.profit > 0).length / trades.length) * 100);
+  // 손익비 = 평균 수익 / 평균 손실 (절댓값)
+  const plRatio = useMemo(() => {
+    if (!trades?.length) return null;
+    const wins   = trades.filter((t) => t.profit > 0);
+    const losses = trades.filter((t) => t.profit < 0);
+    const avgWin  = wins.length   ? wins.reduce((s, t) => s + t.profit, 0) / wins.length : 0;
+    const avgLoss = losses.length ? Math.abs(losses.reduce((s, t) => s + t.profit, 0) / losses.length) : 0;
+    return avgLoss > 0 ? (avgWin / avgLoss).toFixed(2) : null;
   }, [trades]);
 
   if (!account) {
@@ -274,11 +271,11 @@ export default function AccountDetail() {
                 </View>
                 <View style={st.statDivider} />
                 <View style={st.statItem}>
-                  <Text style={st.statLabel}>30일 승률</Text>
+                  <Text style={st.statLabel}>손익비</Text>
                   <Text style={[st.statValue, {
-                    color: winRate >= 60 ? colors.market.rise : winRate >= 40 ? colors.text.primary : colors.market.fall,
+                    color: plRatio && parseFloat(plRatio) >= 1 ? colors.market.rise : plRatio ? colors.market.fall : colors.text.primary,
                   }]}>
-                    {trades?.length ? `${winRate}%` : '—'}
+                    {plRatio ?? '—'}
                   </Text>
                 </View>
               </View>
@@ -298,10 +295,7 @@ export default function AccountDetail() {
           </View>
 
           {tradesLoading ? (
-            <View style={st.loadingWrap}>
-              <ActivityIndicator size="small" color={colors.text.tertiary} />
-              <Text style={{ color: colors.text.tertiary, marginTop: 8, fontSize: 14 }}>거래 내역 불러오는 중...</Text>
-            </View>
+            <TradingListSkeleton />
           ) : !filtered.length ? (
             <View style={st.emptyTrades}>
               <Text style={{ fontSize: 14, color: colors.text.disabled }}>
@@ -361,7 +355,6 @@ const st = StyleSheet.create({
   sectionTitle: { fontSize: 16, fontWeight: '700', color: colors.text.primary },
   chips:        { flexDirection: 'row', gap: 6 },
 
-  loadingWrap: { alignItems: 'center', paddingVertical: 40 },
   emptyTrades: { alignItems: 'center', paddingVertical: 48 },
 
   emptyCenter: { flex: 1, alignItems: 'center', justifyContent: 'center' },

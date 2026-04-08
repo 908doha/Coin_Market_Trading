@@ -116,7 +116,7 @@ export default function ApiAccounts() {
   return (
     <ScreenTransition>
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <SubPageHeader title="계좌 연결" onBack={() => router.navigate('/(main)/account')} />
+        <SubPageHeader title="계좌 연결" onBack={() => router.back()} />
 
         <ScrollView
           contentContainerStyle={styles.content}

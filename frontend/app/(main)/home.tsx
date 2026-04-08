@@ -539,7 +539,7 @@ function AccountRow({
     : null;
 
   return (
-    <PressableScale onPress={() => router.push('/(main)/account/api-accounts')} scaleTo={0.99}>
+    <PressableScale onPress={() => router.push(`/(main)/account/${account.id}`)} scaleTo={0.99}>
       <View style={[accRow.wrap, !isLast && accRow.border]}>
         <ExchangeLogo exchange={account.exchange} size={44} />
 

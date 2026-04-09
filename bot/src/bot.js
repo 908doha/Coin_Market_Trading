@@ -1,12 +1,14 @@
 require('dotenv').config();
 
-const cron = require('node-cron');
+const http   = require('http');
+const cron   = require('node-cron');
 const config = require('./config');
-const gateClient = require('./api/gateClient');
+const gateClient  = require('./api/gateClient');
 const IctStrategy = require('./strategies/ictStrategy');
 const OrderManager = require('./services/orderManager');
 const TelegramService = require('./services/telegram');
-const logger = require('./utils/logger');
+const indicators  = require('./utils/indicators');
+const logger      = require('./utils/logger');
 
 class TradingBot {
   constructor() {
@@ -213,6 +215,192 @@ class TradingBot {
   }
 }
 
+// ── HTTP API 서버 ─────────────────────────────────────────────────────────────
+
+/**
+ * ICT 분석 결과를 구조화된 JSON으로 반환
+ * Telegram의 _analyzePairDetail()과 동일한 데이터, 앱 표시용
+ */
+async function analyzeContractJson(contract) {
+  const [htfCandles, mtfCandles, ltfCandles] = await Promise.all([
+    gateClient.getCandles(contract, config.timeframes.htf, 200),
+    gateClient.getCandles(contract, config.timeframes.mtf, 200),
+    gateClient.getCandles(contract, config.timeframes.ltf, 200),
+  ]);
+
+  const currentPrice = ltfCandles[ltfCandles.length - 1].close;
+  const session = indicators.getActiveSession();
+
+  // HTF
+  const htfSH = indicators.findSwingHighs(htfCandles, config.ict.structureShiftBars);
+  const htfSL = indicators.findSwingLows(htfCandles,  config.ict.structureShiftBars);
+  let htfDirection = null, htfStructure = null;
+  if (htfSH.length >= 2 && htfSL.length >= 2) {
+    const lh = htfSH[htfSH.length - 1].price, ph = htfSH[htfSH.length - 2].price;
+    const ll = htfSL[htfSL.length - 1].price, pl = htfSL[htfSL.length - 2].price;
+    if (lh > ph && ll > pl)      { htfDirection = 'BULLISH'; htfStructure = 'HH+HL'; }
+    else if (lh < ph && ll < pl) { htfDirection = 'BEARISH'; htfStructure = 'LH+LL'; }
+    else                         { htfDirection = 'RANGING'; htfStructure = '횡보'; }
+  }
+  const pdhl    = indicators.calculatePDHL(htfCandles);
+  const htfOBs  = indicators.findOrderBlocks(htfCandles);
+  const htfFVGs = indicators.findFairValueGaps(htfCandles);
+  const htfBullFVG = htfFVGs.bullish.filter(f => !f.isFilled);
+  const htfBearFVG = htfFVGs.bearish.filter(f => !f.isFilled);
+  const tol = 0.003;
+  const inHtfOB  = [...htfOBs.bullish, ...htfOBs.bearish].some(ob => currentPrice >= ob.low * (1 - tol) && currentPrice <= ob.high * (1 + tol));
+  const inHtfFVG = [...htfBullFVG, ...htfBearFVG].some(f => currentPrice >= f.bottom * (1 - tol) && currentPrice <= f.top * (1 + tol));
+
+  // MTF
+  const mtfSH = indicators.findSwingHighs(mtfCandles, config.ict.structureShiftBars);
+  const mtfSL = indicators.findSwingLows(mtfCandles,  config.ict.structureShiftBars);
+  const mtfMss = (mtfSH.length >= 2 && mtfSL.length >= 2)
+    ? indicators.detectMarketStructureShift(mtfCandles, mtfSH, mtfSL)
+    : null;
+  const mtfOBs  = indicators.findOrderBlocks(mtfCandles);
+  const mtfFVGs = indicators.findFairValueGaps(mtfCandles);
+  const mtfBullFVG = mtfFVGs.bullish.filter(f => !f.isFilled);
+  const mtfBearFVG = mtfFVGs.bearish.filter(f => !f.isFilled);
+
+  // LTF
+  const ltfFVGs    = indicators.findFairValueGaps(ltfCandles);
+  const ltfBullCE  = ltfFVGs.bullish.filter(f => !f.isFilled && f.atCE);
+  const ltfBearCE  = ltfFVGs.bearish.filter(f => !f.isFilled && f.atCE);
+  const ltfBullFill = ltfFVGs.bullish.filter(f => !f.isFilled && f.inRange && f.fillPercent >= 50);
+  const ltfBearFill = ltfFVGs.bearish.filter(f => !f.isFilled && f.inRange && f.fillPercent >= 50);
+  const iofeds     = indicators.detectIOFED(ltfCandles);
+  const recentIOFED = iofeds.filter(d => ltfCandles.length - d.index <= 5);
+
+  // Session ranges
+  const sRanges = indicators.calculateSessionRanges(ltfCandles);
+  const sessions = Object.values(sRanges).map(sr => ({
+    name:      sr.name,
+    low:       parseFloat(sr.low.toFixed(2)),
+    high:      parseFloat(sr.high.toFixed(2)),
+    sweep:     !!(sr.highSweep || sr.lowSweep),
+  }));
+
+  // 종합 신호
+  const signal = bot.strategy.analyze({ htf: htfCandles, mtf: mtfCandles, ltf: ltfCandles });
+
+  const lastFvg = (arr) => arr.length > 0 ? {
+    ce:      parseFloat(arr[arr.length - 1].ce.toFixed(2)),
+    fillPct: arr[arr.length - 1].fillPercent,
+  } : null;
+
+  return {
+    contract,
+    currentPrice: parseFloat(currentPrice.toFixed(2)),
+    session: { active: session.active, name: session.name ?? session.reason },
+    htf: {
+      timeframe:  config.timeframes.htf,
+      direction:  htfDirection,
+      structure:  htfStructure,
+      swingHigh:  htfSH.length ? parseFloat(htfSH[htfSH.length - 1].price.toFixed(2)) : null,
+      swingLow:   htfSL.length ? parseFloat(htfSL[htfSL.length - 1].price.toFixed(2)) : null,
+      pdh:        pdhl ? parseFloat(pdhl.pdh.toFixed(2)) : null,
+      pdl:        pdhl ? parseFloat(pdhl.pdl.toFixed(2)) : null,
+      pdhSweep:   pdhl?.pdhSweep ?? false,
+      pdlSweep:   pdhl?.pdlSweep ?? false,
+      ob:         { bull: htfOBs.bullish.length, bear: htfOBs.bearish.length },
+      fvg: {
+        bull: htfBullFVG.length, bear: htfBearFVG.length,
+        lastBull: lastFvg(htfBullFVG),
+        lastBear: lastFvg(htfBearFVG),
+      },
+      inPOI:   inHtfOB || inHtfFVG,
+      poiType: inHtfOB ? 'OB' : inHtfFVG ? 'FVG' : null,
+    },
+    mtf: {
+      timeframe: config.timeframes.mtf,
+      mss:       mtfMss ? { found: true, label: mtfMss.label, kind: mtfMss.kind } : { found: false },
+      ob:        { bull: mtfOBs.bullish.length, bear: mtfOBs.bearish.length },
+      fvg: {
+        bull: mtfBullFVG.length, bear: mtfBearFVG.length,
+        lastBull: lastFvg(mtfBullFVG),
+        lastBear: lastFvg(mtfBearFVG),
+      },
+    },
+    ltf: {
+      timeframe: config.timeframes.ltf,
+      fvgCE:   { bull: ltfBullCE.length,   bear: ltfBearCE.length },
+      fvgFill: { bull: ltfBullFill.length, bear: ltfBearFill.length },
+      iofed:   recentIOFED.map(d => ({ type: d.type, bars: d.consecutiveBars })),
+    },
+    sessions,
+    summary: {
+      signal:     signal.signal,
+      reason:     signal.reason,
+      confluence: signal.confluence ?? [],
+      entry:      signal.entry ?? null,
+      sl:         signal.sl    ?? null,
+      tp:         signal.tp    ?? null,
+    },
+  };
+}
+
+function startHttpServer(botInstance) {
+  const PORT   = process.env.PORT ?? 3001;
+  const SECRET = process.env.BOT_API_SECRET ?? '';
+
+  const server = http.createServer(async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Access-Control-Allow-Origin',  '*');
+    res.setHeader('Access-Control-Allow-Headers', 'x-bot-secret');
+
+    if (req.method === 'OPTIONS') { res.writeHead(200).end('{}'); return; }
+
+    // 시크릿 검증 (설정된 경우)
+    if (SECRET && req.headers['x-bot-secret'] !== SECRET) {
+      res.writeHead(401).end(JSON.stringify({ error: '인증 실패' }));
+      return;
+    }
+
+    const url = new URL(req.url, `http://localhost:${PORT}`);
+
+    try {
+      // GET /bot/status
+      if (url.pathname === '/bot/status') {
+        res.writeHead(200).end(JSON.stringify({
+          running:         botInstance.isRunning,
+          pairs:           botInstance.validPairs,
+          activePositions: Object.fromEntries(botInstance.activePositions),
+        }));
+        return;
+      }
+
+      // GET /bot/analyze?contract=XBT_USDT
+      if (url.pathname === '/bot/analyze') {
+        const contract = url.searchParams.get('contract');
+        if (!contract) {
+          res.writeHead(400).end(JSON.stringify({ error: 'contract 파라미터 필요' }));
+          return;
+        }
+        const result = await analyzeContractJson(contract.replace('/', '_'));
+        res.writeHead(200).end(JSON.stringify(result));
+        return;
+      }
+
+      // GET /bot/agents
+      if (url.pathname === '/bot/agents') {
+        res.writeHead(200).end(JSON.stringify([
+          { id: 'ict-v2', name: 'ICT v2', description: 'HTF/MTF/LTF 멀티 타임프레임 ICT 자동매매', version: '2.0' },
+        ]));
+        return;
+      }
+
+      res.writeHead(404).end(JSON.stringify({ error: 'Not found' }));
+    } catch (err) {
+      logger.error(`[HTTP] ${req.url} 오류: ${err.message}`);
+      res.writeHead(500).end(JSON.stringify({ error: err.message }));
+    }
+  });
+
+  server.listen(PORT, () => {
+    logger.info(`[HTTP] API 서버 시작 — 포트 ${PORT}`);
+  });
+}
+
 // --- 실행 ---
 const bot = new TradingBot();
 
@@ -220,6 +408,8 @@ bot.start().catch((err) => {
   logger.error(`봇 시작 실패: ${err.message}`);
   process.exit(1);
 });
+
+startHttpServer(bot);
 
 // 프로세스 종료 시 정리
 process.on('SIGINT', async () => {

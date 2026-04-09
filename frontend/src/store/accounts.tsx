@@ -163,6 +163,8 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
   const [balancesLoading, setBalLoading] = useState(false);
   const accountsRef = useRef(accounts);
   accountsRef.current = accounts;
+  // 초기 동기화 중 로컬 변경이 발생했는지 추적 (race condition 방지)
+  const hasMutated = useRef(false);
 
   // 앱 시작: 로컬 → 백엔드 순서로 로드
   useEffect(() => {
@@ -174,6 +176,15 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
 
       // ② 백엔드에서 최신 데이터 가져오기 (기기 간 동기화)
       const remote = await backendLoad();
+
+      // 초기 동기화 중 사용자가 계좌를 추가/수정/삭제한 경우 → 백엔드 데이터로 덮어쓰지 않음
+      if (hasMutated.current) {
+        console.log('[accounts] 초기 동기화 중 로컬 변경 감지 — 백엔드 덮어쓰기 건너뜀');
+        // 로컬이 최신이므로 백엔드에 현재 로컬 데이터를 업로드
+        await backendSave(accountsRef.current);
+        return;
+      }
+
       if (remote && remote.length > 0) {
         // 원격 데이터를 로컬보다 우선시 (서버가 source-of-truth)
         setAccounts(remote);
@@ -229,6 +240,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
   const addAccount = useCallback(async (
     input: Omit<ExchangeAccount, 'id' | 'createdAt'>,
   ): Promise<ExchangeAccount> => {
+    hasMutated.current = true;
     const account: ExchangeAccount = {
       ...input,
       id:        makeId(),
@@ -237,7 +249,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     const next = [...accountsRef.current, account];
     await localSave(next);
     setAccounts(next);
-    backendSave(next);   // background
+    backendSave(next).catch((e) => console.error('[accounts] backendSave 실패:', e));
     return account;
   }, []);
 
@@ -245,18 +257,20 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     id: string,
     updates: Partial<Omit<ExchangeAccount, 'id' | 'createdAt'>>,
   ): Promise<void> => {
+    hasMutated.current = true;
     const next = accountsRef.current.map((a) => a.id === id ? { ...a, ...updates } : a);
     await localSave(next);
     setAccounts(next);
-    backendSave(next);   // background
+    backendSave(next).catch((e) => console.error('[accounts] backendSave 실패:', e));
   }, []);
 
   const removeAccount = useCallback(async (id: string): Promise<void> => {
+    hasMutated.current = true;
     const next = accountsRef.current.filter((a) => a.id !== id);
     await localSave(next);
     setAccounts(next);
     setBalances((prev) => { const n = { ...prev }; delete n[id]; return n; });
-    backendSave(next);   // background
+    backendSave(next).catch((e) => console.error('[accounts] backendSave 실패:', e));
   }, []);
 
   return (

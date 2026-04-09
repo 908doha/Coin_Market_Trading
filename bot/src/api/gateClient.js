@@ -268,49 +268,73 @@ const gateClient = {
   /**
    * SL/TP 지정가 주문 세트 등록
    * Gate.io Price Triggered Order (Plan Order)
+   * Single/Dual 모드 자동 대응
    *
    * @param contract 거래쌍
-   * @param positionSize 현재 포지션 사이즈 (항상 양수)
+   * @param positionSize 현재 포지션 사이즈 (항상 양수) - 사용 안 함 (close 자동)
    * @param direction 'long' 또는 'short'
    * @param sl 손절 가격
    * @param tp 익절 가격
    */
   async placeSLTP(contract, positionSize, direction, sl, tp) {
     const results = { slOrder: null, tpOrder: null };
-    const absSize = Math.abs(positionSize);
 
-    if (direction === 'long') {
-      // Long 청산 = 매도 (음수 size)
-      // SL: mark price <= sl 도달 시 청산 (rule=2)
-      results.slOrder = await this._createTriggerOrder(contract, -absSize, sl, 2, 'close-long-order');
-      // TP: mark price >= tp 도달 시 청산 (rule=1)
-      results.tpOrder = await this._createTriggerOrder(contract, -absSize, tp, 1, 'close-long-order');
-    } else {
-      // Short 청산 = 매수 (양수 size)
-      // SL: mark price >= sl 도달 시 청산 (rule=1)
-      results.slOrder = await this._createTriggerOrder(contract, absSize, sl, 1, 'close-short-order');
-      // TP: mark price <= tp 도달 시 청산 (rule=2)
-      results.tpOrder = await this._createTriggerOrder(contract, absSize, tp, 2, 'close-short-order');
+    // 포지션 모드 감지 (single vs dual)
+    let isDual = false;
+    try {
+      const pos = await this.getPosition(contract);
+      const mode = (pos && pos.mode) || 'single';
+      isDual = mode === 'dual_long' || mode === 'dual_short' || mode === 'dual';
+      logger.debug(`[${contract}] 포지션 mode=${mode} isDual=${isDual}`);
+    } catch (err) {
+      logger.warn(`[${contract}] 포지션 mode 확인 실패, single 가정: ${err.message}`);
     }
 
-    logger.info(`SL/TP 등록 완료: SL=${sl} TP=${tp}`);
+    const orderType = direction === 'long' ? 'close-long-order' : 'close-short-order';
+    const autoSize = direction === 'long' ? 'close_long' : 'close_short';
+    const modeOpts = { isDual, autoSize };
+
+    if (direction === 'long') {
+      // SL: mark price <= sl 도달 시 청산 (rule=2)
+      results.slOrder = await this._createTriggerOrder(contract, sl, 2, orderType, modeOpts);
+      // TP: mark price >= tp 도달 시 청산 (rule=1)
+      results.tpOrder = await this._createTriggerOrder(contract, tp, 1, orderType, modeOpts);
+    } else {
+      // SL: mark price >= sl 도달 시 청산 (rule=1)
+      results.slOrder = await this._createTriggerOrder(contract, sl, 1, orderType, modeOpts);
+      // TP: mark price <= tp 도달 시 청산 (rule=2)
+      results.tpOrder = await this._createTriggerOrder(contract, tp, 2, orderType, modeOpts);
+    }
+
+    logger.info(`SL/TP 등록 완료: SL=${sl} TP=${tp} (mode=${isDual ? 'dual' : 'single'})`);
     return results;
   },
 
   /**
    * Gate.io Price Triggered Order 생성
-   * 트리거 발동 시 시장가 전량 청산 (close: true)
+   * 트리거 발동 시 시장가 전량 청산
+   *   - Single 모드: close: true
+   *   - Dual 모드  : autoSize: 'close_long'|'close_short' + reduceOnly
+   *                 (dual 모드는 close: true 금지 - AUTO_INVALID_PARAM_CLOSE)
    */
-  async _createTriggerOrder(contract, _size, triggerPrice, rule, orderType) {
+  async _createTriggerOrder(contract, triggerPrice, rule, orderType, modeOpts = {}) {
     try {
       const order = new GateApi.FuturesPriceTriggeredOrder();
 
       const initial = new GateApi.FuturesInitialOrder();
       initial.contract = contract;
-      initial.size = 0;                      // close=true 일 때 필수로 0
+      initial.size = 0;                      // close/autoSize 시 0
       initial.price = '0';                   // 0 = 시장가 체결
       initial.tif = 'ioc';                   // market order IOC
-      initial.close = true;                  // 포지션 전량 청산 (Gate.io가 방향 자동 판단)
+
+      if (modeOpts.isDual) {
+        // Dual 모드: autoSize + reduceOnly (close 금지)
+        initial.autoSize = modeOpts.autoSize; // 'close_long' | 'close_short'
+        initial.reduceOnly = true;
+      } else {
+        // Single 모드: close=true (포지션 전량 청산)
+        initial.close = true;
+      }
 
       const trigger = new GateApi.FuturesPriceTrigger();
       trigger.strategyType = 0;              // price trigger

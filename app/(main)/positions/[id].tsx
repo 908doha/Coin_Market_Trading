@@ -10,7 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Text, Card, Badge, Divider } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
-import { positionsService } from '@/services';
+import { positionsService, type IctAnalysis } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 
@@ -67,6 +67,115 @@ const riskStyles = StyleSheet.create({
     flex:         1,
     height:       6,
     borderRadius: 3,
+  },
+});
+
+// ─── ICT v2 분석 카드 ────────────────────────────────────────────────────────
+function IctAnalysisCard({ analysis, direction }: { analysis: IctAnalysis; direction: 'Long' | 'Short' }) {
+  const biasColor = analysis.htfBias === 'BULLISH' ? colors.positive.text : colors.negative.text;
+  const biasBg = analysis.htfBias === 'BULLISH' ? colors.positive.subtle : colors.negative.subtle;
+  const dirLabel = direction === 'Long' ? 'LONG' : 'SHORT';
+
+  return (
+    <Card variant="outlined" style={ictStyles.card}>
+      <View style={ictStyles.header}>
+        <Text variant="heading3">ICT v2 분석</Text>
+        <Badge
+          label={`${dirLabel} - ${analysis.confluenceCount}개 컨플루언스`}
+          variant={direction === 'Long' ? 'positive' : 'negative'}
+          size="sm"
+        />
+      </View>
+
+      <Divider style={{ marginBottom: spacing[3] }} />
+
+      {/* 세션 & HTF 바이어스 */}
+      <View style={ictStyles.metaRow}>
+        <View style={ictStyles.metaItem}>
+          <Text variant="caption1" color={colors.text.tertiary}>세션</Text>
+          <View style={[ictStyles.metaValue, { backgroundColor: colors.bg.elevated }]}>
+            <Text variant="label2">{analysis.session}</Text>
+          </View>
+        </View>
+        <View style={ictStyles.metaItem}>
+          <Text variant="caption1" color={colors.text.tertiary}>HTF({analysis.htfTimeframe}) 바이어스</Text>
+          <View style={[ictStyles.metaValue, { backgroundColor: biasBg }]}>
+            <Text variant="label2" color={biasColor}>{analysis.htfBias}</Text>
+          </View>
+        </View>
+      </View>
+
+      {/* 컨플루언스 목록 */}
+      <Text variant="label1Bold" style={{ marginTop: spacing[4], marginBottom: spacing[2] }}>
+        컨플루언스
+      </Text>
+      <View style={ictStyles.confluenceList}>
+        {analysis.confluences.map((c, i) => (
+          <View key={i} style={ictStyles.confluenceItem}>
+            <View style={ictStyles.confluenceDot}>
+              {c.isKey ? (
+                <Text variant="caption2" color={colors.cautious.text}>{'★'}</Text>
+              ) : (
+                <View style={ictStyles.dot} />
+              )}
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text variant="body2">
+                {c.isKey ? `${c.label} ` : `${c.label} `}
+                <Text variant="body2" color={colors.text.tertiary}>{c.detail}</Text>
+              </Text>
+            </View>
+          </View>
+        ))}
+      </View>
+    </Card>
+  );
+}
+
+const ictStyles = StyleSheet.create({
+  card: { marginBottom: spacing[4] },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing[3],
+  },
+  metaRow: {
+    flexDirection: 'row',
+    gap: spacing[3],
+  },
+  metaItem: {
+    flex: 1,
+    gap: spacing[1],
+  },
+  metaValue: {
+    paddingHorizontal: spacing[2.5],
+    paddingVertical: spacing[1.5],
+    borderRadius: borderRadius.sm,
+    alignItems: 'center',
+  },
+  confluenceList: {
+    backgroundColor: colors.bg.subtle,
+    borderRadius: borderRadius.md,
+    padding: spacing[3],
+    gap: spacing[2],
+  },
+  confluenceItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing[2],
+  },
+  confluenceDot: {
+    width: 16,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.text.tertiary,
   },
 });
 
@@ -216,6 +325,11 @@ export default function PositionDetail() {
             </Text>
           </View>
         </View>
+
+        {/* ── ICT v2 분석 ──────────────────────────── */}
+        {position.ictAnalysis && (
+          <IctAnalysisCard analysis={position.ictAnalysis} direction={position.direction} />
+        )}
 
         {/* ── 수익 현황 ───────────────────────────── */}
         <Card variant="filled" style={styles.profitCard}>

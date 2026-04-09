@@ -48,6 +48,20 @@ export const mockChartData = {
 
 // ─── 현재 포지션 ──────────────────────────────────────────────────────────────
 
+export type IctConfluence = {
+  label:  string;
+  detail: string;
+  isKey:  boolean;
+};
+
+export type IctAnalysis = {
+  session:          string;
+  htfBias:          'BULLISH' | 'BEARISH';
+  htfTimeframe:     string;
+  confluences:      IctConfluence[];
+  confluenceCount:  number;
+};
+
 export type Position = {
   id: string;
   coin: string;
@@ -67,6 +81,7 @@ export type Position = {
   riskLevel: 1 | 2 | 3 | 4 | 5;
   agentReason: string;
   agentPlan: string;
+  ictAnalysis?: IctAnalysis;
 };
 
 export const mockPositions: Position[] = [
@@ -91,6 +106,19 @@ export const mockPositions: Position[] = [
       'BTC 4시간봉 기준 골든크로스 확인. RSI 54로 과매수 구간이 아니며 온체인 데이터에서 고래 지갑의 매집 패턴이 감지됐습니다. 거래량 증가와 함께 지지선 96,000,000원을 강하게 지지하고 있어 단기 상승 여력이 있다고 판단했습니다.',
     agentPlan:
       '목표가 도달 또는 3일 이상 횡보 시 청산 예정. 94,000,000원 이탈 시 즉시 손절합니다.',
+    ictAnalysis: {
+      session: 'London AM',
+      htfBias: 'BULLISH',
+      htfTimeframe: '4h',
+      confluences: [
+        { label: 'HTF OB 진입', detail: '[95,800,000-96,050,000]', isKey: true },
+        { label: 'MTF OB', detail: '[95,600,000-96,200,000]', isKey: false },
+        { label: 'HTF+MTF OB 겹침', detail: '[95,800,000-96,050,000]', isKey: true },
+        { label: 'LTF FVG CE', detail: '@ 96,100,000 (진입가 96,200,000)', isKey: false },
+        { label: 'EQL 스윕', detail: '95,500,000 유동성 확보', isKey: false },
+      ],
+      confluenceCount: 5,
+    },
   },
   {
     id: 'p2',
@@ -113,6 +141,20 @@ export const mockPositions: Position[] = [
       'ETH/BTC 비율이 역사적 저점 근처에서 반등 신호 포착. 이더리움 네트워크 수수료(가스비)가 상승세로 전환되며 온체인 활동이 증가하고 있습니다. BTC 강세장에서 ETH가 후행하는 패턴을 보이는 시기로 판단해 진입했습니다.',
     agentPlan:
       '5,600,000원 도달 시 50% 부분 청산 후 나머지 홀딩. 4,950,000원 이탈 시 전량 손절합니다.',
+    ictAnalysis: {
+      session: 'US AM',
+      htfBias: 'BULLISH',
+      htfTimeframe: '4h',
+      confluences: [
+        { label: 'HTF OB 진입', detail: '[5,080,000-5,100,000]', isKey: true },
+        { label: 'MTF OB', detail: '[5,050,000-5,120,000]', isKey: false },
+        { label: 'HTF+MTF OB 겹침', detail: '[5,080,000-5,100,000]', isKey: true },
+        { label: 'LTF FVG CE', detail: '@ 5,110,000 (진입가 5,120,000)', isKey: false },
+        { label: 'MSS 확인', detail: '5,090,000 돌파', isKey: false },
+        { label: 'PMH 스윕', detail: '전일 고점 유동성 확보', isKey: true },
+      ],
+      confluenceCount: 6,
+    },
   },
   {
     id: 'p3',
@@ -135,6 +177,18 @@ export const mockPositions: Position[] = [
       'SOL 생태계 TVL(총 예치금)이 최근 3개월 최고치를 기록하며 펀더멘털이 강화되고 있습니다. 기술적으로는 200,000원 저항선을 돌파 시도 중이며 거래량이 평균 대비 2.3배 증가했습니다. 단기 모멘텀이 강한 구간으로 판단했습니다.',
     agentPlan:
       '220,000원 도달 시 전량 청산. 188,000원 이탈 시 즉시 손절합니다.',
+    ictAnalysis: {
+      session: 'London AM',
+      htfBias: 'BULLISH',
+      htfTimeframe: '4h',
+      confluences: [
+        { label: 'HTF OB 진입', detail: '[196,000-197,500]', isKey: true },
+        { label: 'MTF OB', detail: '[195,000-198,000]', isKey: false },
+        { label: 'LTF FVG CE', detail: '@ 197,800 (진입가 198,000)', isKey: false },
+        { label: 'PDL 스윕', detail: '전일 저점 유동성 확보', isKey: true },
+      ],
+      confluenceCount: 4,
+    },
   },
 ];
 

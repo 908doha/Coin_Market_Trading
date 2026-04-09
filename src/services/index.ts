@@ -9,7 +9,7 @@ export { notificationsService } from './notifications.service';
 export type { LoginRequest, SignupRequest, AuthResponse }             from './auth.service';
 export type { Balance, ChartPoint, ChartPeriod, FundTransaction,
               DepositRequest, WithdrawRequest }                        from './account.service';
-export type { Position }                                              from './positions.service';
+export type { Position, IctAnalysis, IctConfluence }                  from './positions.service';
 export type { Trade }                                                 from './trades.service';
 export type { AgentStats, AgentSettings, AgentStatus, RiskLevel }    from './agent.service';
 export type { NotificationSettings }                                  from './notifications.service';

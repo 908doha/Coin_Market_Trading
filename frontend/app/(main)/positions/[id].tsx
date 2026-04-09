@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
+import { View, StyleSheet, ScrollView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Text, GlassCard, Badge, SubPageHeader, ScreenTransition, PositionDetailSkeleton } from '@/design-system';
@@ -7,6 +7,7 @@ import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
+import { useAccounts } from '@/store/accounts';
 
 interface FvgInfo { ce: number; fillPct: number; }
 interface IctAnalysis {
@@ -255,30 +256,60 @@ export default function PositionDetail() {
   const [ictAnalysis, setIctAnalysis]     = useState<IctAnalysis | null>(null);
   const [botSignal,   setBotSignal]       = useState<BotSignal | null>(null);
   const [signalLoading, setSignalLoading] = useState(false);
+  const { accounts } = useAccounts();
+
+  // localStorage 캐시 헬퍼
+  const cacheKey = (contract: string) => `ict_analysis_${contract}`;
+  const loadCached = (contract: string): IctAnalysis | BotSignal | null => {
+    if (Platform.OS !== 'web') return null;
+    try {
+      const raw = localStorage.getItem(cacheKey(contract));
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  };
+  const saveCache = (contract: string, data: any) => {
+    if (Platform.OS !== 'web') return;
+    try { localStorage.setItem(cacheKey(contract), JSON.stringify(data)); } catch {}
+  };
 
   useEffect(() => {
     if (!position) return;
-    const accountId = (position as any).accountId;
+
+    // accountId: 포지션 데이터 → accounts store 순서로 탐색
+    const accountId = (position as any).accountId
+      || (accounts.length === 1 ? accounts[0].id : accounts[0]?.id);
+    const contract = (position.symbol ?? '').replace('/', '_');
+    if (!contract) return;
+
+    // 캐시된 분석이 있으면 즉시 표시
+    const cached = loadCached(contract);
+    if (cached && 'htf' in cached) {
+      setIctAnalysis(cached as IctAnalysis);
+    } else if (cached && 'confluence' in cached) {
+      setBotSignal(cached as BotSignal);
+    }
+
     if (!accountId) return;
 
-    const contract = (position.symbol ?? '').replace('/', '_');
     setSignalLoading(true);
 
     fetch(`/api/bot/analyze?accountId=${encodeURIComponent(accountId)}&contract=${encodeURIComponent(contract)}`)
       .then((r) => r.json())
       .then((data) => {
         if (data?.error || data?.htf === undefined) {
-          // 구형 BotSignal 폴백
-          if (data?.reason && data.reason !== '봇이 실행 중이지 않습니다') {
+          // 구형 BotSignal 폴백 (봇 미실행 메시지도 표시)
+          if (data?.reason) {
             setBotSignal(data);
+            if (data.confluence?.length > 0) saveCache(contract, data);
           }
           return;
         }
         setIctAnalysis(data as IctAnalysis);
+        saveCache(contract, data);
       })
       .catch(() => {})
       .finally(() => setSignalLoading(false));
-  }, [position]);
+  }, [position, accounts.length]);
 
   const isProfit  = (position?.profit ?? 0) >= 0;
   const pnlColor  = isProfit ? colors.market.rise : colors.market.fall;

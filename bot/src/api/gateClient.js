@@ -299,18 +299,18 @@ const gateClient = {
 
   /**
    * Gate.io Price Triggered Order 생성
-   * 트리거 발동 시 시장가로 청산 (reduceOnly)
+   * 트리거 발동 시 시장가 전량 청산 (close: true)
    */
-  async _createTriggerOrder(contract, size, triggerPrice, rule, orderType) {
+  async _createTriggerOrder(contract, _size, triggerPrice, rule, orderType) {
     try {
       const order = new GateApi.FuturesPriceTriggeredOrder();
 
       const initial = new GateApi.FuturesInitialOrder();
       initial.contract = contract;
-      initial.size = size;                   // 청산 방향 (음수: 매도, 양수: 매수)
-      initial.price = '0';                   // 0 = 시장가 체결 (SL/TP는 확실한 체결 우선)
-      initial.tif = 'ioc';                   // market order는 IOC 필요
-      initial.reduceOnly = true;             // 포지션 감소 전용
+      initial.size = 0;                      // close=true 일 때 필수로 0
+      initial.price = '0';                   // 0 = 시장가 체결
+      initial.tif = 'ioc';                   // market order IOC
+      initial.close = true;                  // 포지션 전량 청산 (Gate.io가 방향 자동 판단)
 
       const trigger = new GateApi.FuturesPriceTrigger();
       trigger.strategyType = 0;              // price trigger
@@ -324,15 +324,26 @@ const gateClient = {
       order.orderType = orderType;
 
       const { body } = await futuresApi.createPriceTriggeredOrder(SETTLE, order);
-      logger.info(`조건부 주문 등록: ${orderType} trigger=${triggerPrice} size=${size} id=${body.id}`);
+      logger.info(`조건부 주문 등록: ${orderType} trigger=${triggerPrice} id=${body.id}`);
       return body;
     } catch (err) {
-      logger.error(`조건부 주문 실패 [${orderType}]: ${err.message}`);
-      // Gate.io SDK 에러 상세 최대한 노출
-      const detail = err.body || (err.response && err.response.body) || err.response || null;
-      if (detail) {
-        logger.error(`상세: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`);
+      // Gate.io SDK 에러 안전 추출 (순환 참조 피함)
+      let detailStr = '(없음)';
+      try {
+        const detail =
+          err.body ||
+          (err.response && err.response.data) ||
+          (err.response && err.response.body) ||
+          null;
+        if (detail) {
+          detailStr = typeof detail === 'string' ? detail : JSON.stringify(detail);
+        } else if (err.response) {
+          detailStr = `status=${err.response.status || err.response.statusCode || '?'} statusText=${err.response.statusText || '-'}`;
+        }
+      } catch (logErr) {
+        detailStr = `(추출 실패: ${logErr.message})`;
       }
+      logger.error(`조건부 주문 실패 [${orderType}]: ${err.message} | 상세: ${detailStr}`);
       throw err;
     }
   },

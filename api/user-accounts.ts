@@ -14,23 +14,6 @@ import crypto from 'crypto';
 import { Pool } from 'pg';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-// ── DB 연결 (커넥션 풀 재사용) ────────────────────────────────────────────────
-let pool: Pool | null = null;
-
-function getPool(): Pool {
-  if (!pool) {
-    pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false },
-      max: 1,
-      idleTimeoutMillis: 0,          // 유휴 연결 즉시 해제 (서버리스 stale 방지)
-      connectionTimeoutMillis: 10_000,
-    });
-    pool.on('error', () => { pool = null; }); // 연결 끊기면 풀 재생성
-  }
-  return pool;
-}
-
 // ── AES-256-GCM 암호화 / 복호화 ─────────────────────────────────────────────
 function getKey(): Buffer {
   const secret = process.env.ACCOUNTS_ENCRYPTION_KEY ?? 'osprey-default-change-me-in-prod!';
@@ -63,9 +46,36 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
   } catch { return null; }
 }
 
-// ── DB 쿼리 ──────────────────────────────────────────────────────────────────
+// ── DB 쿼리 (요청당 새 연결 + 1회 재시도) ────────────────────────────────────
+async function query(sql: string, params?: unknown[]): Promise<any> {
+  const attempt = async () => {
+    const p = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+      max: 1,
+      connectionTimeoutMillis: 10_000,
+    });
+    try {
+      return await p.query(sql, params);
+    } finally {
+      await p.end().catch(() => {});
+    }
+  };
+
+  try {
+    return await attempt();
+  } catch (e: any) {
+    // ECONNRESET 등 네트워크 오류 시 1회 재시도
+    if (e?.code === 'ECONNRESET' || e?.message?.includes('ECONNRESET')) {
+      console.warn('[user-accounts] DB 연결 재시도...');
+      return await attempt();
+    }
+    throw e;
+  }
+}
+
 async function ensureTable(): Promise<void> {
-  await getPool().query(`
+  await query(`
     CREATE TABLE IF NOT EXISTS exchange_accounts (
       user_id    TEXT PRIMARY KEY,
       data       TEXT NOT NULL,
@@ -75,7 +85,7 @@ async function ensureTable(): Promise<void> {
 }
 
 async function dbGet(userId: string): Promise<string | null> {
-  const { rows } = await getPool().query(
+  const { rows } = await query(
     'SELECT data FROM exchange_accounts WHERE user_id = $1',
     [userId],
   );
@@ -83,7 +93,7 @@ async function dbGet(userId: string): Promise<string | null> {
 }
 
 async function dbUpsert(userId: string, encryptedData: string): Promise<void> {
-  await getPool().query(
+  await query(
     `INSERT INTO exchange_accounts (user_id, data, updated_at)
      VALUES ($1, $2, now())
      ON CONFLICT (user_id) DO UPDATE

@@ -2,7 +2,7 @@ import React from 'react';
 import { View, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
-import { Text, SubPageHeader, GlassCard, ScreenTransition } from '@/design-system';
+import { Text, SubPageHeader, GlassCard, ScreenTransition, TradeBadges } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
@@ -97,14 +97,7 @@ export default function TradeDetail() {
               <View style={{ flex: 1 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                   <Text style={st.symbol}>{trade.symbol}</Text>
-                  <View style={[st.badge, { backgroundColor: trade.direction === 'Long' ? '#EAF6F0' : '#FFF0F0' }]}>
-                    <Text style={[st.badgeText, { color: dirColor }]}>
-                      {trade.direction === 'Long' ? '롱' : '숏'}
-                    </Text>
-                  </View>
-                  <View style={[st.badge, { backgroundColor: isProfit ? colors.market.riseSubtle : colors.market.fallSubtle }]}>
-                    <Text style={[st.badgeText, { color: pnlColor }]}>{typeLabel}</Text>
-                  </View>
+                  <TradeBadges direction={trade.direction} tradeType={trade.type} />
                 </View>
                 <Text style={st.subText}>{exitAt} 청산</Text>
               </View>

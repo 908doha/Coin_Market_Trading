@@ -6,23 +6,31 @@ import Animated, {
   useSharedValue, useAnimatedStyle, withTiming, withSpring, runOnJS, Easing,
 } from 'react-native-reanimated';
 import {
-  Text, GlassCard, Chip, PressableScale, FadeTabView, TradingListSkeleton, PageHeader, CurrencyToggle,
+  Text, GlassCard, Chip, PressableScale, FadeTabView, TradingListSkeleton,
+  PageHeader, CurrencyToggle, TradeBadges,
 } from '@/design-system';
 import { positionsService, tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS } from '@/store/accounts';
+import { ProfitAnalysis } from '@/components/ProfitAnalysis';
 import type { Trade, Position } from '@/services';
 
-type MainTab      = 'positions' | 'history';
+// ─── Types ──────────────────────────────────────────────────────────────────
+
+type MainTab       = 'positions' | 'analysis' | 'history';
 type HistoryFilter = '전체' | '수익' | '손실';
 const HISTORY_FILTERS: HistoryFilter[] = ['전체', '수익', '손실'];
+const TAB_CONFIG: { key: MainTab; label: string }[] = [
+  { key: 'positions', label: '포지션 현황' },
+  { key: 'analysis',  label: '수익분석' },
+  { key: 'history',   label: '거래 내역' },
+];
 
 const EASE_OUT = Easing.out(Easing.cubic);
 
-// ─────────────────────────────────────────────
-//  Portfolio Summary Card
-// ─────────────────────────────────────────────
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
 function fmtAmt(krw: number, showUsd: boolean, rate: number) {
   if (!showUsd) return formatKRW(krw);
   return `$${(krw / rate).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -34,7 +42,13 @@ function fmtSigned(krw: number, showUsd: boolean, rate: number) {
   return `${sign}$${Math.abs(usd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function PortfolioSummary({ positions, showUsd, rate }: { positions: Position[]; showUsd: boolean; rate: number }) {
+// ─── Portfolio Summary ──────────────────────────────────────────────────────
+
+function PortfolioSummary({ positions, showUsd, rate }: {
+  positions: Position[];
+  showUsd: boolean;
+  rate: number;
+}) {
   const totalInvested   = positions.reduce((s, p) => s + p.amount, 0);
   const totalProfit     = positions.reduce((s, p) => s + p.profit, 0);
   const totalProfitRate = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
@@ -62,16 +76,15 @@ function PortfolioSummary({ positions, showUsd, rate }: { positions: Position[];
   );
 }
 
-// ─────────────────────────────────────────────
-//  Animated list item (stagger entrance)
-// ─────────────────────────────────────────────
+// ─── Animated Row ───────────────────────────────────────────────────────────
+
 function AnimatedRow({ index, children }: { index: number; children: React.ReactNode }) {
   const opacity    = useSharedValue(0);
   const translateY = useSharedValue(16);
   React.useEffect(() => {
     const delay = index * 60;
     const timer = setTimeout(() => {
-      opacity.value    = withTiming(1, { duration: 300, easing: Easing.out(Easing.cubic) });
+      opacity.value    = withTiming(1, { duration: 300, easing: EASE_OUT });
       translateY.value = withSpring(0, { damping: 20, stiffness: 220 });
     }, delay);
     return () => clearTimeout(timer);
@@ -83,10 +96,14 @@ function AnimatedRow({ index, children }: { index: number; children: React.React
   return <Animated.View style={style}>{children}</Animated.View>;
 }
 
-// ─────────────────────────────────────────────
-//  Position Card Row
-// ─────────────────────────────────────────────
-function PositionCard({ pos, isLast, showUsd, rate }: { pos: Position; isLast: boolean; showUsd: boolean; rate: number }) {
+// ─── Position Card ──────────────────────────────────────────────────────────
+
+function PositionCard({ pos, isLast, showUsd, rate }: {
+  pos: Position;
+  isLast: boolean;
+  showUsd: boolean;
+  rate: number;
+}) {
   const up = pos.profit >= 0;
   return (
     <PressableScale onPress={() => router.push(`/(main)/positions/${pos.id}`)} scaleTo={0.98}>
@@ -97,11 +114,7 @@ function PositionCard({ pos, isLast, showUsd, rate }: { pos: Position; isLast: b
         <View style={{ flex: 1 }}>
           <View style={card.symbolRow}>
             <Text style={card.symbol}>{pos.symbol}</Text>
-            <View style={[card.badge, { backgroundColor: pos.direction === 'Long' ? '#F0F0F0' : '#FFF0F0' }]}>
-              <Text style={[card.badgeText, { color: pos.direction === 'Long' ? '#555555' : '#D93025' }]}>
-                {pos.direction === 'Long' ? '롱' : '숏'}
-              </Text>
-            </View>
+            <TradeBadges direction={pos.direction} leverage={pos.leverage} size="sm" />
           </View>
           <Text variant="meta" color="#AEAEB2" style={{ marginTop: 3 }}>
             {fmtAmt(pos.amount, showUsd, rate)}
@@ -120,26 +133,32 @@ function PositionCard({ pos, isLast, showUsd, rate }: { pos: Position; isLast: b
   );
 }
 
-// ─────────────────────────────────────────────
-//  Trade History Row
-// ─────────────────────────────────────────────
-function TradeRow({ trade, isLast, showUsd, rate }: { trade: Trade; isLast: boolean; showUsd: boolean; rate: number }) {
+// ─── Trade History Row ──────────────────────────────────────────────────────
+
+function TradeRow({ trade, isLast, showUsd, rate }: {
+  trade: Trade;
+  isLast: boolean;
+  showUsd: boolean;
+  rate: number;
+}) {
   const up      = trade.profit >= 0;
   const dateStr = (() => {
     const d = new Date(trade.exitAt);
     if (isNaN(d.getTime())) return trade.exitAt?.slice(5, 10)?.replace('-', '.') ?? '';
     return `${d.getMonth() + 1}.${String(d.getDate()).padStart(2, '0')}`;
   })();
-  const typeLabel = trade.type === 'stop_loss' ? '손절' : (trade.direction === 'Long' ? '롱 청산' : '숏 청산');
 
   return (
     <PressableScale onPress={() => router.push(`/(main)/history/${trade.id}`)} scaleTo={0.98}>
       <View style={[hist.row, !isLast && hist.rowBorder]}>
         <Text style={hist.date}>{dateStr}</Text>
         <View style={{ flex: 1 }}>
-          <Text style={hist.symbol}>{trade.symbol}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={hist.symbol}>{trade.symbol}</Text>
+            <TradeBadges direction={trade.direction} tradeType={trade.type} size="sm" />
+          </View>
           <Text variant="meta" color="#AEAEB2" style={{ marginTop: 3 }}>
-            {typeLabel} · {trade.holdingDays}일
+            {trade.holdingDays > 0 ? `${trade.holdingDays}일 보유` : '당일 청산'}
           </Text>
         </View>
         <View style={{ alignItems: 'flex-end' }}>
@@ -155,10 +174,13 @@ function TradeRow({ trade, isLast, showUsd, rate }: { trade: Trade; isLast: bool
   );
 }
 
-// ─────────────────────────────────────────────
-//  History Tab Content (with filter animation)
-// ─────────────────────────────────────────────
-function HistoryContent({ trades, showUsd, rate }: { trades: Trade[] | null; showUsd: boolean; rate: number }) {
+// ─── History Content ────────────────────────────────────────────────────────
+
+function HistoryContent({ trades, showUsd, rate }: {
+  trades: Trade[] | null;
+  showUsd: boolean;
+  rate: number;
+}) {
   const [filter, setFilter] = useState<HistoryFilter>('전체');
 
   const listOpacity    = useSharedValue(1);
@@ -166,11 +188,9 @@ function HistoryContent({ trades, showUsd, rate }: { trades: Trade[] | null; sho
 
   const animateFilterChange = (newFilter: HistoryFilter) => {
     if (newFilter === filter) return;
-    // Fade out
-    listOpacity.value    = withTiming(0, { duration: 100, easing: Easing.in(Easing.ease) }, () => {
+    listOpacity.value = withTiming(0, { duration: 100, easing: Easing.in(Easing.ease) }, () => {
       runOnJS(setFilter)(newFilter);
       listTranslateY.value = 10;
-      // Fade in
       listOpacity.value    = withTiming(1, { duration: 200, easing: EASE_OUT });
       listTranslateY.value = withTiming(0, { duration: 200, easing: EASE_OUT });
     });
@@ -183,7 +203,7 @@ function HistoryContent({ trades, showUsd, rate }: { trades: Trade[] | null; sho
 
   const list     = trades ?? [];
   const filtered = list.filter((t) =>
-    filter === '수익' ? t.profit >= 0 : filter === '손실' ? t.profit < 0 : true
+    filter === '수익' ? t.profit >= 0 : filter === '손실' ? t.profit < 0 : true,
   );
   const wins    = list.filter((t) => t.profit >= 0).length;
   const total   = list.reduce((s, t) => s + t.profit, 0);
@@ -193,29 +213,27 @@ function HistoryContent({ trades, showUsd, rate }: { trades: Trade[] | null; sho
   const totalColor   = !list.length ? '#AEAEB2' : total > 0 ? '#FF4747' : total < 0 ? '#246CF9' : '#AEAEB2';
 
   const stats = [
-    { label: '총 거래', value: `${list.length}건`,        color: '#191919'    },
-    { label: '승률',    value: `${winRate}%`,              color: winRateColor },
-    { label: '총 손익', value: fmtSigned(total, showUsd, rate), color: totalColor },
+    { label: '총 거래', value: `${list.length}건`,               color: '#191919'    },
+    { label: '승률',    value: `${winRate}%`,                     color: winRateColor },
+    { label: '총 손익', value: fmtSigned(total, showUsd, rate),   color: totalColor   },
   ];
 
   return (
     <>
-      {/* ── Summary ── */}
       <GlassCard intensity="medium" radius={20} padding={24} style={styles.mb14}>
         <View style={styles.statsRow}>
-          {stats.map((s, i) => (
-            <React.Fragment key={s.label}>
+          {stats.map((st, i) => (
+            <React.Fragment key={st.label}>
               {i > 0 && <View style={styles.statsDivider} />}
               <View style={{ flex: 1, alignItems: 'center' }}>
-                <Text variant="meta" color="#AEAEB2" style={styles.mb6}>{s.label}</Text>
-                <Text style={[styles.statsValue, { color: s.color }]}>{s.value}</Text>
+                <Text variant="meta" color="#AEAEB2" style={styles.mb6}>{st.label}</Text>
+                <Text style={[styles.statsValue, { color: st.color }]}>{st.value}</Text>
               </View>
             </React.Fragment>
           ))}
         </View>
       </GlassCard>
 
-      {/* ── Filter Chips ── */}
       <View style={styles.filterRow}>
         {HISTORY_FILTERS.map((f) => (
           <Chip
@@ -228,7 +246,6 @@ function HistoryContent({ trades, showUsd, rate }: { trades: Trade[] | null; sho
         ))}
       </View>
 
-      {/* ── List (animated) ── */}
       <Animated.View style={listAnimStyle}>
         {filtered.length === 0 ? (
           <GlassCard intensity="low" radius={20} padding={40} style={{ alignItems: 'center' }}>
@@ -248,13 +265,14 @@ function HistoryContent({ trades, showUsd, rate }: { trades: Trade[] | null; sho
   );
 }
 
-// ─────────────────────────────────────────────
-//  Account Selector
-// ─────────────────────────────────────────────
-function AccountChip({
-  label, selected, color, dotColor, onPress,
-}: {
-  label: string; selected: boolean; color?: string; dotColor?: string; onPress: () => void;
+// ─── Account Selector ───────────────────────────────────────────────────────
+
+function AccountChip({ label, selected, color, dotColor, onPress }: {
+  label: string;
+  selected: boolean;
+  color?: string;
+  dotColor?: string;
+  onPress: () => void;
 }) {
   const scale = useSharedValue(1);
   const chipStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
@@ -272,8 +290,10 @@ function AccountChip({
           : styles.accountChipActive),
       ]}>
         {dotColor && <View style={[styles.accountDot, { backgroundColor: dotColor }]} />}
-        <Text style={[styles.accountChipText, selected && (color ? { color } : styles.accountChipTextActive)]}
-          numberOfLines={1}>
+        <Text
+          style={[styles.accountChipText, selected && (color ? { color } : styles.accountChipTextActive)]}
+          numberOfLines={1}
+        >
           {label}
         </Text>
       </Animated.View>
@@ -281,10 +301,7 @@ function AccountChip({
   );
 }
 
-function AccountSelector({
-  selectedId,
-  onSelect,
-}: {
+function AccountSelector({ selectedId, onSelect }: {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
 }) {
@@ -318,9 +335,8 @@ function AccountSelector({
   );
 }
 
-// ─────────────────────────────────────────────
-//  Main Screen
-// ─────────────────────────────────────────────
+// ─── Main Screen ────────────────────────────────────────────────────────────
+
 export default function Trading() {
   const [tab, setTab]               = useState<MainTab>('positions');
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
@@ -328,7 +344,6 @@ export default function Trading() {
   const { accounts, totalBalance }  = useAccounts();
   const rate = totalBalance?.usdtKrw ?? 1350;
 
-  // 선택된 계좌 (null = 전체)
   const selectedAccounts = selectedAccountId
     ? accounts.filter((a) => a.id === selectedAccountId)
     : accounts;
@@ -350,14 +365,15 @@ export default function Trading() {
   const tabOpacity    = useSharedValue(1);
   const tabTranslateX = useSharedValue(0);
 
+  const currentTabIndex = TAB_CONFIG.findIndex((t) => t.key === tab);
+
   const switchTab = (newTab: MainTab) => {
     if (newTab === tab) return;
-    const dir = newTab === 'history' ? 1 : -1;
-    // Fade + slide out
-    tabOpacity.value    = withTiming(0, { duration: 120, easing: Easing.in(Easing.ease) }, () => {
+    const newIndex = TAB_CONFIG.findIndex((t) => t.key === newTab);
+    const dir = newIndex > currentTabIndex ? 1 : -1;
+    tabOpacity.value = withTiming(0, { duration: 120, easing: Easing.in(Easing.ease) }, () => {
       runOnJS(setTab)(newTab);
       tabTranslateX.value = 24 * dir;
-      // Fade + slide in from opposite side
       tabOpacity.value    = withTiming(1, { duration: 220, easing: EASE_OUT });
       tabTranslateX.value = withTiming(0, { duration: 220, easing: EASE_OUT });
     });
@@ -368,36 +384,37 @@ export default function Trading() {
     transform: [{ translateX: tabTranslateX.value }],
   }));
 
-  const isLoading = tab === 'positions' ? posLoading : tradeLoading;
-
-  const filteredPositions = positions ?? [];
-  const filteredTrades    = trades    ?? [];
+  const isLoading = tab === 'positions' ? posLoading
+    : tab === 'analysis' ? tradeLoading
+    : tradeLoading;
 
   return (
     <FadeTabView style={styles.root}>
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
-
         <PageHeader
           title="트레이딩"
-          rightElement={<CurrencyToggle showUsd={showUsd} onToggle={() => setShowUsd((v) => !v)} />}
+          rightElement={
+            tab !== 'analysis'
+              ? <CurrencyToggle showUsd={showUsd} onToggle={() => setShowUsd((v) => !v)} />
+              : undefined
+          }
         />
 
-        {/* ── Account Selector ── */}
         <AccountSelector selectedId={selectedAccountId} onSelect={setSelectedAccountId} />
 
-        {/* ── Segment Control ── */}
+        {/* ── Segment Control (3탭) ── */}
         <View style={styles.segWrap}>
           <GlassCard intensity="medium" radius={16} padding={4} style={styles.seg}>
-            {(['positions', 'history'] as MainTab[]).map((t) => (
+            {TAB_CONFIG.map((t) => (
               <PressableScale
-                key={t}
-                style={[styles.segBtn, tab === t && styles.segBtnActive]}
-                onPress={() => switchTab(t)}
+                key={t.key}
+                style={[styles.segBtn, tab === t.key && styles.segBtnActive]}
+                onPress={() => switchTab(t.key)}
                 scaleTo={0.97}
               >
                 <View style={styles.segBtnInner}>
-                  <Text style={[styles.segText, { color: tab === t ? '#191919' : '#AEAEB2' }]}>
-                    {t === 'positions' ? '보유 포지션' : '거래 내역'}
+                  <Text style={[styles.segText, { color: tab === t.key ? '#191919' : '#AEAEB2' }]}>
+                    {t.label}
                   </Text>
                 </View>
               </PressableScale>
@@ -405,7 +422,7 @@ export default function Trading() {
           </GlassCard>
         </View>
 
-        {/* ── Content (animated) ── */}
+        {/* ── Content ── */}
         <ScrollView
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
@@ -414,24 +431,31 @@ export default function Trading() {
             {isLoading ? (
               <TradingListSkeleton />
             ) : tab === 'positions' ? (
-              !filteredPositions.length ? (
+              !(positions ?? []).length ? (
                 <GlassCard intensity="low" radius={20} padding={48} style={{ alignItems: 'center' }}>
                   <Text variant="body2" color="#AEAEB2">활성 포지션이 없어요</Text>
                 </GlassCard>
               ) : (
                 <>
-                  <PortfolioSummary positions={filteredPositions} showUsd={showUsd} rate={rate} />
+                  <PortfolioSummary positions={positions!} showUsd={showUsd} rate={rate} />
                   <GlassCard intensity="medium" radius={20} padding={0} style={{ overflow: 'hidden' }}>
-                    {filteredPositions.map((pos, i) => (
+                    {positions!.map((pos, i) => (
                       <AnimatedRow key={pos.id} index={i}>
-                        <PositionCard pos={pos} isLast={i === filteredPositions.length - 1} showUsd={showUsd} rate={rate} />
+                        <PositionCard pos={pos} isLast={i === positions!.length - 1} showUsd={showUsd} rate={rate} />
                       </AnimatedRow>
                     ))}
                   </GlassCard>
                 </>
               )
+            ) : tab === 'analysis' ? (
+              <ProfitAnalysis
+                trades={trades ?? []}
+                showUsd={showUsd}
+                onToggleUsd={() => setShowUsd((v) => !v)}
+                usdRate={rate}
+              />
             ) : (
-              <HistoryContent trades={filteredTrades} showUsd={showUsd} rate={rate} />
+              <HistoryContent trades={trades ?? []} showUsd={showUsd} rate={rate} />
             )}
           </Animated.View>
           <View style={{ height: 120 }} />
@@ -441,11 +465,10 @@ export default function Trading() {
   );
 }
 
-// ─────────────────────────────────────────────
-//  Styles
-// ─────────────────────────────────────────────
+// ─── Styles ─────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  root:    { flex: 1, backgroundColor: '#F5F5F5' },
+  root: { flex: 1, backgroundColor: '#F5F5F5' },
 
   accountSelectorWrap: {
     borderBottomWidth: 1,
@@ -472,15 +495,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#191919',
     borderColor:     '#191919',
   },
-  accountDot: {
-    width: 7, height: 7, borderRadius: 4,
-  },
+  accountDot: { width: 7, height: 7, borderRadius: 4 },
   accountChipText: {
     fontSize: 13, fontWeight: '600', color: '#AEAEB2', maxWidth: 120,
   },
-  accountChipTextActive: {
-    color: '#FFFFFF',
-  },
+  accountChipTextActive: { color: '#FFFFFF' },
 
   segWrap: { paddingHorizontal: 20, paddingBottom: 20 },
   seg:     { flexDirection: 'row' },
@@ -489,7 +508,7 @@ const styles = StyleSheet.create({
   segBtnInner:  { paddingVertical: 13, alignItems: 'center', justifyContent: 'center' },
   segText:      { fontSize: 14, fontWeight: '600' },
 
-  content:  { paddingHorizontal: 20, paddingTop: 4 },
+  content: { paddingHorizontal: 20, paddingTop: 4 },
 
   summaryRow:     { flexDirection: 'row', alignItems: 'center' },
   summaryDivider: { width: 1, height: 48, backgroundColor: '#F0F0F0', marginHorizontal: 20 },
@@ -514,11 +533,8 @@ const card = StyleSheet.create({
   iconText:  { fontSize: 15, fontWeight: '700', color: '#555555' },
   symbolRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   symbol:    { fontSize: 16, fontWeight: '700', color: '#191919' },
-  badge:     { borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3 },
-  badgeText: { fontSize: 11, fontWeight: '600' },
   profit:    { fontSize: 16, fontWeight: '700' },
   rate:      { fontSize: 13, fontWeight: '600', marginTop: 3 },
-  hint:      { paddingHorizontal: 20, paddingBottom: 14, paddingTop: 0 },
 });
 
 const hist = StyleSheet.create({

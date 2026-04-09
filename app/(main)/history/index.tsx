@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, StyleSheet, ScrollView, Pressable, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Text, Card, Badge, Chip, PageHeader, CurrencyToggle } from '@/design-system';
+import { Text, Card, Chip, PageHeader, CurrencyToggle, TradeBadges } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
@@ -46,8 +46,7 @@ function TradeCard({ trade, showUsd, rate }: { trade: Trade; showUsd: boolean; r
             <View>
               <View style={{ flexDirection: 'row', gap: spacing[2], alignItems: 'center' }}>
                 <Text variant="heading3">{trade.symbol}</Text>
-                <Badge label={trade.direction} variant={trade.direction === 'Long' ? 'positive' : 'negative'} size="sm" />
-                {trade.type === 'stop_loss' && <Badge label="손절" variant="negative" size="sm" />}
+                <TradeBadges direction={trade.direction} tradeType={trade.type} size="sm" />
               </View>
               <Text variant="caption1" color={colors.text.tertiary}>
                 {exitDate}{trade.holdingDays > 0 ? ` · ${trade.holdingDays}일 보유` : ''}

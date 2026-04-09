@@ -5,7 +5,7 @@ import { useLocalSearchParams, router } from 'expo-router';
 import Animated, {
   useSharedValue, useAnimatedStyle, withTiming, withSpring, Easing,
 } from 'react-native-reanimated';
-import { Text, SubPageHeader } from '@/design-system';
+import { Text, SubPageHeader, TradeBadges } from '@/design-system';
 import { positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
@@ -101,18 +101,7 @@ export default function PositionDetail() {
                 <View style={{ flex: 1 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     <Text style={st.symbol}>{position.symbol}</Text>
-                    <View style={[st.dirBadge, {
-                      backgroundColor: direction === 'Long' ? '#EAF6F0' : '#FFF0F0',
-                    }]}>
-                      <Text style={[st.dirText, {
-                        color: direction === 'Long' ? '#1AC24E' : '#FF4747',
-                      }]}>
-                        {direction === 'Long' ? '롱' : '숏'}
-                      </Text>
-                    </View>
-                    <View style={st.leverBadge}>
-                      <Text style={st.leverText}>{position.leverage}x</Text>
-                    </View>
+                    <TradeBadges direction={position.direction} leverage={position.leverage} size="sm" />
                   </View>
                   <Text style={st.subText}>{p.entryAt ?? '-'} 진입</Text>
                 </View>

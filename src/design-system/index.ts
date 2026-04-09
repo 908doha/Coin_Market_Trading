@@ -19,6 +19,7 @@ export { PressableScale }         from './components/PressableScale';
 export { Toggle }                 from './components/Toggle';
 export { CurrencyToggle }         from './components/CurrencyToggle';
 export { FadeTabView }            from './components/FadeTabView';
+export { TradeBadges }            from './components/TradeBadges';
 export {
   Skeleton, AssetCardSkeleton, TradingListSkeleton, AccountSkeleton,
   TransactionListSkeleton, PositionDetailSkeleton, AgentSettingsSkeleton,
@@ -32,6 +33,7 @@ export type { CardProps, CardViewProps, CardVariant }   from './components/Card'
 export type { ChipProps, ChipVariant, ChipSize }        from './components/Chip';
 export type { BadgeProps, BadgeVariant, BadgeSize }     from './components/Badge';
 export type { DividerProps }  from './components/Divider';
+export type { TradeBadgesProps } from './components/TradeBadges';
 export type { AvatarProps, AvatarSize } from './components/Avatar';
 
 export { ToastProvider, useToast } from './components/Toast';

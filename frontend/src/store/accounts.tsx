@@ -10,6 +10,7 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import { exchangeService } from '../services/exchange.service';
 import type { Balance } from '../services/account.service';
+import { useAuth } from './auth';
 
 export type ExchangeType = 'binance' | 'upbit' | 'bybit' | 'okx' | 'gate' | 'custom';
 
@@ -156,6 +157,7 @@ function sumBalances(bals: (Balance | null)[]): Balance | null {
 }
 
 export function AccountsProvider({ children }: { children: React.ReactNode }) {
+  const { isLoggedIn, isLoading: authLoading } = useAuth();
   const [accounts, setAccounts]          = useState<ExchangeAccount[]>([]);
   const [isLoading, setIsLoading]        = useState(true);
   const [balances, setBalances]          = useState<Record<string, Balance | null>>({});
@@ -166,21 +168,28 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
   // 초기 동기화 중 로컬 변경이 발생했는지 추적 (race condition 방지)
   const hasMutated = useRef(false);
 
-  // 앱 시작: 로컬 → 백엔드 순서로 로드
+  // 로컬 → 백엔드 순서로 로드 (인증 상태 변경 시 재실행)
   useEffect(() => {
+    // 인증 상태 확인 중이면 대기 (토큰 복원 완료 후 실행)
+    if (authLoading) return;
+
+    hasMutated.current = false;
+
     (async () => {
       // ① 로컬 즉시 로드 (빠름)
       const local = await localLoad();
       setAccounts(local);
       setIsLoading(false);
 
+      // 비로그인 상태 → 로컬만 사용
+      if (!isLoggedIn) return;
+
       // ② 백엔드에서 최신 데이터 가져오기 (기기 간 동기화)
       const remote = await backendLoad();
 
-      // 초기 동기화 중 사용자가 계좌를 추가/수정/삭제한 경우 → 백엔드 데이터로 덮어쓰지 않음
+      // 동기화 중 사용자가 계좌를 추가/수정/삭제한 경우 → 백엔드 데이터로 덮어쓰지 않음
       if (hasMutated.current) {
-        console.log('[accounts] 초기 동기화 중 로컬 변경 감지 — 백엔드 덮어쓰기 건너뜀');
-        // 로컬이 최신이므로 백엔드에 현재 로컬 데이터를 업로드
+        console.log('[accounts] 동기화 중 로컬 변경 감지 — 백엔드 덮어쓰기 건너뜀');
         await backendSave(accountsRef.current);
         return;
       }
@@ -196,7 +205,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
         console.log('[accounts] uploaded local accounts to backend');
       }
     })();
-  }, []);
+  }, [authLoading, isLoggedIn]);
 
   // 잔고 자동 fetch
   const refreshBalances = useCallback(async () => {

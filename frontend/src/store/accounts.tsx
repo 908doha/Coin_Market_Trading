@@ -168,10 +168,19 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
   // 초기 동기화 중 로컬 변경이 발생했는지 추적 (race condition 방지)
   const hasMutated = useRef(false);
 
-  // 로컬 → 백엔드 순서로 로드 (인증 상태 변경 시 재실행)
+  // 로그인 상태 변경 시 계좌 로드/초기화
   useEffect(() => {
     // 인증 상태 확인 중이면 대기 (토큰 복원 완료 후 실행)
     if (authLoading) return;
+
+    // 비로그인 → 계좌 초기화 (로그인 필수 기능)
+    if (!isLoggedIn) {
+      setAccounts([]);
+      setBalances({});
+      setBalErrors({});
+      setIsLoading(false);
+      return;
+    }
 
     hasMutated.current = false;
 
@@ -180,9 +189,6 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
       const local = await localLoad();
       setAccounts(local);
       setIsLoading(false);
-
-      // 비로그인 상태 → 로컬만 사용
-      if (!isLoggedIn) return;
 
       // ② 백엔드에서 최신 데이터 가져오기 (기기 간 동기화)
       const remote = await backendLoad();
@@ -244,11 +250,12 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     ? sumBalances(accounts.map((a) => balances[a.id] ?? null))
     : null;
 
-  // ── CRUD — 로컬 우선, 백엔드 background sync ─────────────────────────────────
+  // ── CRUD — 로그인 필수, 로컬 우선 + 백엔드 background sync ──────────────────
 
   const addAccount = useCallback(async (
     input: Omit<ExchangeAccount, 'id' | 'createdAt'>,
   ): Promise<ExchangeAccount> => {
+    if (!isLoggedIn) throw new Error('로그인이 필요합니다.');
     hasMutated.current = true;
     const account: ExchangeAccount = {
       ...input,
@@ -260,27 +267,29 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     setAccounts(next);
     backendSave(next).catch((e) => console.error('[accounts] backendSave 실패:', e));
     return account;
-  }, []);
+  }, [isLoggedIn]);
 
   const updateAccount = useCallback(async (
     id: string,
     updates: Partial<Omit<ExchangeAccount, 'id' | 'createdAt'>>,
   ): Promise<void> => {
+    if (!isLoggedIn) throw new Error('로그인이 필요합니다.');
     hasMutated.current = true;
     const next = accountsRef.current.map((a) => a.id === id ? { ...a, ...updates } : a);
     await localSave(next);
     setAccounts(next);
     backendSave(next).catch((e) => console.error('[accounts] backendSave 실패:', e));
-  }, []);
+  }, [isLoggedIn]);
 
   const removeAccount = useCallback(async (id: string): Promise<void> => {
+    if (!isLoggedIn) throw new Error('로그인이 필요합니다.');
     hasMutated.current = true;
     const next = accountsRef.current.filter((a) => a.id !== id);
     await localSave(next);
     setAccounts(next);
     setBalances((prev) => { const n = { ...prev }; delete n[id]; return n; });
     backendSave(next).catch((e) => console.error('[accounts] backendSave 실패:', e));
-  }, []);
+  }, [isLoggedIn]);
 
   return (
     <AccountsContext.Provider value={{

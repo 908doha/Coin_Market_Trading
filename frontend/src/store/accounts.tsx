@@ -28,6 +28,12 @@ export interface ExchangeAccount {
 
 const STORAGE_KEY = 'exchange_accounts_v1';
 
+// Vercel 서버리스 함수 호출 base URL (exchange.service.ts 등과 동일 패턴)
+const API_BASE =
+  typeof window !== 'undefined' && window.location?.origin
+    ? window.location.origin
+    : process.env.EXPO_PUBLIC_APP_URL ?? '';
+
 // ── 로컬 저장소 ───────────────────────────────────────────────────────────────
 
 async function localLoad(): Promise<ExchangeAccount[]> {
@@ -66,7 +72,7 @@ async function backendLoad(): Promise<ExchangeAccount[] | null> {
   const token = await tokenStorage.getAccess();
   if (!token) return null;
 
-  const res = await fetch('/api/user-accounts', {
+  const res = await fetch(`${API_BASE}/api/user-accounts`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (res.status === 204) {
@@ -86,7 +92,7 @@ async function backendSave(accounts: ExchangeAccount[]): Promise<void> {
   const token = await tokenStorage.getAccess();
   if (!token) throw new Error('로그인 토큰이 없습니다.');
 
-  const res = await fetch('/api/user-accounts', {
+  const res = await fetch(`${API_BASE}/api/user-accounts`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body:    JSON.stringify(accounts),

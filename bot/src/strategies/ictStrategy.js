@@ -62,6 +62,8 @@ class IctStrategy {
     }
 
     // HTF POI — 현재가가 HTF OB/FVG 내부 또는 ±0.3% 근접 시 가점
+    const hasHtfPoi = (htfBias.activeOBs && htfBias.activeOBs.length > 0)
+                   || (htfBias.activeFVGs && htfBias.activeFVGs.length > 0);
     if (htfBias.activeOBs && htfBias.activeOBs.length > 0) {
       const ob = htfBias.activeOBs[htfBias.activeOBs.length - 1];
       confluence.push(`★ HTF OB 진입 [${ob.low.toFixed(2)}-${ob.high.toFixed(2)}]`);
@@ -69,6 +71,12 @@ class IctStrategy {
     if (htfBias.activeFVGs && htfBias.activeFVGs.length > 0) {
       const fvg = htfBias.activeFVGs[htfBias.activeFVGs.length - 1];
       confluence.push(`★ HTF FVG 진입 [${fvg.bottom.toFixed(2)}-${fvg.top.toFixed(2)}] CE:${fvg.ce.toFixed(2)}`);
+    }
+
+    // HTF Liquidity Sweep (BSL/SSL) — 방향과 일치하는 스윕만
+    if (htfBias.htfActiveSweep) {
+      const sw = htfBias.htfActiveSweep;
+      confluence.push(`★ HTF ${sw.label} @ ${sw.level.toFixed(2)}`);
     }
 
     // ========== STEP 2: MTF (15m) 구조 확인 ==========
@@ -102,6 +110,8 @@ class IctStrategy {
       sl: parseFloat(sl.toFixed(2)),
       tp: parseFloat(tp.toFixed(2)),
       confluence,
+      hasHtfPoi,
+      hasHtfSweep: !!htfBias.htfActiveSweep,
     };
   }
 
@@ -192,6 +202,12 @@ class IctStrategy {
       );
     }
 
+    // ===== HTF Liquidity Sweep (BSL/SSL) =====
+    // HTF swing high/low 스윕은 기관 stop hunt 이후 반전 신호 (ICT 핵심)
+    const htfSweeps = indicators.detectLiquiditySweep(candles, swingHighs, swingLows);
+    // 방향이 결정된 경우 그 방향과 일치하는 sweep만 유효 (bullish 방향 → SSL sweep)
+    const htfActiveSweep = direction ? htfSweeps.find((s) => s.type === direction) : null;
+
     return {
       direction,
       reason: direction ? reason : '트렌드 불명확',
@@ -202,6 +218,8 @@ class IctStrategy {
       fvgs: relevantFVGs,
       activeOBs,
       activeFVGs,
+      htfSweeps,
+      htfActiveSweep,
     };
   }
 
@@ -292,6 +310,13 @@ class IctStrategy {
       }
     }
 
+    // MTF Liquidity Sweep (BSL/SSL) — HTF 방향과 일치하는 스윕만 가점
+    const mtfSweeps = indicators.detectLiquiditySweep(candles, swingHighs, swingLows);
+    const mtfActiveSweep = mtfSweeps.find((s) => s.type === htfDirection);
+    if (mtfActiveSweep) {
+      confluence.push(`★ MTF ${mtfActiveSweep.label} @ ${mtfActiveSweep.level.toFixed(2)}`);
+    }
+
     const hasStructure = mssAligned || relevantOBs.length > 0;
     const hasPOI = relevantOBs.length > 0 || unfilled.length > 0;
 
@@ -303,6 +328,7 @@ class IctStrategy {
       fvgs: unfilled,
       swingHighs,
       swingLows,
+      mtfActiveSweep,
     };
   }
 

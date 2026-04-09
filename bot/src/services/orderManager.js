@@ -129,12 +129,16 @@ class OrderManager {
 
   /**
    * 포지션 수량 계산
-   *   marginBudget    = balance.total × f*
+   *   marginBudget    = balance.total × f* × poiBoost
    *   leveragedNotional = marginBudget × leverage
    *   총 노출 상한(balance × maxTotalExposure) 초과 시 남은 한도로 축소
    *   한도 0이면 0 반환 → 진입 스킵
+   *
+   * @param contract 거래 페어
+   * @param price    진입가
+   * @param poiBoost HTF POI 기반 가중치 (1.0 = HTF POI 안, 0.5 = 밖)
    */
-  async calculatePositionSize(contract, price) {
+  async calculatePositionSize(contract, price, poiBoost = 1.0) {
     try {
       const contractInfo = await gateClient.getContract(contract);
       const multiplier = contractInfo.quantoMultiplier;
@@ -144,7 +148,7 @@ class OrderManager {
       const balance = await gateClient.getBalance();
 
       const effectiveFrac = kellyFrac > 0 ? kellyFrac : config.kelly.defaultFraction;
-      let marginBudget = balance.total * effectiveFrac;
+      let marginBudget = balance.total * effectiveFrac * poiBoost;
       let leveragedNotional = marginBudget * config.leverage;
 
       // 총 노출 상한 캡
@@ -166,8 +170,9 @@ class OrderManager {
       }
 
       const stats = this._getStats(contract);
+      const boostTag = poiBoost < 1 ? ` | boost=${poiBoost}(HTF POI 밖)` : ' | boost=1.0(HTF POI 안)';
       logger.info(
-        `[${contract}] [Kelly] f*=${(kellyFrac * 100).toFixed(2)}% | 표본=${stats.wins + stats.losses} (W:${stats.wins}/L:${stats.losses}) | 잔고=${balance.total.toFixed(2)} | margin=${marginBudget.toFixed(2)} | notional=${leveragedNotional.toFixed(2)} USDT`
+        `[${contract}] [Kelly] f*=${(kellyFrac * 100).toFixed(2)}%${boostTag} | 표본=${stats.wins + stats.losses} (W:${stats.wins}/L:${stats.losses}) | 잔고=${balance.total.toFixed(2)} | margin=${marginBudget.toFixed(2)} | notional=${leveragedNotional.toFixed(2)} USDT`
       );
 
       const size = Math.floor(leveragedNotional / contractValue);
@@ -219,8 +224,11 @@ class OrderManager {
     // 레버리지 설정
     await gateClient.setLeverage(contract, config.leverage);
 
-    // 수량 계산 (노출 한도 확인 포함)
-    const sizeResult = await this.calculatePositionSize(contract, entry);
+    // HTF POI 가중치: POI 안이면 full, 밖이면 half (옵션 3-A)
+    const poiBoost = signal.hasHtfPoi ? 1.0 : 0.5;
+
+    // 수량 계산 (노출 한도 확인 + POI 가중치 포함)
+    const sizeResult = await this.calculatePositionSize(contract, entry, poiBoost);
     const size = sizeResult.size;
     if (!size || size <= 0) {
       return { executed: false, reason: '노출 한도 또는 수량 0' };

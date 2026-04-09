@@ -424,15 +424,23 @@ class TelegramService {
     if (inHtfOB || inHtfFVG) {
       lines.push(`  ⭐ 현재가 HTF POI 진입 중${inHtfOB ? ' (OB)' : ''}${inHtfFVG ? ' (FVG)' : ''}`);
     }
+
+    // HTF Liquidity Sweep (BSL/SSL)
+    const htfSweeps = indicators.detectLiquiditySweep(htfCandles, htfSH, htfSL);
+    if (htfSweeps.length > 0) {
+      for (const sw of htfSweeps) {
+        lines.push(`  ⚡ HTF ${sw.label} @ ${sw.level.toFixed(2)}`);
+      }
+    }
     lines.push('');
 
     // MTF
     lines.push(`📊 MTF (${config.timeframes.mtf})`);
-    const mtfMss = (() => {
-      const sh = indicators.findSwingHighs(mtfCandles, config.ict.structureShiftBars);
-      const sl = indicators.findSwingLows(mtfCandles, config.ict.structureShiftBars);
-      return (sh.length >= 2 && sl.length >= 2) ? indicators.detectMarketStructureShift(mtfCandles, sh, sl) : null;
-    })();
+    const mtfSH = indicators.findSwingHighs(mtfCandles, config.ict.structureShiftBars);
+    const mtfSL = indicators.findSwingLows(mtfCandles, config.ict.structureShiftBars);
+    const mtfMss = (mtfSH.length >= 2 && mtfSL.length >= 2)
+      ? indicators.detectMarketStructureShift(mtfCandles, mtfSH, mtfSL)
+      : null;
     lines.push(`  MSS: ${mtfMss ? `✅ ${mtfMss.label.toUpperCase()}` : '❌ 없음'}`);
 
     const mtfOBs = indicators.findOrderBlocks(mtfCandles);
@@ -449,6 +457,16 @@ class TelegramService {
     if (mtfBearUnfilled.length > 0) {
       const f = mtfBearUnfilled[mtfBearUnfilled.length - 1];
       lines.push(`    └ CE: ${f.ce.toFixed(2)} (${f.fillPercent}% filled)`);
+    }
+
+    // MTF Liquidity Sweep (BSL/SSL)
+    if (mtfSH.length >= 2 && mtfSL.length >= 2) {
+      const mtfSweeps = indicators.detectLiquiditySweep(mtfCandles, mtfSH, mtfSL);
+      if (mtfSweeps.length > 0) {
+        for (const sw of mtfSweeps) {
+          lines.push(`  ⚡ MTF ${sw.label} @ ${sw.level.toFixed(2)}`);
+        }
+      }
     }
     lines.push('');
 

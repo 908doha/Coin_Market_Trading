@@ -8,22 +8,16 @@
  * 환경 변수 (Vercel > Settings > Environment Variables):
  *   DATABASE_URL             — PostgreSQL 연결 문자열
  *   ACCOUNTS_ENCRYPTION_KEY  — 32자+ 임의 문자열 (API 키 암호화)
- *
- * 최초 1회 테이블 생성:
- *   CREATE TABLE IF NOT EXISTS exchange_accounts (
- *     user_id    TEXT PRIMARY KEY,
- *     data       TEXT NOT NULL,
- *     updated_at TIMESTAMPTZ DEFAULT now()
- *   );
  */
 
-const crypto = require('crypto');
-const { Pool } = require('pg');
+import crypto from 'crypto';
+import { Pool } from 'pg';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 // ── DB 연결 (커넥션 풀 재사용) ────────────────────────────────────────────────
-let pool = null;
+let pool: Pool | null = null;
 
-function getPool() {
+function getPool(): Pool {
   if (!pool) {
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,
@@ -36,12 +30,12 @@ function getPool() {
 }
 
 // ── AES-256-GCM 암호화 / 복호화 ─────────────────────────────────────────────
-function getKey() {
+function getKey(): Buffer {
   const secret = process.env.ACCOUNTS_ENCRYPTION_KEY ?? 'osprey-default-change-me-in-prod!';
   return crypto.scryptSync(secret, 'osprey-accounts-salt', 32);
 }
 
-function encrypt(plain) {
+function encrypt(plain: string): string {
   const iv     = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', getKey(), iv);
   const enc    = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
@@ -49,7 +43,7 @@ function encrypt(plain) {
   return [iv.toString('hex'), tag.toString('hex'), enc.toString('hex')].join(':');
 }
 
-function decrypt(encoded) {
+function decrypt(encoded: string): string {
   const [ivHex, tagHex, encHex] = encoded.split(':');
   const iv       = Buffer.from(ivHex, 'hex');
   const tag      = Buffer.from(tagHex, 'hex');
@@ -60,7 +54,7 @@ function decrypt(encoded) {
 }
 
 // ── JWT 디코딩 (서명 검증 없이 payload만 파싱) ───────────────────────────────
-function decodeJwtPayload(token) {
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
   try {
     const part = token.split('.')[1];
     return JSON.parse(Buffer.from(part, 'base64url').toString('utf8'));
@@ -68,7 +62,7 @@ function decodeJwtPayload(token) {
 }
 
 // ── DB 쿼리 ──────────────────────────────────────────────────────────────────
-async function ensureTable() {
+async function ensureTable(): Promise<void> {
   await getPool().query(`
     CREATE TABLE IF NOT EXISTS exchange_accounts (
       user_id    TEXT PRIMARY KEY,
@@ -78,7 +72,7 @@ async function ensureTable() {
   `);
 }
 
-async function dbGet(userId) {
+async function dbGet(userId: string): Promise<string | null> {
   const { rows } = await getPool().query(
     'SELECT data FROM exchange_accounts WHERE user_id = $1',
     [userId],
@@ -86,7 +80,7 @@ async function dbGet(userId) {
   return rows[0]?.data ?? null;
 }
 
-async function dbUpsert(userId, encryptedData) {
+async function dbUpsert(userId: string, encryptedData: string): Promise<void> {
   await getPool().query(
     `INSERT INTO exchange_accounts (user_id, data, updated_at)
      VALUES ($1, $2, now())
@@ -97,14 +91,14 @@ async function dbUpsert(userId, encryptedData) {
 }
 
 // ── Handler ──────────────────────────────────────────────────────────────────
-module.exports = async function handler(req, res) {
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin',  '*');
   res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
 
   if (req.method === 'OPTIONS') { res.status(200).end(); return; }
 
-  // DATABASE_URL 미설정이면 204 (기능 비활성화, 로컬만 사용)
+  // DATABASE_URL 미설정이면 204 (기능 비활성화)
   if (!process.env.DATABASE_URL) {
     res.status(204).end();
     return;
@@ -145,8 +139,8 @@ module.exports = async function handler(req, res) {
 
     res.status(405).json({ error: 'Method not allowed' });
 
-  } catch (e) {
+  } catch (e: any) {
     console.error('[user-accounts]', e);
     res.status(500).json({ error: e?.message ?? 'DB 오류' });
   }
-};
+}

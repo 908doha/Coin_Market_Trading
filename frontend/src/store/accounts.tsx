@@ -9,6 +9,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback, use
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import { exchangeService } from '../services/exchange.service';
+import { tokenStorage } from '../services/client';
 import type { Balance } from '../services/account.service';
 import { useAuth } from './auth';
 
@@ -26,7 +27,6 @@ export interface ExchangeAccount {
 }
 
 const STORAGE_KEY = 'exchange_accounts_v1';
-const TOKEN_KEY   = 'jwt_access';
 
 // ── 로컬 저장소 ───────────────────────────────────────────────────────────────
 
@@ -60,64 +60,45 @@ function makeId(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
-// ── 백엔드 동기화 ─────────────────────────────────────────────────────────────
-
-function getToken(): string | null {
-  if (Platform.OS !== 'web') return null;
-  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
-}
+// ── 백엔드 동기화 (Vercel 서버리스 함수 — 상대 URL) ─────────────────────────
 
 async function backendLoad(): Promise<ExchangeAccount[] | null> {
-  const token = getToken();
-  if (!token) {
-    console.warn('[accounts] backendLoad: 토큰 없음 — 로그인 상태 확인 필요');
+  const token = await tokenStorage.getAccess();
+  if (!token) return null;
+
+  const res = await fetch('/api/user-accounts', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 204) {
+    console.warn('[accounts] backendLoad: DATABASE_URL 미설정');
     return null;
   }
-  try {
-    const res = await fetch('/api/user-accounts', {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (res.status === 204) {
-      console.warn('[accounts] backendLoad: DATABASE_URL 미설정 — Vercel 환경변수 확인 필요');
-      return null;
-    }
-    console.log('[accounts] backendLoad status:', res.status);
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      console.error('[accounts] backendLoad 실패:', res.status, body);
-      return null;
-    }
-    const data = await res.json();
-    return Array.isArray(data) ? data : null;
-  } catch (e) {
-    console.error('[accounts] backendLoad 네트워크 오류:', e);
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    console.error('[accounts] backendLoad 실패:', res.status, body);
     return null;
   }
+  const data = await res.json();
+  return Array.isArray(data) ? data : null;
 }
 
 async function backendSave(accounts: ExchangeAccount[]): Promise<void> {
-  const token = getToken();
-  if (!token) {
-    console.warn('[accounts] backendSave: 토큰 없음 — DB 동기화 건너뜀');
-    return;
+  const token = await tokenStorage.getAccess();
+  if (!token) throw new Error('로그인 토큰이 없습니다.');
+
+  const res = await fetch('/api/user-accounts', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body:    JSON.stringify(accounts),
+  });
+  if (res.status === 204) {
+    throw new Error('서버 DB 미설정 (DATABASE_URL) — 관리자에게 문의하세요');
   }
-  try {
-    const res = await fetch('/api/user-accounts', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body:    JSON.stringify(accounts),
-    });
-    if (res.status === 204) {
-      console.warn('[accounts] backendSave: DATABASE_URL 미설정 — Vercel 환경변수 확인 필요');
-    } else if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      console.error('[accounts] backendSave 실패:', res.status, body);
-    } else {
-      console.log('[accounts] backendSave 성공 ✓', res.status);
-    }
-  } catch (e) {
-    console.error('[accounts] backendSave 네트워크 오류:', e);
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`DB 저장 실패 (${res.status}): ${body}`);
   }
+  console.log('[accounts] backendSave 성공 ✓');
 }
 
 // ── Context ───────────────────────────────────────────────────────────────────
@@ -265,7 +246,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     const next = [...accountsRef.current, account];
     await localSave(next);
     setAccounts(next);
-    backendSave(next).catch((e) => console.error('[accounts] backendSave 실패:', e));
+    await backendSave(next);
     return account;
   }, [isLoggedIn]);
 
@@ -278,7 +259,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     const next = accountsRef.current.map((a) => a.id === id ? { ...a, ...updates } : a);
     await localSave(next);
     setAccounts(next);
-    backendSave(next).catch((e) => console.error('[accounts] backendSave 실패:', e));
+    await backendSave(next);
   }, [isLoggedIn]);
 
   const removeAccount = useCallback(async (id: string): Promise<void> => {
@@ -288,7 +269,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     await localSave(next);
     setAccounts(next);
     setBalances((prev) => { const n = { ...prev }; delete n[id]; return n; });
-    backendSave(next).catch((e) => console.error('[accounts] backendSave 실패:', e));
+    await backendSave(next);
   }, [isLoggedIn]);
 
   return (

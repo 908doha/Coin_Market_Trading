@@ -33,8 +33,8 @@ export default function AddApi() {
         isActive: true,
       });
       router.back();
-    } catch {
-      Alert.alert('오류', 'API 키 저장에 실패했어요.');
+    } catch (e: any) {
+      Alert.alert('오류', e?.message ?? 'API 키 저장에 실패했어요.');
     } finally {
       setSaving(false);
     }

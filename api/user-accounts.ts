@@ -22,9 +22,11 @@ function getPool(): Pool {
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,
       ssl: { rejectUnauthorized: false },
-      max: 3,
-      idleTimeoutMillis: 10_000,
+      max: 1,
+      idleTimeoutMillis: 0,          // 유휴 연결 즉시 해제 (서버리스 stale 방지)
+      connectionTimeoutMillis: 10_000,
     });
+    pool.on('error', () => { pool = null; }); // 연결 끊기면 풀 재생성
   }
   return pool;
 }

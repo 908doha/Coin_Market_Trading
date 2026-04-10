@@ -12,6 +12,9 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 # Runtime data
 pids
 *.pid
+
+# Bot persistent data (Kelly stats - personal)
+bot/data/
 *.seed
 *.pid.lock
 

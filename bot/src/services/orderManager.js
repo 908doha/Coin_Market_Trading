@@ -1,29 +1,80 @@
 const gateClient = require('../api/gateClient');
 const config = require('../config');
 const logger = require('../utils/logger');
+const kellyPersistence = require('../utils/kellyPersistence');
 
 /**
  * 주문 실행 및 포지션 관리 서비스 (멀티 페어 지원)
  *
  * 페어별 독립 상태:
  *  - slOrderIds / tpOrderIds / lastKnownPositions : pair → value Map
- *  - tradeStatsByPair                            : pair → Kelly 통계
+ *  - tradeStatsByPair                            : pair → Kelly 통계 (영구 저장)
  *  - openExposureUsdt                            : pair → leveraged notional (USDT)
  *
  * 전역 상태:
- *  - dailyPnl (전 페어 합산 일일 손익, maxDailyLossUsdt 한도 적용)
+ *  - dailyPnl (전 페어 합산 일일 손익, maxDailyLossUsdt 한도 적용, 영구 저장)
  */
 class OrderManager {
   constructor() {
-    this.dailyPnl = 0;
-    this.dailyPnlResetDate = new Date().toDateString();
-
-    // 페어별 상태
+    // 페어별 상태 (런타임)
     this.slOrderIds = new Map();
     this.tpOrderIds = new Map();
     this.lastKnownPositions = new Map();
     this.tradeStatsByPair = new Map();
-    this.openExposureUsdt = new Map(); // leveraged notional per pair
+    this.openExposureUsdt = new Map();
+
+    // 영구 저장에서 복원
+    this._loadPersistedStats();
+  }
+
+  /**
+   * 저장된 Kelly 통계 + dailyPnl 복원
+   */
+  _loadPersistedStats() {
+    try {
+      const data = kellyPersistence.load();
+
+      // dailyPnl 복원 (같은 날짜일 때만)
+      if (data.dailyPnl && data.dailyPnl.date === new Date().toDateString()) {
+        this.dailyPnl = data.dailyPnl.pnl || 0;
+        this.dailyPnlResetDate = data.dailyPnl.date;
+        logger.info(`일일 PnL 복원: ${this.dailyPnl.toFixed(2)} USDT (${this.dailyPnlResetDate})`);
+      } else {
+        this.dailyPnl = 0;
+        this.dailyPnlResetDate = new Date().toDateString();
+      }
+
+      // 페어별 Kelly 통계 복원
+      if (data.pairs) {
+        for (const [pair, stats] of Object.entries(data.pairs)) {
+          this.tradeStatsByPair.set(pair, {
+            wins: stats.wins || 0,
+            losses: stats.losses || 0,
+            totalWinUsdt: stats.totalWinUsdt || 0,
+            totalLossUsdt: stats.totalLossUsdt || 0,
+          });
+        }
+        const total = [...this.tradeStatsByPair.values()].reduce((s, v) => s + v.wins + v.losses, 0);
+        if (total > 0) {
+          logger.info(`Kelly 통계 복원: ${this.tradeStatsByPair.size}개 페어, 총 ${total}건 거래`);
+        }
+      }
+    } catch (err) {
+      logger.error(`Kelly 통계 복원 실패 (기본값 사용): ${err.message}`);
+      this.dailyPnl = 0;
+      this.dailyPnlResetDate = new Date().toDateString();
+    }
+  }
+
+  /**
+   * 현재 통계를 영구 저장 (실패해도 봇 크래시 안 함)
+   */
+  _saveStats() {
+    try {
+      kellyPersistence.save(this.tradeStatsByPair, this.dailyPnl, this.dailyPnlResetDate);
+    } catch (err) {
+      logger.error(`Kelly 통계 저장 실패 (무시): ${err.message}`);
+    }
   }
 
   // ===== Kelly 통계 (페어별) =====
@@ -49,6 +100,7 @@ class OrderManager {
       s.losses += 1;
       s.totalLossUsdt += Math.abs(pnl);
     }
+    this._saveStats();
   }
 
   /**
@@ -113,6 +165,7 @@ class OrderManager {
       logger.info(`일일 PnL 초기화: ${this.dailyPnl.toFixed(2)} USDT → 0`);
       this.dailyPnl = 0;
       this.dailyPnlResetDate = today;
+      this._saveStats();
     }
   }
 

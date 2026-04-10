@@ -1,9 +1,9 @@
-import React, { useState, useRef, useMemo } from 'react';
-import { View, StyleSheet, ScrollView, TouchableWithoutFeedback, Modal, Pressable, Platform } from 'react-native';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
+import { View, StyleSheet, ScrollView, TouchableWithoutFeedback, Pressable, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Svg, { Polyline, Defs, LinearGradient, Stop, Polygon, Path, Rect, Text as SvgText, Line, Circle } from 'react-native-svg';
-import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS } from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
 import { Text, GlassCard, PressableScale, FadeTabView, AssetCardSkeleton, PageHeader, CurrencyToggle } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { accountService, positionsService, tradesService } from '@/services';
@@ -95,105 +95,71 @@ const PERIODS = [
 ] as const;
 type PeriodKey = typeof PERIODS[number]['key'];
 
-// ── 기간 선택 바텀시트 ────────────────────────────────────────────────────────
-function PeriodBottomSheet({
-  visible, period, onChange, onClose,
+// ── 슬라이딩 pill 기간 탭 (수익분석과 동일한 컴포넌트) ────────────────────────
+function SlidingPillTabs({
+  tabs, active, onChange, paddingH = 16, paddingV = 10, gap = 6,
 }: {
-  visible:  boolean;
-  period:   PeriodKey;
-  onChange: (k: PeriodKey) => void;
-  onClose:  () => void;
+  tabs:     string[];
+  active:   string;
+  onChange: (t: string) => void;
+  paddingH?: number;
+  paddingV?: number;
+  gap?:     number;
 }) {
-  const translateY = useSharedValue(400);
-  const [mounted, setMounted] = React.useState(false);
+  const [layouts, setLayouts] = useState<{ x: number; width: number }[]>([]);
+  const pillX     = useSharedValue(-999);
+  const pillWidth = useSharedValue(0);
+  const PILL_H    = 30;
 
-  React.useEffect(() => {
-    if (visible) {
-      setMounted(true);
-      translateY.value = withSpring(0, { damping: 26, stiffness: 280, mass: 0.8 });
+  useEffect(() => {
+    const idx = tabs.indexOf(active);
+    const lo  = layouts[idx];
+    if (!lo) return;
+    if (pillX.value === -999) {
+      pillX.value     = lo.x;
+      pillWidth.value = lo.width;
     } else {
-      translateY.value = withTiming(400, { duration: 240 }, () => {
-        runOnJS(setMounted)(false);
-      });
+      pillX.value     = withSpring(lo.x,     { damping: 22, stiffness: 320, mass: 0.8 });
+      pillWidth.value = withSpring(lo.width, { damping: 22, stiffness: 320, mass: 0.8 });
     }
-  }, [visible]);
+  }, [active, layouts.length]);
 
-  const sheetStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: translateY.value }],
+  const pillStyle = useAnimatedStyle(() => ({
+    position:        'absolute',
+    left:            pillX.value,
+    width:           pillWidth.value,
+    height:          PILL_H,
+    borderRadius:    PILL_H / 2,
+    backgroundColor: 'rgba(0,0,0,0.07)',
   }));
 
-  if (!mounted) return null;
-
   return (
-    <Modal visible transparent animationType="none" onRequestClose={onClose}>
-      {/* 배경: 즉시 표시, 애니메이션 없음 */}
-      <Pressable style={sheet.overlay} onPress={onClose}>
-        <Animated.View style={[sheet.sheet, sheetStyle]}>
-          <View style={sheet.handle} />
-
-          {PERIODS.map((p) => {
-            const active = p.key === period;
-            return (
-              <Pressable
-                key={p.key}
-                style={({ pressed }) => [sheet.row, pressed && sheet.rowPressed]}
-                onPress={() => { onChange(p.key); onClose(); }}
-              >
-                <Text style={[sheet.rowText, active && sheet.rowTextActive]}>
-                  {p.label}
-                </Text>
-                {active && (
-                  <Svg width={22} height={22} viewBox="0 0 24 24">
-                    <Circle cx="12" cy="12" r="12" fill={colors.primary.default} />
-                    <Path
-                      d="M7 12.5l3.5 3.5 6.5-7"
-                      stroke="#fff"
-                      strokeWidth="2.2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      fill="none"
-                    />
-                  </Svg>
-                )}
-              </Pressable>
-            );
-          })}
-
-          <View style={{ height: 34 }} />
-        </Animated.View>
-      </Pressable>
-    </Modal>
+    <View style={{ flexDirection: 'row', paddingHorizontal: paddingH, paddingVertical: paddingV, gap }}>
+      <Animated.View style={pillStyle} />
+      {tabs.map((t, i) => (
+        <Pressable
+          key={t}
+          onPress={() => onChange(t)}
+          onLayout={(e) => {
+            const { x, width } = e.nativeEvent.layout;
+            setLayouts((prev) => {
+              const next = [...prev];
+              next[i] = { x, width };
+              return next;
+            });
+          }}
+        >
+          <View style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 14 }}>
+            <Text style={[hSpt.text, active === t && hSpt.textOn]}>{t}</Text>
+          </View>
+        </Pressable>
+      ))}
+    </View>
   );
 }
-
-const sheet = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius:  20,
-    borderTopRightRadius: 20,
-    paddingTop: 10,
-  },
-  handle: {
-    width: 32, height: 4, borderRadius: 2,
-    backgroundColor: '#E5E5EA',
-    alignSelf: 'center',
-    marginBottom: 8,
-  },
-  row: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    justifyContent: 'space-between',
-    paddingVertical:   18,
-    paddingHorizontal: 24,
-  },
-  rowPressed:      { backgroundColor: '#F5F5F7' },
-  rowText:         { fontSize: 17, fontWeight: '400', color: '#191919' },
-  rowTextActive:   { fontWeight: '600', color: colors.primary.default },
+const hSpt = StyleSheet.create({
+  text  : { fontSize: 14, color: colors.text.tertiary, fontWeight: '500' },
+  textOn: { color: colors.text.primary, fontWeight: '700' },
 });
 
 // ── 자산 통계 카드 ────────────────────────────────────────────────────────────
@@ -218,29 +184,19 @@ const PAD_B    = 0;
 const DRAW_H   = CHART_H - PAD_T - PAD_B;
 
 interface AssetChartProps {
-  data:           { value: number; date?: string }[];
-  positive:       boolean;
-  showUsd:        boolean;
-  rate:           number;
-  period:         PeriodKey;
-  onPeriodPress:  () => void;
+  data:      { value: number; date?: string }[];
+  positive:  boolean;
+  showUsd:   boolean;
+  rate:      number;
 }
 
-function AssetChart({ data, positive, showUsd, rate, period, onPeriodPress }: AssetChartProps) {
+function AssetChart({ data, positive, showUsd, rate }: AssetChartProps) {
   const [tooltip, setTooltip] = useState<{ idx: number; x: number; y: number } | null>(null);
-
-  const periodLabel = PERIODS.find((p) => p.key === period)?.label ?? period;
 
   if (!data?.length || data.length < 2) {
     return (
-      <View>
-        <Pressable style={chartSt.periodRow} onPress={onPeriodPress}>
-          <Text style={chartSt.periodLabel}>{periodLabel}</Text>
-          <Text style={chartSt.periodChevron}>▾</Text>
-        </Pressable>
-        <View style={{ height: CHART_H, alignItems: 'center', justifyContent: 'center' }}>
-          <Text variant="caption1" color={colors.text.disabled}>데이터 없음</Text>
-        </View>
+      <View style={{ height: CHART_H, alignItems: 'center', justifyContent: 'center' }}>
+        <Text variant="caption1" color={colors.text.disabled}>데이터 없음</Text>
       </View>
     );
   }
@@ -251,14 +207,8 @@ function AssetChart({ data, positive, showUsd, rate, period, onPeriodPress }: As
 
   if (values.length < 2) {
     return (
-      <View>
-        <Pressable style={chartSt.periodRow} onPress={onPeriodPress}>
-          <Text style={chartSt.periodLabel}>{periodLabel}</Text>
-          <Text style={chartSt.periodChevron}>▾</Text>
-        </Pressable>
-        <View style={{ height: CHART_H, alignItems: 'center', justifyContent: 'center' }}>
-          <Text variant="caption1" color={colors.text.disabled}>데이터 없음</Text>
-        </View>
+      <View style={{ height: CHART_H, alignItems: 'center', justifyContent: 'center' }}>
+        <Text variant="caption1" color={colors.text.disabled}>데이터 없음</Text>
       </View>
     );
   }
@@ -309,17 +259,13 @@ function AssetChart({ data, positive, showUsd, rate, period, onPeriodPress }: As
 
   return (
     <View>
-      {/* 기간 선택 + 변동률 */}
-      <Pressable style={chartSt.periodRow} onPress={onPeriodPress}>
-        <Text style={chartSt.periodLabel}>{periodLabel}</Text>
-        <Text style={chartSt.periodChevron}>▾</Text>
-        <View style={chartSt.changePill}>
-          <Text style={[chartSt.changePct, { color }]}>
-            {changeSign}{changePct.toFixed(2)}%
-          </Text>
-          <Text style={chartSt.changeLabel}> 기간 수익률</Text>
-        </View>
-      </Pressable>
+      {/* 기간 수익률 */}
+      <View style={chartSt.changePill}>
+        <Text style={[chartSt.changePct, { color }]}>
+          {changeSign}{changePct.toFixed(2)}%
+        </Text>
+        <Text style={chartSt.changeLabel}> 기간 수익률</Text>
+      </View>
 
       {/* SVG 차트 */}
       <TouchableWithoutFeedback onPress={handleTouch} onPressOut={() => setTooltip(null)}>
@@ -415,15 +361,9 @@ function AssetChart({ data, positive, showUsd, rate, period, onPeriodPress }: As
 }
 
 const chartSt = StyleSheet.create({
-  periodRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    marginBottom: spacing[2], alignSelf: 'flex-start',
-  },
-  periodLabel:   { fontSize: 13, fontWeight: '600', color: colors.text.secondary },
-  periodChevron: { fontSize: 11, color: colors.text.tertiary, marginTop: 1 },
-  changePill:    { flexDirection: 'row', alignItems: 'baseline', marginLeft: 8 },
-  changePct:     { fontSize: 14, fontWeight: '700' },
-  changeLabel:   { fontSize: 13, color: colors.text.disabled },
+  changePill:  { flexDirection: 'row', alignItems: 'baseline', paddingHorizontal: 16, marginBottom: spacing[2] },
+  changePct:   { fontSize: 14, fontWeight: '700' },
+  changeLabel: { fontSize: 13, color: colors.text.disabled },
   dateRow: {
     flexDirection: 'row', justifyContent: 'space-between',
     marginTop: 4, paddingHorizontal: 2,
@@ -576,9 +516,8 @@ function AccountRow({
 }
 
 export default function Home() {
-  const [period, setPeriod]         = useState<PeriodKey>('일');
-  const [showUsd, setShowUsd]       = useState(false);
-  const [showPeriodSheet, setShowPeriodSheet] = useState(false);
+  const [period, setPeriod] = useState<PeriodKey>('일');
+  const [showUsd, setShowUsd] = useState(false);
   const { accounts, balances, balanceErrors, totalBalance, balancesLoading } = useAccounts();
 
   const { data: singleBalance, isLoading: singleLoading } = useApi(
@@ -648,13 +587,19 @@ export default function Home() {
                   </View>
                 </View>
                 <View style={styles.chartArea}>
+                  <SlidingPillTabs
+                    tabs={PERIODS.map((p) => p.key)}
+                    active={period}
+                    onChange={(t) => setPeriod(t as PeriodKey)}
+                    paddingH={16}
+                    paddingV={6}
+                    gap={4}
+                  />
                   <AssetChart
                     data={chartData}
                     positive={isProfit}
                     showUsd={showUsd}
                     rate={balance?.usdtKrw ?? 1350}
-                    period={period}
-                    onPeriodPress={() => setShowPeriodSheet(true)}
                   />
                 </View>
               </>
@@ -762,12 +707,6 @@ export default function Home() {
         </ScrollView>
       </SafeAreaView>
 
-      <PeriodBottomSheet
-        visible={showPeriodSheet}
-        period={period}
-        onChange={setPeriod}
-        onClose={() => setShowPeriodSheet(false)}
-      />
     </FadeTabView>
   );
 }

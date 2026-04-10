@@ -5,14 +5,14 @@
  *   SummaryList → Divider → SubTabs → ResultChips → AmountBar →
  *   ViewToggle → TradeList
  */
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View, StyleSheet, ScrollView, Pressable, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Animated, {
-  useSharedValue, useAnimatedStyle, withTiming,
+  useSharedValue, useAnimatedStyle, withTiming, withSpring,
 } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
 import { Text, CurrencyToggle } from '@/design-system';
@@ -208,29 +208,84 @@ const am = StyleSheet.create({
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ③ PeriodTabs  ← 일 (주) 월 년 전체  — 선택은 그레이 pill
+// ③ SlidingPillTabs — 공용 슬라이딩 pill 탭 컴포넌트
+//    PeriodTabs, ResultChips 모두 이 컴포넌트를 사용
 // ─────────────────────────────────────────────────────────────────────────────
-function PeriodTabs({ period, onChange }: { period: Period; onChange: (p: Period) => void }) {
-  const TABS: Period[] = ['일', '주', '월', '년', '전체'];
+function SlidingPillTabs({
+  tabs, active, onChange, paddingH = 16, paddingV = 10, gap = 6,
+}: {
+  tabs:     string[];
+  active:   string;
+  onChange: (t: string) => void;
+  paddingH?: number;
+  paddingV?: number;
+  gap?:     number;
+}) {
+  const [layouts, setLayouts] = useState<{ x: number; width: number }[]>([]);
+  const pillX     = useSharedValue(-999);
+  const pillWidth = useSharedValue(0);
+  const PILL_H    = 30;
+
+  useEffect(() => {
+    const idx = tabs.indexOf(active);
+    const lo  = layouts[idx];
+    if (!lo) return;
+    if (pillX.value === -999) {
+      pillX.value     = lo.x;
+      pillWidth.value = lo.width;
+    } else {
+      pillX.value     = withSpring(lo.x,     { damping: 22, stiffness: 320, mass: 0.8 });
+      pillWidth.value = withSpring(lo.width, { damping: 22, stiffness: 320, mass: 0.8 });
+    }
+  }, [active, layouts.length]);
+
+  const pillStyle = useAnimatedStyle(() => ({
+    position:        'absolute',
+    left:            pillX.value,
+    width:           pillWidth.value,
+    height:          PILL_H,
+    borderRadius:    PILL_H / 2,
+    backgroundColor: C.pillBg,
+  }));
+
   return (
-    <View style={pt.row}>
-      {TABS.map((p) => (
-        <Pressable key={p} onPress={() => onChange(p)}>
-          <View style={[pt.pill, period === p && pt.pillOn]}>
-            <Text style={[pt.text, period === p && pt.textOn]}>{p}</Text>
+    <View style={{ flexDirection: 'row', paddingHorizontal: paddingH, paddingVertical: paddingV, gap }}>
+      <Animated.View style={pillStyle} />
+      {tabs.map((t, i) => (
+        <Pressable
+          key={t}
+          onPress={() => onChange(t)}
+          onLayout={(e) => {
+            const { x, width } = e.nativeEvent.layout;
+            setLayouts((prev) => {
+              const next = [...prev];
+              next[i] = { x, width };
+              return next;
+            });
+          }}
+        >
+          <View style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 14 }}>
+            <Text style={[spt.text, active === t && spt.textOn]}>{t}</Text>
           </View>
         </Pressable>
       ))}
     </View>
   );
 }
-const pt = StyleSheet.create({
-  row  : { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 10, gap: 6 },
-  pill : { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 14 },
-  pillOn: { backgroundColor: C.pillBg },
-  text : { fontSize: 15, color: C.textLight, fontWeight: '500' },
+const spt = StyleSheet.create({
+  text  : { fontSize: 15, color: C.textLight, fontWeight: '500' },
   textOn: { color: C.text, fontWeight: '700' },
 });
+
+function PeriodTabs({ period, onChange }: { period: Period; onChange: (p: Period) => void }) {
+  return (
+    <SlidingPillTabs
+      tabs={['일', '주', '월', '년', '전체']}
+      active={period}
+      onChange={(t) => onChange(t as Period)}
+    />
+  );
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ④ NavRow  ← ◄  25년 10월 5주 실현수익  ►
@@ -378,27 +433,20 @@ const st2 = StyleSheet.create({
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ⑧ ResultChips  ← 전체 국내주식 해외주식  →  전체 수익 손실
+// ⑧ ResultChips  — SlidingPillTabs 재사용
 // ─────────────────────────────────────────────────────────────────────────────
 function ResultChips({ active, onChange }: { active: ResultFilter; onChange: (f: ResultFilter) => void }) {
-  const CHIPS: ResultFilter[] = ['전체', '수익', '손실'];
   return (
-    <View style={rc.row}>
-      {CHIPS.map((c) => (
-        <Pressable key={c} style={[rc.chip, active === c && rc.chipOn]} onPress={() => onChange(c)}>
-          <Text style={[rc.text, active === c && rc.textOn]}>{c}</Text>
-        </Pressable>
-      ))}
-    </View>
+    <SlidingPillTabs
+      tabs={['전체', '수익', '손실']}
+      active={active}
+      onChange={(t) => onChange(t as ResultFilter)}
+      paddingH={20}
+      paddingV={12}
+      gap={8}
+    />
   );
 }
-const rc = StyleSheet.create({
-  row   : { flexDirection: 'row', gap: 8, paddingHorizontal: 20, paddingVertical: 12 },
-  chip  : { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: '#E0E0E0' },
-  chipOn: { borderColor: C.borderDark },
-  text  : { fontSize: 13, color: C.textGray, fontWeight: '500' },
-  textOn: { color: C.text, fontWeight: '700' },
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ⑨ AmountBar  ← -253,059원(8.6%)  |  $ 원

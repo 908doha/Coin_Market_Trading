@@ -56,6 +56,11 @@ class TelegramService {
     return null;
   }
 
+  /** 선물 표기용 디스플레이 이름: ETH_USDT → ETH.P */
+  _displayName(pair) {
+    return pair.split('_')[0] + '.P';
+  }
+
   _registerCommands() {
     const chatId = config.telegramChatId;
 
@@ -119,20 +124,29 @@ class TelegramService {
         }
 
         const lines = [`━━━ 활성 포지션 (${activePositions.size}) ━━━`];
-        for (const pair of activePositions.keys()) {
+        for (const [pair, active] of activePositions.entries()) {
           try {
             const pos = await gateClient.getPosition(pair);
             if (!pos || pos.size === 0) continue;
-            const dir = pos.size > 0 ? 'LONG 📈' : 'SHORT 📉';
-            const pnlEmoji = pos.unrealisedPnl >= 0 ? '🟢' : '🔴';
+            const dirEmoji = pos.size > 0 ? '📈' : '📉';
+            const dirText = pos.size > 0 ? 'LONG' : 'SHORT';
+            const dn = this._displayName(pair);
             const contractInfo = await gateClient.getContract(pair);
             const baseCoin = pair.split('_')[0];
             const coinAmount = Math.abs(pos.size) * Math.abs(contractInfo.quantoMultiplier);
-            lines.push(
-              `[${pair}] ${dir} ${coinAmount.toFixed(4)} ${baseCoin} | ${pnlEmoji} ${pos.unrealisedPnl.toFixed(2)} USDT`
-            );
+            const slText = active.sl != null ? active.sl : '(수동)';
+            const tpText = active.tp != null ? active.tp : '(수동)';
+            const pnlSign = pos.unrealisedPnl >= 0 ? '+' : '';
+
+            lines.push('');
+            lines.push(`${dirEmoji} [${dn}]`);
+            lines.push(`  방향: ${dirText}`);
+            lines.push(`  수량: ${coinAmount.toFixed(4)} ${baseCoin}`);
+            lines.push(`  진입가: ${pos.entryPrice > 0 ? pos.entryPrice.toFixed(2) : '-'}`);
+            lines.push(`  SL: ${slText} | TP: ${tpText}`);
+            lines.push(`  PnL: ${pnlSign}${pos.unrealisedPnl.toFixed(2)} USDT`);
           } catch (err) {
-            lines.push(`[${pair}] ❌ ${err.message}`);
+            lines.push(`\n[${this._displayName(pair)}] ❌ ${err.message}`);
           }
         }
         await this.bot.sendMessage(chatId, lines.join('\n'));
@@ -149,25 +163,30 @@ class TelegramService {
       try {
         const pos = await gateClient.getPosition(pair);
         if (!pos || pos.size === 0) {
-          await this.bot.sendMessage(chatId, `📊 [${pair}] 열린 포지션 없음`);
+          await this.bot.sendMessage(chatId, `📊 [${this._displayName(pair)}] 열린 포지션 없음`);
           return;
         }
 
-        const direction = pos.size > 0 ? 'LONG 📈' : 'SHORT 📉';
-        const pnlEmoji = pos.unrealisedPnl >= 0 ? '🟢' : '🔴';
+        const dirEmoji = pos.size > 0 ? '📈' : '📉';
+        const dirText = pos.size > 0 ? 'LONG' : 'SHORT';
+        const dn = this._displayName(pair);
         const lev = pos.leverage || '-';
-
         const contractInfo = await gateClient.getContract(pair);
         const baseCoin = pair.split('_')[0];
         const coinAmount = Math.abs(pos.size) * Math.abs(contractInfo.quantoMultiplier);
+        const active = this.tradingBot.activePositions.get(pair);
+        const slText = active && active.sl != null ? active.sl : '(수동)';
+        const tpText = active && active.tp != null ? active.tp : '(수동)';
+        const pnlSign = pos.unrealisedPnl >= 0 ? '+' : '';
 
         await this.bot.sendMessage(chatId, [
-          `━━━ [${pair}] 포지션 정보 ━━━`,
-          `방향: ${direction}`,
+          `━━━ [${dn}] 포지션 정보 ━━━`,
+          `${dirEmoji} 방향: ${dirText}`,
           `수량: ${coinAmount.toFixed(4)} ${baseCoin}`,
-          `진입가: ${pos.entryPrice > 0 ? pos.entryPrice.toFixed(2) : '조회 중...'}`,
-          `현재가: ${pos.markPrice > 0 ? pos.markPrice.toFixed(2) : '조회 중...'}`,
-          `${pnlEmoji} 미실현 PnL: ${pos.unrealisedPnl.toFixed(2)} USDT`,
+          `진입가: ${pos.entryPrice > 0 ? pos.entryPrice.toFixed(2) : '-'}`,
+          `현재가: ${pos.markPrice > 0 ? pos.markPrice.toFixed(2) : '-'}`,
+          `SL: ${slText} | TP: ${tpText}`,
+          `PnL: ${pnlSign}${pos.unrealisedPnl.toFixed(2)} USDT`,
           `레버리지: x${lev}`,
         ].join('\n'));
       } catch (err) {
@@ -575,7 +594,7 @@ class TelegramService {
     const scoreLabel = ss ? `📊 Setup: ${ss.score}/100 — ${ss.label}` : '';
 
     await this.send([
-      `${emoji} ━━━ [${pair}] 포지션 진입 ━━━`,
+      `${emoji} ━━━ [${this._displayName(pair)}] 포지션 진입 ━━━`,
       `방향: ${signal.signal.toUpperCase()}`,
       `진입가: ${signal.entry}`,
       `손절(SL): ${signal.sl}`,
@@ -597,12 +616,12 @@ class TelegramService {
   async notifyClose(pair, action, pnl, price) {
     const emoji = action === 'tp_hit' ? '🎯' : '🛑';
     const label = action === 'tp_hit' ? '익절' : '손절';
-    const pnlEmoji = pnl >= 0 ? '🟢' : '🔴';
+    const pnlSign = pnl >= 0 ? '+' : '';
 
     await this.send([
-      `${emoji} ━━━ [${pair}] ${label} 청산 ━━━`,
+      `${emoji} ━━━ [${this._displayName(pair)}] ${label} 청산 ━━━`,
       `청산가: ${price}`,
-      `${pnlEmoji} PnL: ${pnl.toFixed(2)} USDT`,
+      `PnL: ${pnlSign}${pnl.toFixed(2)} USDT`,
     ].join('\n'));
   }
 

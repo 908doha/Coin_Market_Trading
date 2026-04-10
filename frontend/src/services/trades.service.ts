@@ -11,6 +11,7 @@ export interface Trade {
   holdingDays: number;
   entryAt:     string;
   exitAt:      string;
+  leverage?:         number;
   // compat
   entryPrice?:       number;
   exitPrice?:        number;

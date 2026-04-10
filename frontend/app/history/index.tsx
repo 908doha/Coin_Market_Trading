@@ -196,8 +196,10 @@ function ResultBadge({ isProfit, isLoss }: { isProfit: boolean; isLoss: boolean 
   );
 }
 const bdg = StyleSheet.create({
-  base: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6 },
-  text: { fontSize: 12, fontWeight: '700' },
+  base:    { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6 },
+  text:    { fontSize: 12, fontWeight: '700' },
+  lev:     { paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6, backgroundColor: '#F5F5F5' },
+  levText: { fontSize: 12, fontWeight: '600', color: '#777' },
 });
 
 // ── 거래 행 ───────────────────────────────────────────────────────────────────
@@ -228,6 +230,11 @@ function TradeRow({
             <Text style={tr.symbol} numberOfLines={1}>{trade.symbol}</Text>
             <DirectionBadge direction={trade.direction} />
             <ResultBadge isProfit={isProfit} isLoss={isLoss} />
+            {!!trade.leverage && trade.leverage > 1 && (
+              <View style={bdg.lev}>
+                <Text style={bdg.levText}>{trade.leverage}x</Text>
+              </View>
+            )}
           </View>
         </View>
         {trade.profit !== 0 && (

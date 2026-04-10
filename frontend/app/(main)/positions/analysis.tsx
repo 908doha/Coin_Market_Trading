@@ -367,7 +367,7 @@ function SlidingPillTabs({
   const [layouts, setLayouts] = useState<{ x: number; width: number }[]>([]);
   const pillX     = useSharedValue(-999);
   const pillWidth = useSharedValue(0);
-  const PILL_H    = 30;
+  const PILL_H    = 32; // paddingVertical*2(12) + lineHeight(20)
 
   useEffect(() => {
     const idx = tabs.indexOf(active);
@@ -416,8 +416,8 @@ function SlidingPillTabs({
   );
 }
 const spt = StyleSheet.create({
-  text  : { fontSize: 15, color: C.textLight, fontWeight: '500' },
-  textOn: { color: C.text, fontWeight: '700' },
+  text  : { fontSize: 15, color: C.textLight, fontWeight: '500', lineHeight: 20 },
+  textOn: { color: C.text, fontWeight: '700', lineHeight: 20 },
 });
 
 function PeriodTabs({ period, onChange }: { period: Period; onChange: (p: Period) => void }) {
@@ -426,6 +426,7 @@ function PeriodTabs({ period, onChange }: { period: Period; onChange: (p: Period
       tabs={['일', '주', '월', '년', '전체']}
       active={period}
       onChange={(t) => onChange(t as Period)}
+      paddingH={20}
     />
   );
 }

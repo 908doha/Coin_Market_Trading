@@ -135,7 +135,7 @@ function SlidingPillTabs({
   const [layouts, setLayouts] = useState<{ x: number; width: number }[]>([]);
   const pillX     = useSharedValue(-999);
   const pillWidth = useSharedValue(0);
-  const PILL_H    = 30;
+  const PILL_H    = 32; // paddingVertical*2(12) + lineHeight(20)
 
   useEffect(() => {
     const idx = tabs.indexOf(active);
@@ -184,8 +184,8 @@ function SlidingPillTabs({
   );
 }
 const hSpt = StyleSheet.create({
-  text  : { fontSize: 14, color: colors.text.tertiary, fontWeight: '500' },
-  textOn: { color: colors.text.primary, fontWeight: '700' },
+  text  : { fontSize: 14, color: colors.text.tertiary, fontWeight: '500', lineHeight: 20 },
+  textOn: { color: colors.text.primary, fontWeight: '700', lineHeight: 20 },
 });
 
 // ── 자산 통계 카드 ────────────────────────────────────────────────────────────

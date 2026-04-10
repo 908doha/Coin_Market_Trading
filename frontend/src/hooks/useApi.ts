@@ -22,6 +22,7 @@ interface UseApiReturn<T> extends ApiState<T> {
 export function useApi<T>(
   fetcher: () => Promise<T>,
   deps: unknown[] = [],
+  options?: { pollingInterval?: number },
 ): UseApiReturn<T> {
   const [state, setState] = useState<ApiState<T>>({
     data:      null,
@@ -45,7 +46,22 @@ export function useApi<T>(
     }
   }, deps); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 폴링 (silent refresh — isLoading 변경 없이 백그라운드 갱신)
+  const silentFetch = useCallback(async () => {
+    try {
+      const data = await fetcherRef.current();
+      setState((prev) => ({ ...prev, data }));
+    } catch { /* 폴링 에러는 무시 */ }
+  }, deps); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => { fetch(); }, [fetch]);
+
+  useEffect(() => {
+    const ms = options?.pollingInterval;
+    if (!ms) return;
+    const id = setInterval(silentFetch, ms);
+    return () => clearInterval(id);
+  }, [silentFetch, options?.pollingInterval]);
 
   return { ...state, refetch: fetch };
 }

@@ -1,107 +1,266 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, TouchableWithoutFeedback, Modal, Pressable, Platform } from 'react-native';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
+import { View, StyleSheet, ScrollView, TouchableWithoutFeedback, Pressable, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Svg, { Polyline, Defs, LinearGradient, Stop, Polygon, Path, Rect, Text as SvgText, Line, Circle } from 'react-native-svg';
-import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming, Easing } from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
 import { Text, GlassCard, PressableScale, FadeTabView, AssetCardSkeleton, PageHeader, CurrencyToggle } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
-import { accountService, positionsService } from '@/services';
+import { accountService, positionsService, tradesService } from '@/services';
+import type { Trade } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeAccount, ExchangeType } from '@/store/accounts';
 import type { Balance } from '@/services';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 
+// ── 거래 내역으로 자산 차트 데이터 생성 ───────────────────────────────────────
+function buildChartFromTrades(
+  trades: Trade[],
+  balance: Balance | null,
+  period: PeriodKey,
+): { value: number; date: string }[] {
+  if (!trades.length) return [];
+
+  const sorted     = [...trades].sort((a, b) => +new Date(a.exitAt) - +new Date(b.exitAt));
+  const totalPnl   = sorted.reduce((s, t) => s + t.profit, 0);
+  const currentTotal = balance?.total ?? 0;
+  const base       = currentTotal > 0 ? currentTotal - totalPnl : 0;
+  const now        = new Date();
+
+  // ── 전체: 거래가 있는 날만 sparse하게 표시 ────────────────────────────────
+  if (period === '전체') {
+    const bucketPnl = new Map<string, number>();
+    let running = 0;
+    for (const t of sorted) {
+      const k = t.exitAt.slice(0, 10);
+      running += t.profit;
+      bucketPnl.set(k, running);
+    }
+    const keys = Array.from(bucketPnl.keys()).sort();
+    if (!keys.length) return [];
+    const fmt = (k: string) => { const [, m, d] = k.split('-'); return `${parseInt(m)}/${parseInt(d)}`; };
+    const result = [{ value: base, date: fmt(keys[0]) }];
+    for (const k of keys) result.push({ value: base + bucketPnl.get(k)!, date: fmt(k) });
+    return result;
+  }
+
+  // ── 고정 버킷 생성: 전체 시간 구간을 균등 분할 ───────────────────────────
+  type Bucket = { key: string; label: string };
+  const buckets: Bucket[] = [];
+
+  if (period === '시간') {
+    // 24개 시간 버킷 (24시간 전 ~ 현재)
+    for (let i = 23; i >= 0; i--) {
+      const d = new Date(now.getTime() - i * 3600_000);
+      const key   = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}`;
+      const label = `${d.getHours()}시`;
+      buckets.push({ key, label });
+    }
+  } else if (period === '일') {
+    // 30개 일별 버킷 (30일 전 ~ 오늘)
+    for (let i = 29; i >= 0; i--) {
+      const d   = new Date(now.getTime() - i * 86400_000);
+      const key = d.toISOString().slice(0, 10);
+      buckets.push({ key, label: `${d.getMonth()+1}/${d.getDate()}` });
+    }
+  } else if (period === '월') {
+    // 12개 월별 버킷 (12개월 전 ~ 이번 달)
+    for (let i = 11; i >= 0; i--) {
+      const d   = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      buckets.push({ key, label: `${String(d.getFullYear()).slice(2)}.${d.getMonth()+1}` });
+    }
+  } else {
+    // 10개 연도 버킷 (10년 전 ~ 올해)
+    for (let i = 9; i >= 0; i--) {
+      const y = now.getFullYear() - i;
+      buckets.push({ key: `${y}`, label: `${y}` });
+    }
+  }
+
+  // 버킷 키 함수
+  const getKey = (iso: string): string => {
+    const d = new Date(iso);
+    if (period === '시간') return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}`;
+    if (period === '월')   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    if (period === '년')   return `${d.getFullYear()}`;
+    return d.toISOString().slice(0, 10);
+  };
+
+  const firstBucketKey = buckets[0].key;
+
+  // 기간 시작 이전 거래의 누적 손익 → 기준값
+  let prePnl = 0;
+  const deltaByKey = new Map<string, number>();
+
+  for (const t of sorted) {
+    const k = getKey(t.exitAt);
+    if (k < firstBucketKey) {
+      prePnl += t.profit;
+    } else {
+      deltaByKey.set(k, (deltaByKey.get(k) ?? 0) + t.profit);
+    }
+  }
+
+  // 각 버킷에 누적 PnL carry-forward
+  const result: { value: number; date: string }[] = [];
+  let cumPnl = prePnl;
+  for (const bucket of buckets) {
+    cumPnl += deltaByKey.get(bucket.key) ?? 0;
+    result.push({ value: base + cumPnl, date: bucket.label });
+  }
+  return result;
+}
+
+// ── 기간별 손익 바 차트 데이터 생성 ──────────────────────────────────────────
+function buildPeriodBarsFromTrades(
+  trades: Trade[],
+  balance: Balance | null,
+  period: PeriodKey,
+): { value: number; rate: number; date: string }[] {
+  if (!trades.length) return [];
+  const totalAssets = balance?.total ?? 0;
+  const sorted      = [...trades].sort((a, b) => +new Date(a.exitAt) - +new Date(b.exitAt));
+  const now         = new Date();
+
+  if (period === '전체') {
+    const bucketPnl = new Map<string, number>();
+    for (const t of sorted) {
+      const k = t.exitAt.slice(0, 10);
+      bucketPnl.set(k, (bucketPnl.get(k) ?? 0) + t.profit);
+    }
+    const keys = Array.from(bucketPnl.keys()).sort();
+    if (!keys.length) return [];
+    const fmt = (k: string) => { const [, m, d] = k.split('-'); return `${parseInt(m)}/${parseInt(d)}`; };
+    return keys.map((k) => {
+      const profit = bucketPnl.get(k)!;
+      return { value: profit, rate: totalAssets > 0 ? (profit / totalAssets) * 100 : 0, date: fmt(k) };
+    });
+  }
+
+  type Bucket = { key: string; label: string };
+  const buckets: Bucket[] = [];
+
+  if (period === '시간') {
+    for (let i = 23; i >= 0; i--) {
+      const d   = new Date(now.getTime() - i * 3600_000);
+      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}`;
+      buckets.push({ key, label: `${d.getHours()}시` });
+    }
+  } else if (period === '일') {
+    for (let i = 29; i >= 0; i--) {
+      const d   = new Date(now.getTime() - i * 86400_000);
+      const key = d.toISOString().slice(0, 10);
+      buckets.push({ key, label: `${d.getMonth()+1}/${d.getDate()}` });
+    }
+  } else if (period === '월') {
+    for (let i = 11; i >= 0; i--) {
+      const d   = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      buckets.push({ key, label: `${String(d.getFullYear()).slice(2)}.${d.getMonth()+1}` });
+    }
+  } else {
+    for (let i = 9; i >= 0; i--) {
+      const y = now.getFullYear() - i;
+      buckets.push({ key: `${y}`, label: `${y}` });
+    }
+  }
+
+  const getKey = (iso: string): string => {
+    const d = new Date(iso);
+    if (period === '시간') return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}`;
+    if (period === '월')   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    if (period === '년')   return `${d.getFullYear()}`;
+    return d.toISOString().slice(0, 10);
+  };
+
+  const firstBucketKey = buckets[0].key;
+  const deltaByKey     = new Map<string, number>();
+  for (const t of sorted) {
+    const k = getKey(t.exitAt);
+    if (k >= firstBucketKey) deltaByKey.set(k, (deltaByKey.get(k) ?? 0) + t.profit);
+  }
+
+  return buckets.map((b) => {
+    const profit = deltaByKey.get(b.key) ?? 0;
+    return { value: profit, rate: totalAssets > 0 ? (profit / totalAssets) * 100 : 0, date: b.label };
+  });
+}
+
 const PERIODS = [
-  { key: '1W',  label: '최근 일주일' },
-  { key: '1M',  label: '최근 한달'   },
-  { key: '6M',  label: '최근 6개월'  },
-  { key: '1Y',  label: '최근 1년'    },
-  { key: 'ALL', label: '전체'        },
+  { key: '시간', label: '시간' },
+  { key: '일',   label: '일'   },
+  { key: '월',   label: '월'   },
+  { key: '년',   label: '년'   },
+  { key: '전체', label: '전체' },
 ] as const;
 type PeriodKey = typeof PERIODS[number]['key'];
 
-// ── 기간 선택 바텀시트 (Toss 스타일) ─────────────────────────────────────────
-function PeriodBottomSheet({
-  visible, period, onChange, onClose,
+// ── 슬라이딩 pill 기간 탭 (수익분석과 동일한 컴포넌트) ────────────────────────
+function SlidingPillTabs({
+  tabs, active, onChange, paddingH = 16, paddingV = 10, gap = 6,
 }: {
-  visible:  boolean;
-  period:   PeriodKey;
-  onChange: (k: PeriodKey) => void;
-  onClose:  () => void;
+  tabs:     string[];
+  active:   string;
+  onChange: (t: string) => void;
+  paddingH?: number;
+  paddingV?: number;
+  gap?:     number;
 }) {
+  const [layouts, setLayouts] = useState<{ x: number; width: number }[]>([]);
+  const pillX     = useSharedValue(-999);
+  const pillWidth = useSharedValue(0);
+  const PILL_H    = 32; // paddingVertical*2(12) + lineHeight(20)
+
+  useEffect(() => {
+    const idx = tabs.indexOf(active);
+    const lo  = layouts[idx];
+    if (!lo) return;
+    if (pillX.value === -999) {
+      pillX.value     = lo.x;
+      pillWidth.value = lo.width;
+    } else {
+      pillX.value     = withSpring(lo.x,     { damping: 22, stiffness: 320, mass: 0.8 });
+      pillWidth.value = withSpring(lo.width, { damping: 22, stiffness: 320, mass: 0.8 });
+    }
+  }, [active, layouts.length]);
+
+  const pillStyle = useAnimatedStyle(() => ({
+    position:        'absolute',
+    left:            pillX.value,
+    width:           pillWidth.value,
+    height:          PILL_H,
+    borderRadius:    8,
+    backgroundColor: 'rgba(0,0,0,0.07)',
+  }));
+
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={sheet.overlay} onPress={onClose}>
-        {/* stopPropagation 대신 빈 onPress로 버블 차단 */}
-        <View style={sheet.sheet}>
-          <View style={sheet.handle} />
-
-          {PERIODS.map((p) => {
-            const active = p.key === period;
-            return (
-              <Pressable
-                key={p.key}
-                style={({ pressed }) => [sheet.row, pressed && sheet.rowPressed]}
-                onPress={() => { onChange(p.key); onClose(); }}
-              >
-                <Text style={[sheet.rowText, active && sheet.rowTextActive]}>
-                  {p.label}
-                </Text>
-                {active && (
-                  <Svg width={24} height={24} viewBox="0 0 24 24">
-                    <Circle cx="12" cy="12" r="12" fill={colors.primary.default} />
-                    <Path
-                      d="M7 12.5l3.5 3.5 6.5-7"
-                      stroke="#fff"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      fill="none"
-                    />
-                  </Svg>
-                )}
-              </Pressable>
-            );
-          })}
-
-          <View style={{ height: 34 }} />
-        </View>
-      </Pressable>
-    </Modal>
+    <View style={{ flexDirection: 'row', alignSelf: 'flex-start', paddingHorizontal: paddingH, paddingVertical: paddingV, gap }}>
+      <Animated.View style={pillStyle} />
+      {tabs.map((t, i) => (
+        <Pressable
+          key={t}
+          onPress={() => onChange(t)}
+          onLayout={(e) => {
+            const { x, width } = e.nativeEvent.layout;
+            setLayouts((prev) => {
+              const next = [...prev];
+              next[i] = { x, width };
+              return next;
+            });
+          }}
+        >
+          <View style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8 }}>
+            <Text style={[hSpt.text, active === t && hSpt.textOn]}>{t}</Text>
+          </View>
+        </Pressable>
+      ))}
+    </View>
   );
 }
-
-const sheet = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.15)',
-    justifyContent: 'flex-end',
-    // web: backdrop blur
-    ...(Platform.OS === 'web' ? { backdropFilter: 'blur(12px)' } as any : {}),
-  },
-  sheet: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius:  20,
-    borderTopRightRadius: 20,
-    paddingTop: 10,
-  },
-  handle: {
-    width: 32, height: 4, borderRadius: 2,
-    backgroundColor: '#E5E5EA',
-    alignSelf: 'center',
-    marginBottom: 8,
-  },
-  row: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    justifyContent: 'space-between',
-    paddingVertical:   18,
-    paddingHorizontal: 24,
-  },
-  rowPressed:      { backgroundColor: '#F5F5F7' },
-  rowText:         { fontSize: 17, fontWeight: '400', color: '#191919' },
-  rowTextActive:   { fontWeight: '600', color: colors.primary.default },
+const hSpt = StyleSheet.create({
+  text  : { fontSize: 14, color: colors.text.tertiary, fontWeight: '500', lineHeight: 20 },
+  textOn: { color: colors.text.primary, fontWeight: '700', lineHeight: 20 },
 });
 
 // ── 자산 통계 카드 ────────────────────────────────────────────────────────────
@@ -126,29 +285,20 @@ const PAD_B    = 0;
 const DRAW_H   = CHART_H - PAD_T - PAD_B;
 
 interface AssetChartProps {
-  data:           { value: number; date?: string }[];
-  positive:       boolean;
-  showUsd:        boolean;
-  rate:           number;
-  period:         PeriodKey;
-  onPeriodPress:  () => void;
+  data:         { value: number; date?: string }[];
+  positive:     boolean;
+  showUsd:      boolean;
+  rate:         number;
+  periodRate?:  number;  // 현재 기간(마지막 버킷) 수익률 — 없으면 전체 시리즈 변동률 사용
 }
 
-function AssetChart({ data, positive, showUsd, rate, period, onPeriodPress }: AssetChartProps) {
+function AssetChart({ data, positive, showUsd, rate, periodRate }: AssetChartProps) {
   const [tooltip, setTooltip] = useState<{ idx: number; x: number; y: number } | null>(null);
-
-  const periodLabel = PERIODS.find((p) => p.key === period)?.label ?? period;
 
   if (!data?.length || data.length < 2) {
     return (
-      <View>
-        <Pressable style={chartSt.periodRow} onPress={onPeriodPress}>
-          <Text style={chartSt.periodLabel}>{periodLabel}</Text>
-          <Text style={chartSt.periodChevron}>▾</Text>
-        </Pressable>
-        <View style={{ height: CHART_H, alignItems: 'center', justifyContent: 'center' }}>
-          <Text variant="caption1" color={colors.text.disabled}>데이터 없음</Text>
-        </View>
+      <View style={{ height: CHART_H, alignItems: 'center', justifyContent: 'center' }}>
+        <Text variant="caption1" color={colors.text.disabled}>데이터 없음</Text>
       </View>
     );
   }
@@ -159,14 +309,8 @@ function AssetChart({ data, positive, showUsd, rate, period, onPeriodPress }: As
 
   if (values.length < 2) {
     return (
-      <View>
-        <Pressable style={chartSt.periodRow} onPress={onPeriodPress}>
-          <Text style={chartSt.periodLabel}>{periodLabel}</Text>
-          <Text style={chartSt.periodChevron}>▾</Text>
-        </Pressable>
-        <View style={{ height: CHART_H, alignItems: 'center', justifyContent: 'center' }}>
-          <Text variant="caption1" color={colors.text.disabled}>데이터 없음</Text>
-        </View>
+      <View style={{ height: CHART_H, alignItems: 'center', justifyContent: 'center' }}>
+        <Text variant="caption1" color={colors.text.disabled}>데이터 없음</Text>
       </View>
     );
   }
@@ -177,11 +321,13 @@ function AssetChart({ data, positive, showUsd, rate, period, onPeriodPress }: As
   const color  = positive ? colors.market.rise : colors.market.fall;
   const n      = values.length;
 
-  // 시작 → 끝 변동률
-  const startV   = values[0];
-  const endV     = values[n - 1];
-  const changePct = startV !== 0 ? ((endV - startV) / Math.abs(startV)) * 100 : 0;
-  const changeSign = changePct >= 0 ? '+' : '';
+  // 시작 → 끝 변동률 (기본값) / periodRate 있으면 그걸 사용
+  const startV     = values[0];
+  const endV       = values[n - 1];
+  const changePct  = startV !== 0 ? ((endV - startV) / Math.abs(startV)) * 100 : 0;
+  const pillRate   = periodRate !== undefined ? periodRate : changePct;
+  const pillSign   = pillRate >= 0 ? '+' : '';
+  const pillColor  = pillRate >= 0 ? colors.market.rise : colors.market.fall;
 
   const toY = (v: number) => PAD_T + (1 - (v - min) / range) * DRAW_H;
   const toX = (i: number) => PAD_L + (i / (n - 1)) * CHART_W;
@@ -217,17 +363,13 @@ function AssetChart({ data, positive, showUsd, rate, period, onPeriodPress }: As
 
   return (
     <View>
-      {/* 기간 선택 + 변동률 */}
-      <Pressable style={chartSt.periodRow} onPress={onPeriodPress}>
-        <Text style={chartSt.periodLabel}>{periodLabel}</Text>
-        <Text style={chartSt.periodChevron}>▾</Text>
-        <View style={chartSt.changePill}>
-          <Text style={[chartSt.changePct, { color }]}>
-            {changeSign}{changePct.toFixed(2)}%
-          </Text>
-          <Text style={chartSt.changeLabel}> 기간 수익률</Text>
-        </View>
-      </Pressable>
+      {/* 기간 수익률 */}
+      <View style={chartSt.changePill}>
+        <Text style={[chartSt.changePct, { color: pillColor }]}>
+          {pillSign}{pillRate.toFixed(2)}%
+        </Text>
+        <Text style={chartSt.changeLabel}> 기간 수익률</Text>
+      </View>
 
       {/* SVG 차트 */}
       <TouchableWithoutFeedback onPress={handleTouch} onPressOut={() => setTooltip(null)}>
@@ -323,20 +465,77 @@ function AssetChart({ data, positive, showUsd, rate, period, onPeriodPress }: As
 }
 
 const chartSt = StyleSheet.create({
-  periodRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    marginBottom: spacing[2], alignSelf: 'flex-start',
-  },
-  periodLabel:   { fontSize: 13, fontWeight: '600', color: colors.text.secondary },
-  periodChevron: { fontSize: 11, color: colors.text.tertiary, marginTop: 1 },
-  changePill:    { flexDirection: 'row', alignItems: 'baseline', marginLeft: 8 },
-  changePct:     { fontSize: 14, fontWeight: '700' },
-  changeLabel:   { fontSize: 13, color: colors.text.disabled },
+  changePill:  { flexDirection: 'row', alignItems: 'baseline', paddingHorizontal: 16, marginBottom: spacing[2] },
+  changePct:   { fontSize: 14, fontWeight: '700' },
+  changeLabel: { fontSize: 13, color: colors.text.disabled },
   dateRow: {
     flexDirection: 'row', justifyContent: 'space-between',
     marginTop: 4, paddingHorizontal: 2,
   },
 });
+
+// ── 기간별 수익률 바 차트 ─────────────────────────────────────────────────────
+const BARS_H = 100;
+
+function PeriodPnlBars({ data }: { data: { value: number; rate: number; date: string }[] }) {
+  const hasData = data.some((d) => d.value !== 0);
+
+  if (!hasData) {
+    return (
+      <View style={{ height: BARS_H, alignItems: 'center', justifyContent: 'center' }}>
+        <Text variant="caption1" color={colors.text.disabled}>데이터 없음</Text>
+      </View>
+    );
+  }
+
+  const maxAbs  = Math.max(...data.map((d) => Math.abs(d.value))) || 1;
+  const n       = data.length;
+  const barW    = Math.max((CHART_W / n) * 0.55, 4);
+  const midY    = BARS_H / 2;
+  const maxBarH = midY - 8;
+
+  return (
+    <View>
+      <View style={{ height: BARS_H }}>
+        <Svg
+          width="100%"
+          height={BARS_H}
+          viewBox={`0 0 ${CHART_W} ${BARS_H}`}
+          preserveAspectRatio="none"
+        >
+          <Line
+            x1={0} y1={midY}
+            x2={CHART_W} y2={midY}
+            stroke={colors.border.default}
+            strokeWidth="0.8"
+          />
+          {data.map((d, i) => {
+            const barH = (Math.abs(d.value) / maxAbs) * maxBarH;
+            const x    = PAD_L + (i / n) * CHART_W + ((CHART_W / n) - barW) / 2;
+            const y    = d.value >= 0 ? midY - barH : midY;
+            const c    = d.value >= 0 ? colors.market.rise : colors.market.fall;
+            return (
+              <Rect
+                key={i}
+                x={x}
+                y={y}
+                width={barW}
+                height={Math.max(barH, d.value !== 0 ? 2 : 0)}
+                rx="3"
+                fill={c}
+                fillOpacity="0.85"
+              />
+            );
+          })}
+        </Svg>
+      </View>
+      <View style={chartSt.dateRow}>
+        <Text variant="caption1" color={colors.text.disabled}>{data[0]?.date ?? ''}</Text>
+        <Text variant="caption1" color={colors.text.disabled}>{data[data.length - 1]?.date ?? ''}</Text>
+      </View>
+    </View>
+  );
+}
 
 // ── 거래소 로고 아이콘 ────────────────────────────────────────────────────────
 function ExchangeLogo({ exchange, size = 44 }: { exchange: ExchangeType; size?: number }) {
@@ -423,24 +622,6 @@ function ExchangeLogo({ exchange, size = 44 }: { exchange: ExchangeType; size?: 
   );
 }
 
-// ── 스태거 페이드인 래퍼 ──────────────────────────────────────────────────────
-function FadeInRow({ index, children }: { index: number; children: React.ReactNode }) {
-  const opacity    = useSharedValue(0);
-  const translateY = useSharedValue(12);
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      opacity.value    = withTiming(1, { duration: 300, easing: Easing.out(Easing.cubic) });
-      translateY.value = withSpring(0, { damping: 22, stiffness: 220 });
-    }, index * 80);
-    return () => clearTimeout(timer);
-  }, [index]);
-  const style = useAnimatedStyle(() => ({
-    opacity:   opacity.value,
-    transform: [{ translateY: translateY.value }],
-  }));
-  return <Animated.View style={style}>{children}</Animated.View>;
-}
-
 // ── 연결된 계정 행 ────────────────────────────────────────────────────────────
 function AccountRow({
   account, balance, error, isLast, showUsd,
@@ -472,7 +653,7 @@ function AccountRow({
     : null;
 
   return (
-    <PressableScale onPress={() => router.push('/(main)/account/api-accounts')} scaleTo={0.99}>
+    <PressableScale onPress={() => router.push(`/(main)/account/${account.id}`)} scaleTo={0.99}>
       <View style={[accRow.wrap, !isLast && accRow.border]}>
         <ExchangeLogo exchange={account.exchange} size={44} />
 
@@ -502,22 +683,35 @@ function AccountRow({
 }
 
 export default function Home() {
-  const [period, setPeriod]         = useState<PeriodKey>('1M');
-  const [showUsd, setShowUsd]       = useState(false);
-  const [showPeriodSheet, setShowPeriodSheet] = useState(false);
+  const [period, setPeriod] = useState<PeriodKey>('일');
+  const [showUsd, setShowUsd] = useState(false);
   const { accounts, balances, balanceErrors, totalBalance, balancesLoading } = useAccounts();
 
   const { data: singleBalance, isLoading: singleLoading } = useApi(
     () => accounts.length === 0 ? accountService.getBalance() : Promise.resolve(null),
     [accounts.length],
   );
-  const { data: chart }   = useApi(() => accountService.getChart(period), [period]);
+  const { data: allTrades } = useApi(
+    () => tradesService.getAllByAccounts(accounts),
+    [accounts],
+  );
   const { data: positions } = useApi(
     () => positionsService.getAllByAccounts(accounts), [accounts],
   );
   const balance    = accounts.length > 0 ? totalBalance : singleBalance;
   const balLoading = accounts.length > 0 ? balancesLoading : singleLoading;
   const isProfit   = (balance?.profitTotal ?? 0) >= 0;
+  const chartData  = useMemo(
+    () => buildChartFromTrades(allTrades ?? [], balance ?? null, period),
+    [allTrades, balance, period],
+  );
+  const barsData   = useMemo(
+    () => buildPeriodBarsFromTrades(allTrades ?? [], balance ?? null, period),
+    [allTrades, balance, period],
+  );
+  // 현재 기간(마지막 버킷) 수익률 → AssetChart "기간 수익률" 표시에 사용
+  const lastBar           = barsData[barsData.length - 1];
+  const currentPeriodRate = lastBar?.rate ?? 0;
 
   return (
     <FadeTabView style={styles.root}>
@@ -567,17 +761,30 @@ export default function Home() {
                   </View>
                 </View>
                 <View style={styles.chartArea}>
+                  <SlidingPillTabs
+                    tabs={PERIODS.map((p) => p.key)}
+                    active={period}
+                    onChange={(t) => setPeriod(t as PeriodKey)}
+                    paddingH={16}
+                    paddingV={6}
+                    gap={4}
+                  />
                   <AssetChart
-                    data={chart ?? []}
+                    data={chartData}
                     positive={isProfit}
                     showUsd={showUsd}
                     rate={balance?.usdtKrw ?? 1350}
-                    period={period}
-                    onPeriodPress={() => setShowPeriodSheet(true)}
+                    periodRate={currentPeriodRate}
                   />
                 </View>
               </>
             )}
+          </GlassCard>
+
+          {/* ── 기간 수익률 차트 ── */}
+          <GlassCard style={styles.rateCard} intensity="low" radius={20} padding={16}>
+            <Text variant="meta" color={colors.text.tertiary} style={{ marginBottom: 8 }}>기간 수익률</Text>
+            <PeriodPnlBars data={barsData} />
           </GlassCard>
 
           {/* ── 자산 분배 ── */}
@@ -611,15 +818,14 @@ export default function Home() {
           ) : (
             <GlassCard intensity="medium" radius={20} padding={0} style={[styles.section, { overflow: 'hidden' }]}>
               {accounts.map((acc, i) => (
-                <FadeInRow key={acc.id} index={i}>
-                  <AccountRow
-                    account={acc}
-                    balance={balances[acc.id] ?? null}
-                    error={balanceErrors[acc.id] ?? null}
-                    isLast={i === accounts.length - 1}
-                    showUsd={showUsd}
-                  />
-                </FadeInRow>
+                <AccountRow
+                  key={acc.id}
+                  account={acc}
+                  balance={balances[acc.id] ?? null}
+                  error={balanceErrors[acc.id] ?? null}
+                  isLast={i === accounts.length - 1}
+                  showUsd={showUsd}
+                />
               ))}
             </GlassCard>
           )}
@@ -637,57 +843,76 @@ export default function Home() {
               <View style={{ paddingTop: 16, alignItems: 'center' }}>
                 <Text style={styles.emptyText}>현재 활성 포지션이 없어요</Text>
               </View>
-            ) : (
-              positions.slice(0, 2).map((pos, idx) => {
-                const up = pos.profit >= 0;
-                return (
-                  <PressableScale
-                    key={pos.id}
-                    onPress={() => router.push(`/(main)/positions/${pos.id}`)}
-                    style={[styles.posItem, idx === 0 && { marginTop: 16 }]}
-                  >
-                    <View style={styles.posRow}>
-                      <View style={[styles.posIcon, { backgroundColor: up ? colors.market.riseSubtle : colors.bg.elevated }]}>
-                        <Text style={{ fontSize: 18, fontWeight: '700', color: up ? colors.negative.text : colors.market.fall }}>
-                          {pos.coin.slice(0, 2)}
-                        </Text>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing[2] }}>
-                          <Text style={styles.posSymbol}>{pos.symbol}</Text>
-                          <View style={[styles.dirBadge, { backgroundColor: pos.direction === 'Long' ? colors.bg.elevated : colors.market.riseSubtle }]}>
-                            <Text style={[styles.dirText, { color: pos.direction === 'Long' ? colors.text.secondary : colors.negative.text }]}>
-                              {pos.direction}
-                            </Text>
-                          </View>
-                        </View>
-                        <Text variant="meta" color={colors.text.tertiary}>{formatKRW(pos.amount)}</Text>
-                      </View>
-                      <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={[styles.posProfit, { color: up ? colors.market.rise : colors.market.fall }]}>
-                          {formatKRWSigned(pos.profit)}
-                        </Text>
-                        <Text style={[styles.posProfitRate, { color: up ? colors.market.rise : colors.market.fall }]}>
-                          {formatRate(pos.profitRate)}
-                        </Text>
-                      </View>
+            ) : (() => {
+              // 계정이 2개 이상이면 계정별 그룹 헤더 표시
+              const multiAccount = accounts.length >= 2;
+              // accountId 기준으로 그룹화 (없으면 단일 그룹)
+              const groups: { accountId: string | undefined; label: string; items: typeof positions }[] =
+                multiAccount
+                  ? accounts
+                      .map((acc) => ({
+                        accountId: acc.id,
+                        label:     acc.name || EXCHANGE_LABELS[acc.exchange] || acc.exchange,
+                        items:     positions.filter((p) => p.accountId === acc.id),
+                      }))
+                      .filter((g) => g.items.length > 0)
+                  : [{ accountId: undefined, label: '', items: positions }];
+
+              return (
+                <View style={{ marginTop: 16, gap: multiAccount ? 0 : 0 }}>
+                  {groups.map((group) => (
+                    <View key={group.accountId ?? 'all'}>
+                      {multiAccount && (
+                        <Text style={styles.posAccountLabel}>{group.label}</Text>
+                      )}
+                      {group.items.map((pos, idx) => {
+                        const up = pos.profit >= 0;
+                        return (
+                          <PressableScale
+                            key={pos.id}
+                            onPress={() => router.push(`/(main)/positions/${pos.id}`)}
+                            style={[styles.posItem, idx > 0 && { marginTop: 10 }]}
+                          >
+                            <View style={styles.posRow}>
+                              <View style={[styles.posIcon, { backgroundColor: up ? colors.market.riseSubtle : colors.bg.elevated }]}>
+                                <Text style={{ fontSize: 18, fontWeight: '700', color: up ? colors.negative.text : colors.market.fall }}>
+                                  {pos.coin.slice(0, 2)}
+                                </Text>
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing[2] }}>
+                                  <Text style={styles.posSymbol}>{pos.symbol}</Text>
+                                  <View style={[styles.dirBadge, { backgroundColor: pos.direction === 'Long' ? colors.bg.elevated : colors.market.riseSubtle }]}>
+                                    <Text style={[styles.dirText, { color: pos.direction === 'Long' ? colors.text.secondary : colors.negative.text }]}>
+                                      {pos.direction === 'Long' ? '롱' : '숏'}
+                                    </Text>
+                                  </View>
+                                </View>
+                                <Text variant="meta" color={colors.text.tertiary}>{formatKRW(pos.amount)}</Text>
+                              </View>
+                              <View style={{ alignItems: 'flex-end' }}>
+                                <Text style={[styles.posProfit, { color: up ? colors.market.rise : colors.market.fall }]}>
+                                  {formatKRWSigned(pos.profit)}
+                                </Text>
+                                <Text style={[styles.posProfitRate, { color: up ? colors.market.rise : colors.market.fall }]}>
+                                  {formatRate(pos.profitRate)}
+                                </Text>
+                              </View>
+                            </View>
+                          </PressableScale>
+                        );
+                      })}
                     </View>
-                  </PressableScale>
-                );
-              })
-            )}
+                  ))}
+                </View>
+              );
+            })()}
           </GlassCard>
 
           <View style={{ height: 120 }} />
         </ScrollView>
       </SafeAreaView>
 
-      <PeriodBottomSheet
-        visible={showPeriodSheet}
-        period={period}
-        onChange={setPeriod}
-        onClose={() => setShowPeriodSheet(false)}
-      />
     </FadeTabView>
   );
 }
@@ -697,6 +922,7 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: spacing[5] },
 
   heroCard:     { marginBottom: spacing[3] },
+  rateCard:     { marginBottom: spacing[3] },
   heroAmount:   { fontSize: 26, fontWeight: '700', color: colors.text.primary, letterSpacing: -0.5, marginTop: spacing[2], marginBottom: spacing[2] },
   heroSubRow:   { flexDirection: 'row', alignItems: 'center', gap: spacing[2], marginBottom: spacing[1] },
   heroPnl:      { fontSize: 15, fontWeight: '600' },
@@ -720,10 +946,11 @@ const styles = StyleSheet.create({
   addBtn:            { paddingHorizontal: spacing[3] + 2, paddingVertical: spacing[1] + 2, borderRadius: borderRadius.md, backgroundColor: colors.primary.default },
   addBtnText:        { fontSize: 13, fontWeight: '600', color: colors.primary.foreground },
 
-  posHeader:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  posArrow:     { fontSize: 22, color: colors.text.disabled, lineHeight: 26 },
-  posItem:      { marginTop: spacing[3] },
-  posRow:       { flexDirection: 'row', alignItems: 'center', gap: spacing[3] },
+  posHeader:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  posArrow:        { fontSize: 22, color: colors.text.disabled, lineHeight: 26 },
+  posAccountLabel: { fontSize: 12, fontWeight: '600', color: colors.text.tertiary, marginTop: 14, marginBottom: 6, letterSpacing: 0.3 },
+  posItem:         { marginTop: 0 },
+  posRow:          { flexDirection: 'row', alignItems: 'center', gap: spacing[3], paddingVertical: 8 },
   posIcon:      { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
   posSymbol:    { fontSize: 15, fontWeight: '700', color: colors.text.primary },
   posProfit:    { fontSize: 15, fontWeight: '700' },
@@ -732,7 +959,6 @@ const styles = StyleSheet.create({
   dirText:      { fontSize: 11, fontWeight: '600' },
   emptyText:    { fontSize: 14, color: colors.text.tertiary },
 });
-
 
 const accRow = StyleSheet.create({
   wrap: {

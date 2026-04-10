@@ -233,7 +233,7 @@ function PositionRow({ pos, isLast }: { pos: any; isLast: boolean }) {
   return (
     <Pressable
       style={({ pressed }) => [pr.row, !isLast && pr.border, pressed && { backgroundColor: '#F8F8F8' }]}
-      onPress={() => router.push(`/(main)/positions/${pos.id}`)}
+      onPress={() => router.push(`/history/${pos.id}?type=position`)}
     >
       <View style={[pr.icon, { backgroundColor: up ? colors.market.riseSubtle : colors.market.fallSubtle }]}>
         <Text style={[pr.iconText, { color: pnlColor }]}>{pos.coin?.slice(0, 2) ?? 'BT'}</Text>

@@ -335,6 +335,7 @@ async function analyzeContractJson(contract) {
       entry:      signal.entry ?? null,
       sl:         signal.sl    ?? null,
       tp:         signal.tp    ?? null,
+      setupScore: signal.setupScore ?? null,
     },
   };
 }

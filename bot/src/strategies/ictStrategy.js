@@ -222,10 +222,28 @@ class IctStrategy {
       );
     }
 
+    // ===== HTF Opposing POI (TP 구조적 타겟용) =====
+    let opposingOBs = [];
+    let opposingFVGs = [];
+    if (direction) {
+      // Opposing OB: 진행 방향에 있는 반대 OB (Long → bearish OB 위, Short → bullish OB 아래)
+      const oppRawOBs = direction === 'bullish' ? orderBlocks.bearish : orderBlocks.bullish;
+      opposingOBs = oppRawOBs.filter((ob) => {
+        if (direction === 'bullish') return ob.low > currentPrice;
+        return ob.high < currentPrice;
+      });
+
+      // Opposing FVG: 진행 방향에 있는 반대 미메움 FVG
+      const oppRawFVGs = direction === 'bullish' ? fvgs.bearish : fvgs.bullish;
+      opposingFVGs = oppRawFVGs.filter((f) => {
+        if (f.isFilled) return false;
+        if (direction === 'bullish') return f.bottom > currentPrice;
+        return f.top < currentPrice;
+      });
+    }
+
     // ===== HTF Liquidity Sweep (BSL/SSL) =====
-    // HTF swing high/low 스윕은 기관 stop hunt 이후 반전 신호 (ICT 핵심)
     const htfSweeps = indicators.detectLiquiditySweep(candles, swingHighs, swingLows);
-    // 방향이 결정된 경우 그 방향과 일치하는 sweep만 유효 (bullish 방향 → SSL sweep)
     const htfActiveSweep = direction ? htfSweeps.find((s) => s.type === direction) : null;
 
     return {
@@ -235,7 +253,9 @@ class IctStrategy {
       swingLows,
       pdhl,
       orderBlocks: relevantOBs,
+      opposingOBs,
       fvgs: relevantFVGs,
+      opposingFVGs,
       activeOBs,
       activeFVGs,
       htfSweeps,
@@ -553,81 +573,106 @@ class IctStrategy {
 
     const risk = Math.abs(price - sl);
 
-    // ===== TP 계산 (구조적 타겟) =====
+    // ===== TP 계산 (구조적 타겟 — ICT Liquidity Draw) =====
+    // 가격은 다음 유동성 풀로 끌린다. TP = 가장 가까운 구조적 타겟.
+    // 후보를 모두 모은 뒤 가까운 순으로 정렬, R:R ≥ 1.5인 첫 후보 채택.
     let tp;
-    const tpCandidates = [];
+    let tpSource = 'fallback';
+    const tpCandidates = []; // { price, source }
 
     if (direction === 'bullish') {
-      // Long TP: 위쪽 타겟 (가격 가까운 순)
-      // 1. HTF swing high (opposing BSL)
+      // Long: 위쪽 타겟 수집
+      // 1. HTF swing high (opposing BSL) — 진입가 위의 모든 swing high 수집
       if (htfBias.swingHighs) {
         for (const sh of htfBias.swingHighs) {
-          if (sh.price > price) { tpCandidates.push(sh.price); break; }
+          if (sh.price > price) tpCandidates.push({ price: sh.price, source: 'HTF swing high' });
         }
       }
       // 2. PDH
-      if (htfBias.pdhl && htfBias.pdhl.pdh > price) tpCandidates.push(htfBias.pdhl.pdh);
+      if (htfBias.pdhl && htfBias.pdhl.pdh > price) {
+        tpCandidates.push({ price: htfBias.pdhl.pdh, source: 'PDH' });
+      }
       // 3. MTF opposing OB (bearish OB 하단 = 저항)
       if (mtfStructure.opposingOBs) {
         for (const ob of mtfStructure.opposingOBs) {
-          if (ob.low > price) { tpCandidates.push(ob.low); break; }
+          if (ob.low > price) tpCandidates.push({ price: ob.low, source: 'MTF opposing OB' });
         }
       }
-      // 4. HTF opposing FVG
-      if (htfBias.fvgs) {
-        // bullish 방향이면 bearish FVG가 opposing
-        const oppFVGs = indicators.findFairValueGaps([]); // 빈 배열 — htfBias에서 이미 필터됨
-        // htfBias.fvgs는 같은 방향만 있으므로 원본에서 반대 방향 FVG를 찾아야 함
+      // 4. HTF opposing OB
+      if (htfBias.opposingOBs) {
+        for (const ob of htfBias.opposingOBs) {
+          if (ob.low > price) tpCandidates.push({ price: ob.low, source: 'HTF opposing OB' });
+        }
+      }
+      // 5. HTF opposing FVG (반대 방향 미메움 FVG)
+      if (htfBias.opposingFVGs) {
+        for (const f of htfBias.opposingFVGs) {
+          if (f.bottom > price) tpCandidates.push({ price: f.bottom, source: 'HTF opposing FVG' });
+        }
       }
 
-      // 가장 가까운 후보를 TP로 선택 (가격과 가장 가까운 위쪽)
-      tpCandidates.sort((a, b) => a - b); // 오름차순 (가까운 순)
-      const structuralTP = tpCandidates.find((t) => {
-        const reward = t - price;
-        return reward / risk >= 1.5; // 최소 R:R 1.5 이상인 타겟만
-      });
+      // 가까운 순 정렬 (오름차순)
+      tpCandidates.sort((a, b) => a.price - b.price);
 
-      if (structuralTP) {
-        const rr = (structuralTP - price) / risk;
-        tp = rr > maxRR ? price + risk * maxRR : structuralTP;
+      // R:R ≥ 1.5 인 첫 후보 채택
+      const match = tpCandidates.find((t) => (t.price - price) / risk >= 1.5);
+      if (match) {
+        const rr = (match.price - price) / risk;
+        tp = rr > maxRR ? price + risk * maxRR : match.price;
+        tpSource = rr > maxRR ? `${match.source} (캡 ${maxRR})` : match.source;
       } else {
         tp = price + risk * fallbackRR;
+        tpSource = `fallback (risk×${fallbackRR})`;
       }
     } else {
-      // Short TP: 아래쪽 타겟 (가격 가까운 순)
+      // Short: 아래쪽 타겟 수집
       // 1. HTF swing low (opposing SSL)
       if (htfBias.swingLows) {
-        for (let i = htfBias.swingLows.length - 1; i >= 0; i--) {
-          if (htfBias.swingLows[i].price < price) { tpCandidates.push(htfBias.swingLows[i].price); break; }
+        for (const sl of htfBias.swingLows) {
+          if (sl.price < price) tpCandidates.push({ price: sl.price, source: 'HTF swing low' });
         }
       }
       // 2. PDL
-      if (htfBias.pdhl && htfBias.pdhl.pdl < price) tpCandidates.push(htfBias.pdhl.pdl);
+      if (htfBias.pdhl && htfBias.pdhl.pdl < price) {
+        tpCandidates.push({ price: htfBias.pdhl.pdl, source: 'PDL' });
+      }
       // 3. MTF opposing OB (bullish OB 상단 = 지지)
       if (mtfStructure.opposingOBs) {
-        for (let i = mtfStructure.opposingOBs.length - 1; i >= 0; i--) {
-          if (mtfStructure.opposingOBs[i].high < price) { tpCandidates.push(mtfStructure.opposingOBs[i].high); break; }
+        for (const ob of mtfStructure.opposingOBs) {
+          if (ob.high < price) tpCandidates.push({ price: ob.high, source: 'MTF opposing OB' });
+        }
+      }
+      // 4. HTF opposing OB
+      if (htfBias.opposingOBs) {
+        for (const ob of htfBias.opposingOBs) {
+          if (ob.high < price) tpCandidates.push({ price: ob.high, source: 'HTF opposing OB' });
+        }
+      }
+      // 5. HTF opposing FVG
+      if (htfBias.opposingFVGs) {
+        for (const f of htfBias.opposingFVGs) {
+          if (f.top < price) tpCandidates.push({ price: f.top, source: 'HTF opposing FVG' });
         }
       }
 
-      // 가장 가까운 아래쪽 후보 (가격과 가까운 순)
-      tpCandidates.sort((a, b) => b - a); // 내림차순 (가까운 순)
-      const structuralTP = tpCandidates.find((t) => {
-        const reward = price - t;
-        return reward / risk >= 1.5;
-      });
+      // 가까운 순 정렬 (내림차순 = 가격에서 가장 가까운 아래쪽부터)
+      tpCandidates.sort((a, b) => b.price - a.price);
 
-      if (structuralTP) {
-        const rr = (price - structuralTP) / risk;
-        tp = rr > maxRR ? price - risk * maxRR : structuralTP;
+      const match = tpCandidates.find((t) => (price - t.price) / risk >= 1.5);
+      if (match) {
+        const rr = (price - match.price) / risk;
+        tp = rr > maxRR ? price - risk * maxRR : match.price;
+        tpSource = rr > maxRR ? `${match.source} (캡 ${maxRR})` : match.source;
       } else {
         tp = price - risk * fallbackRR;
+        tpSource = `fallback (risk×${fallbackRR})`;
       }
     }
 
     const actualRR = Math.abs(tp - price) / risk;
+    logger.info(`[SL/TP] SL=${sl.toFixed(2)} | TP=${tp.toFixed(2)} (${tpSource}) | R:R 1:${actualRR.toFixed(2)} | 후보 ${tpCandidates.length}개`);
 
-    return { sl, tp, rr: parseFloat(actualRR.toFixed(2)) };
+    return { sl, tp, rr: parseFloat(actualRR.toFixed(2)), tpSource };
   }
 }
 

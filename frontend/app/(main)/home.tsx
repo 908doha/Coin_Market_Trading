@@ -63,6 +63,15 @@ function buildChartFromTrades(
       const key = d.toISOString().slice(0, 10);
       buckets.push({ key, label: `${d.getMonth()+1}/${d.getDate()}` });
     }
+  } else if (period === '주') {
+    // 12개 주간 버킷 (12주 전 ~ 이번 주, 월요일 기준)
+    for (let i = 11; i >= 0; i--) {
+      const d   = new Date(now.getTime() - i * 7 * 86400_000);
+      const dow = d.getDay();
+      const monday = new Date(d.getTime() - ((dow === 0 ? 6 : dow - 1) * 86400_000));
+      const key = monday.toISOString().slice(0, 10);
+      buckets.push({ key, label: `${monday.getMonth()+1}/${monday.getDate()}` });
+    }
   } else if (period === '월') {
     // 12개 월별 버킷 (12개월 전 ~ 이번 달)
     for (let i = 11; i >= 0; i--) {
@@ -82,6 +91,7 @@ function buildChartFromTrades(
   const getKey = (iso: string): string => {
     const d = new Date(iso);
     if (period === '시간') return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}`;
+    if (period === '주')   { const dow = d.getDay(); const mon = new Date(d.getTime() - ((dow === 0 ? 6 : dow - 1) * 86400_000)); return mon.toISOString().slice(0, 10); }
     if (period === '월')   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
     if (period === '년')   return `${d.getFullYear()}`;
     return d.toISOString().slice(0, 10);
@@ -153,6 +163,14 @@ function buildPeriodBarsFromTrades(
       const key = d.toISOString().slice(0, 10);
       buckets.push({ key, label: `${d.getMonth()+1}/${d.getDate()}` });
     }
+  } else if (period === '주') {
+    for (let i = 11; i >= 0; i--) {
+      const d   = new Date(now.getTime() - i * 7 * 86400_000);
+      const dow = d.getDay();
+      const monday = new Date(d.getTime() - ((dow === 0 ? 6 : dow - 1) * 86400_000));
+      const key = monday.toISOString().slice(0, 10);
+      buckets.push({ key, label: `${monday.getMonth()+1}/${monday.getDate()}` });
+    }
   } else if (period === '월') {
     for (let i = 11; i >= 0; i--) {
       const d   = new Date(now.getFullYear(), now.getMonth() - i, 1);
@@ -169,6 +187,7 @@ function buildPeriodBarsFromTrades(
   const getKey = (iso: string): string => {
     const d = new Date(iso);
     if (period === '시간') return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}`;
+    if (period === '주')   { const dow = d.getDay(); const mon = new Date(d.getTime() - ((dow === 0 ? 6 : dow - 1) * 86400_000)); return mon.toISOString().slice(0, 10); }
     if (period === '월')   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
     if (period === '년')   return `${d.getFullYear()}`;
     return d.toISOString().slice(0, 10);
@@ -190,6 +209,7 @@ function buildPeriodBarsFromTrades(
 const PERIODS = [
   { key: '시간', label: '시간' },
   { key: '일',   label: '일'   },
+  { key: '주',   label: '주'   },
   { key: '월',   label: '월'   },
   { key: '년',   label: '년'   },
   { key: '전체', label: '전체' },
@@ -277,11 +297,11 @@ function StatCard({ label, krw, showUsd, rate }: { label: string; krw: number; s
 }
 
 // ── 자산 차트 ──────────────────────────────────────────────────────────────────
-const CHART_H  = 120;
+const CHART_H  = 148;
 const CHART_W  = 600; // SVG viewBox width
 const PAD_L    = 0;
-const PAD_T    = 12;
-const PAD_B    = 0;
+const PAD_T    = 16;
+const PAD_B    = 20;  // X축 라벨 공간
 const DRAW_H   = CHART_H - PAD_T - PAD_B;
 
 interface AssetChartProps {
@@ -293,7 +313,8 @@ interface AssetChartProps {
 }
 
 function AssetChart({ data, positive, showUsd, rate, periodRate }: AssetChartProps) {
-  const [tooltip, setTooltip] = useState<{ idx: number; x: number; y: number } | null>(null);
+  const [tooltip,    setTooltip]    = useState<{ idx: number; x: number; y: number } | null>(null);
+  const [chartWidth, setChartWidth] = useState(390);
 
   if (!data?.length || data.length < 2) {
     return (
@@ -349,8 +370,7 @@ function AssetChart({ data, positive, showUsd, rate, periodRate }: AssetChartPro
 
   const handleTouch = (evt: any) => {
     const { locationX } = evt.nativeEvent;
-    // locationX는 렌더된 width 기준 → SVG viewBox 비율로 변환
-    const ratio = locationX / evt.nativeEvent.target?.getBoundingClientRect?.()?.width || locationX / 390;
+    const ratio = locationX / chartWidth;
     const svgX  = ratio * CHART_W;
     const idx   = Math.max(0, Math.min(n - 1, Math.round((svgX / CHART_W) * (n - 1))));
     setTooltip({ idx, x: toX(idx), y: toY(values[idx]) });
@@ -359,6 +379,16 @@ function AssetChart({ data, positive, showUsd, rate, periodRate }: AssetChartPro
   const formatTip = (v: number) => {
     if (showUsd && rate > 0) return `$${(v / rate).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
     return `${Math.round(v / 10000).toLocaleString('ko-KR')}만원`;
+  };
+
+  const formatYLabel = (v: number): string => {
+    if (showUsd && rate > 0) {
+      const usd = v / rate;
+      return usd >= 1000 ? `$${(usd / 1000).toFixed(1)}k` : `$${usd.toFixed(0)}`;
+    }
+    if (v >= 100_000_000) return `${(v / 100_000_000).toFixed(1)}억`;
+    if (v >= 10_000)      return `${Math.round(v / 10_000)}만`;
+    return `${Math.round(v).toLocaleString()}`;
   };
 
   return (
@@ -373,7 +403,10 @@ function AssetChart({ data, positive, showUsd, rate, periodRate }: AssetChartPro
 
       {/* SVG 차트 */}
       <TouchableWithoutFeedback onPress={handleTouch} onPressOut={() => setTooltip(null)}>
-        <View style={{ height: CHART_H }}>
+        <View
+          style={{ height: CHART_H }}
+          onLayout={(e) => setChartWidth(e.nativeEvent.layout.width)}
+        >
           <Svg
             width="100%"
             height={CHART_H}
@@ -387,16 +420,26 @@ function AssetChart({ data, positive, showUsd, rate, periodRate }: AssetChartPro
               </LinearGradient>
             </Defs>
 
-            {/* 수평 격자선 */}
+            {/* 수평 격자선 + Y축 라벨 */}
             {gridValues.map((gv, gi) => (
-              <Line
-                key={gi}
-                x1={PAD_L} y1={toY(gv)}
-                x2={CHART_W} y2={toY(gv)}
-                stroke={colors.border.default}
-                strokeWidth="0.8"
-                strokeDasharray="4,4"
-              />
+              <React.Fragment key={gi}>
+                <Line
+                  x1={PAD_L} y1={toY(gv)}
+                  x2={CHART_W} y2={toY(gv)}
+                  stroke={colors.border.default}
+                  strokeWidth="0.8"
+                  strokeDasharray="4,4"
+                />
+                <SvgText
+                  x={4}
+                  y={toY(gv) - 3}
+                  fontSize="9"
+                  fill={colors.text.disabled}
+                  textAnchor="start"
+                >
+                  {formatYLabel(gv)}
+                </SvgText>
+              </React.Fragment>
             ))}
 
             {/* 채우기 */}
@@ -416,13 +459,34 @@ function AssetChart({ data, positive, showUsd, rate, periodRate }: AssetChartPro
             <Circle cx={lastX} cy={lastY} r="4" fill={color} />
             <Circle cx={lastX} cy={lastY} r="7" fill={color} fillOpacity="0.2" />
 
+            {/* X축 시간 라벨 */}
+            {(() => {
+              const step = Math.max(1, Math.floor((n - 1) / 4));
+              return data.map((d, i) => {
+                if (i % step !== 0 && i !== n - 1) return null;
+                const lx = toX(i);
+                return (
+                  <SvgText
+                    key={`xl-${i}`}
+                    x={Math.max(20, Math.min(lx, CHART_W - 20))}
+                    y={CHART_H - 4}
+                    fontSize="9"
+                    fill={colors.text.disabled}
+                    textAnchor="middle"
+                  >
+                    {d.date ?? ''}
+                  </SvgText>
+                );
+              });
+            })()}
+
             {/* 툴팁 */}
             {tooltip !== null && tipX !== null && tipY !== null && (
               <>
                 {/* 수직선 */}
                 <Line
                   x1={tipX} y1={PAD_T}
-                  x2={tipX} y2={CHART_H}
+                  x2={tipX} y2={CHART_H - PAD_B}
                   stroke={color} strokeWidth="1.2" strokeDasharray="3,3"
                 />
                 {/* 포인트 */}
@@ -452,14 +516,6 @@ function AssetChart({ data, positive, showUsd, rate, periodRate }: AssetChartPro
           </Svg>
         </View>
       </TouchableWithoutFeedback>
-
-      {/* 날짜 범위 */}
-      {(data[0]?.date || data[data.length - 1]?.date) && (
-        <View style={chartSt.dateRow}>
-          <Text variant="caption1" color={colors.text.disabled}>{data[0]?.date ?? ''}</Text>
-          <Text variant="caption1" color={colors.text.disabled}>{data[data.length - 1]?.date ?? ''}</Text>
-        </View>
-      )}
     </View>
   );
 }

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, TouchableWithoutFeedback, Pressable, Platform } from 'react-native';
+import { View, StyleSheet, ScrollView, TouchableWithoutFeedback, Pressable, Platform, Vibration } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Svg, { Polyline, Defs, LinearGradient, Stop, Polygon, Path, Rect, Text as SvgText, Line, Circle } from 'react-native-svg';
@@ -368,12 +368,13 @@ function AssetChart({ data, positive, showUsd, rate, periodRate }: AssetChartPro
   const tipX = tooltip !== null ? tooltip.x : null;
   const tipY = tooltip !== null ? tooltip.y : null;
 
-  const handleTouch = (evt: any) => {
+  const handleTouch = (evt: any, withVibration = false) => {
     const lx: number = evt.nativeEvent?.locationX ?? evt.nativeEvent?.offsetX ?? -1;
     if (!isFinite(lx) || lx < 0) return;
     const ratio = lx / chartWidth;
     const svgX  = ratio * CHART_W;
     const idx   = Math.max(0, Math.min(n - 1, Math.round((svgX / CHART_W) * (n - 1))));
+    if (withVibration) Vibration.vibrate(40);
     setTooltip({ idx, x: toX(idx), y: toY(values[idx]) });
   };
 
@@ -394,16 +395,12 @@ function AssetChart({ data, positive, showUsd, rate, periodRate }: AssetChartPro
 
   return (
     <View>
-      {/* 기간 수익률 */}
-      <View style={chartSt.changePill}>
-        <Text style={[chartSt.changePct, { color: pillColor }]}>
-          {pillSign}{pillRate.toFixed(2)}%
-        </Text>
-        <Text style={chartSt.changeLabel}> 기간 수익률</Text>
-      </View>
-
-      {/* SVG 차트 + Y축 라벨 overlay */}
-      <TouchableWithoutFeedback onPress={handleTouch} onPressOut={() => setTooltip(null)}>
+      {/* SVG 차트 + Y축 라벨 overlay — 꾹 누르면 툴팁 + 진동 */}
+      <TouchableWithoutFeedback
+        onLongPress={(e) => handleTouch(e, true)}
+        onPressOut={() => setTooltip(null)}
+        delayLongPress={300}
+      >
         <View style={{ position: 'relative' }}>
           <View
             style={{ height: CHART_H }}
@@ -847,11 +844,20 @@ export default function Home() {
           <GlassCard style={styles.heroCard} intensity="medium" radius={24}>
             {balLoading ? <AssetCardSkeleton /> : (
               <>
-                <Text variant="meta" color={colors.text.tertiary} style={{ marginBottom: 6 }}>총 자산</Text>
+                {/* 날짜 + 카드 타이틀 */}
+                <Text variant="meta" color={colors.text.disabled} style={{ marginBottom: 2 }}>
+                  {new Date().toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' })}
+                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'baseline', marginBottom: 6, gap: 8 }}>
+                  <Text variant="meta" color={colors.text.tertiary}>총 자산</Text>
+                  <Text style={[styles.heroPct, { color: isProfit ? colors.market.rise : colors.market.fall }]}>
+                    {(balance?.profitRate ?? 0) >= 0 ? '+' : ''}{(balance?.profitRate ?? 0).toFixed(2)}%
+                  </Text>
+                </View>
                 <Text style={styles.heroAmount}>
                   {showUsd && (balance?.totalUsd ?? 0) > 0
                     ? `$${balance!.totalUsd!.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                    : formatKRW(balance?.total ?? 0)}
+                    : `₩${(balance?.total ?? 0).toLocaleString('ko-KR')}`}
                 </Text>
                 <View style={styles.heroSubRow}>
                   <Text style={[styles.heroPnl, { color: isProfit ? colors.market.rise : colors.market.fall }]}>
@@ -892,7 +898,12 @@ export default function Home() {
 
           {/* ── 기간 수익률 차트 ── */}
           <GlassCard style={styles.rateCard} intensity="low" radius={20} padding={16}>
-            <Text variant="meta" color={colors.text.tertiary} style={{ marginBottom: 8 }}>기간 수익률</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', marginBottom: 8, gap: 8 }}>
+              <Text variant="meta" color={colors.text.tertiary}>수익률</Text>
+              <Text style={[styles.heroPct, { color: currentPeriodRate >= 0 ? colors.market.rise : colors.market.fall }]}>
+                {currentPeriodRate >= 0 ? '+' : ''}{currentPeriodRate.toFixed(2)}%
+              </Text>
+            </View>
             <PeriodPnlBars data={barsData} showUsd={showUsd} rate={balance?.usdtKrw ?? 1350} />
           </GlassCard>
 
@@ -1032,7 +1043,8 @@ const styles = StyleSheet.create({
 
   heroCard:     { marginBottom: spacing[3] },
   rateCard:     { marginBottom: spacing[3] },
-  heroAmount:   { fontSize: 26, fontWeight: '700', color: colors.text.primary, letterSpacing: -0.5, marginTop: spacing[2], marginBottom: spacing[2] },
+  heroAmount:   { fontSize: 26, fontWeight: '700', color: colors.text.primary, letterSpacing: -0.5, marginTop: spacing[1], marginBottom: spacing[2] },
+  heroPct:      { fontSize: 13, fontWeight: '700' },
   heroSubRow:   { flexDirection: 'row', alignItems: 'center', gap: spacing[2], marginBottom: spacing[1] },
   heroPnl:      { fontSize: 15, fontWeight: '600' },
   pnlBadge:     { borderRadius: borderRadius.sm, paddingHorizontal: spacing[2], paddingVertical: 3 },

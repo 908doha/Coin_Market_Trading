@@ -224,8 +224,8 @@ function TradeRow({
       >
         <Text style={tr.date}>{showDate ? fmtDate(trade.exitAt) : ''}</Text>
         <View style={tr.middle}>
-          <Text style={tr.symbol} numberOfLines={1}>{trade.symbol}</Text>
-          <View style={tr.badges}>
+          <View style={tr.symbolRow}>
+            <Text style={tr.symbol} numberOfLines={1}>{trade.symbol}</Text>
             <DirectionBadge direction={trade.direction} />
             <ResultBadge isProfit={isProfit} isLoss={isLoss} />
           </View>
@@ -241,14 +241,14 @@ function TradeRow({
   );
 }
 const tr = StyleSheet.create({
-  wrap:   { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 20, backgroundColor: '#FFFFFF' },
-  border: { borderBottomWidth: 1, borderBottomColor: '#F2F2F2' },
-  date:   { width: 34, fontSize: 13, color: colors.text.tertiary, lineHeight: 18 },
-  middle: { flex: 1, paddingRight: 12 },
-  symbol: { fontSize: 15, fontWeight: '700', color: colors.text.primary, lineHeight: 20, marginBottom: 5 },
-  badges: { flexDirection: 'row', gap: 5 },
-  amount: { fontSize: 15, fontWeight: '700' },
-  rate:   { fontSize: 12, fontWeight: '600', marginTop: 2 },
+  wrap:      { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 20, backgroundColor: '#FFFFFF' },
+  border:    { borderBottomWidth: 1, borderBottomColor: '#F2F2F2' },
+  date:      { width: 34, fontSize: 13, color: colors.text.tertiary, lineHeight: 18 },
+  middle:    { flex: 1, paddingRight: 12 },
+  symbolRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  symbol:    { fontSize: 15, fontWeight: '700', color: colors.text.primary },
+  amount:    { fontSize: 15, fontWeight: '700' },
+  rate:      { fontSize: 12, fontWeight: '600', marginTop: 2 },
 });
 
 // ── 섹션 헤더 ─────────────────────────────────────────────────────────────────

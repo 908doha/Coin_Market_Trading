@@ -355,7 +355,9 @@ class TelegramService {
 
     if (signal.signal) {
       const emoji = signal.signal === 'long' ? '📈' : '📉';
-      return `[${pair}] ${emoji} ${signal.signal.toUpperCase()} @ ${currentPrice.toFixed(2)} | ${signal.confluence.length}개 컨플루언스`;
+      const ss = signal.setupScore;
+      const scoreTag = ss ? ` | ${ss.score}/100 ${ss.label}` : '';
+      return `[${pair}] ${emoji} ${signal.signal.toUpperCase()} @ ${currentPrice.toFixed(2)}${scoreTag}`;
     }
     return `[${pair}] ⏸️ ${currentPrice.toFixed(2)} | ${signal.reason}`;
   }
@@ -499,10 +501,26 @@ class TelegramService {
     const signal = this.tradingBot.strategy.analyze({ htf: htfCandles, mtf: mtfCandles, ltf: ltfCandles });
     if (signal.signal) {
       const emoji = signal.signal === 'long' ? '📈' : '📉';
+      const ss = signal.setupScore;
       lines.push(`  ${emoji} ${signal.signal.toUpperCase()} 신호!`);
       lines.push(`  진입: ${signal.entry} | SL: ${signal.sl} | TP: ${signal.tp}`);
+      lines.push(`  R:R: 1:${signal.rr}`);
+      if (ss) {
+        lines.push(`  📊 Setup: ${ss.score}/100 — ${ss.label}`);
+      }
       lines.push(`  컨플루언스 ${signal.confluence.length}개:`);
-      signal.confluence.forEach(c => lines.push(`    • ${c}`));
+      const breakdownMap = new Map();
+      if (ss && ss.breakdown) {
+        for (const b of ss.breakdown) breakdownMap.set(b.text, b.points);
+      }
+      signal.confluence.forEach((c) => {
+        const pts = breakdownMap.get(c);
+        lines.push(pts ? `    • ${c} [+${pts}]` : `    • ${c}`);
+      });
+      const rrBonusItem = ss && ss.breakdown ? ss.breakdown.find((b) => b.text.startsWith('R:R')) : null;
+      if (rrBonusItem) {
+        lines.push(`    • R:R ${signal.rr} 보너스 [+${rrBonusItem.points}]`);
+      }
     } else {
       lines.push(`  ⏸️ ${signal.reason}`);
       if (signal.confluence && signal.confluence.length > 0) {
@@ -536,6 +554,26 @@ class TelegramService {
     } catch (err) {
       logger.error(`[${pair}] 수량 변환 실패: ${err.message}`);
     }
+    // Setup Score breakdown (항목별 점수 표시)
+    const ss = signal.setupScore;
+    const breakdownMap = new Map();
+    if (ss && ss.breakdown) {
+      for (const b of ss.breakdown) breakdownMap.set(b.text, b.points);
+    }
+
+    const confluenceLines = signal.confluence.map((c) => {
+      const pts = breakdownMap.get(c);
+      return pts ? `  • ${c} [+${pts}]` : `  • ${c}`;
+    });
+
+    // R:R 보너스가 있으면 별도 표시
+    const rrBonusItem = ss && ss.breakdown ? ss.breakdown.find((b) => b.text.startsWith('R:R')) : null;
+    if (rrBonusItem) {
+      confluenceLines.push(`  • R:R ${signal.rr} 보너스 [+${rrBonusItem.points}]`);
+    }
+
+    const scoreLabel = ss ? `📊 Setup: ${ss.score}/100 — ${ss.label}` : '';
+
     await this.send([
       `${emoji} ━━━ [${pair}] 포지션 진입 ━━━`,
       `방향: ${signal.signal.toUpperCase()}`,
@@ -544,9 +582,10 @@ class TelegramService {
       `익절(TP): ${signal.tp}`,
       `R:R: 1:${signal.rr || '?'}`,
       `수량: ${qtyText}`,
+      scoreLabel,
       ``,
       `📋 컨플루언스:`,
-      ...signal.confluence.map((c) => `  • ${c}`),
+      ...confluenceLines,
       ``,
       `💡 ${signal.reason}`,
     ].join('\n'));

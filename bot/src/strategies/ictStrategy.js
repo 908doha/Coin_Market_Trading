@@ -120,16 +120,19 @@ class IctStrategy {
       };
     }
 
-    logger.info(`[ICT v2] ${signal.toUpperCase()} | R:R ${rr} | ${confluence.length}개 컨플루언스`);
+    // ========== Setup Score ==========
+    const setupScore = this._calculateSetupScore(confluence, rr);
+    logger.info(`[ICT v2] ${signal.toUpperCase()} | R:R ${rr} | ${setupScore.score}/100 ${setupScore.label} | ${confluence.length}개 컨플루언스`);
 
     return {
       signal,
-      reason: `ICT v2 ${signal.toUpperCase()} - R:R ${rr} | ${confluence.length}개 컨플루언스`,
+      reason: `ICT v2 ${signal.toUpperCase()} - R:R ${rr} | ${setupScore.score}/100 ${setupScore.label}`,
       entry: currentPrice,
       sl: parseFloat(sl.toFixed(2)),
       tp: parseFloat(tp.toFixed(2)),
       rr,
       confluence,
+      setupScore,
       hasHtfPoi,
       hasHtfSweep: !!htfBias.htfActiveSweep,
     };
@@ -673,6 +676,75 @@ class IctStrategy {
     logger.info(`[SL/TP] SL=${sl.toFixed(2)} | TP=${tp.toFixed(2)} (${tpSource}) | R:R 1:${actualRR.toFixed(2)} | 후보 ${tpCandidates.length}개`);
 
     return { sl, tp, rr: parseFloat(actualRR.toFixed(2)), tpSource };
+  }
+
+  /**
+   * 컨플루언스 점수 계산 (ICT 중요도 기반, 100점 만점)
+   *
+   * 각 컨플루언스 항목에 ICT 중요도에 따른 점수를 부여하고,
+   * R:R 보너스를 더해 총점(최대 100)을 산출한다.
+   *
+   * @param confluence  컨플루언스 문자열 배열
+   * @param rr          Risk:Reward 비율
+   * @returns {{ score, grade, label, breakdown }}
+   */
+  _calculateSetupScore(confluence, rr) {
+    const rules = [
+      { pattern: /세션:/,                              points: 5,  label: 'Session' },
+      { pattern: /HTF\(.+\)\s+(BULLISH|BEARISH)/,      points: 10, label: 'HTF Direction' },
+      { pattern: /★ HTF OB 진입/,                      points: 15, label: 'HTF OB Entry' },
+      { pattern: /★ HTF FVG 진입/,                     points: 12, label: 'HTF FVG Entry' },
+      { pattern: /★ HTF (BSL|SSL) sweep/,              points: 10, label: 'HTF Sweep' },
+      { pattern: /PD[HL] Sweep/,                        points: 8,  label: 'PDH/PDL Sweep' },
+      { pattern: /★ HTF\+MTF.+겹침/,                   points: 12, label: 'HTF+MTF Overlap' },
+      { pattern: /MTF\(.+\)\s+(BOS|CHoCH)/,            points: 8,  label: 'MTF MSS' },
+      { pattern: /MTF OB/,                              points: 7,  label: 'MTF OB' },
+      { pattern: /MTF FVG/,                             points: 5,  label: 'MTF FVG' },
+      { pattern: /★ MTF (BSL|SSL) sweep/,              points: 7,  label: 'MTF Sweep' },
+      { pattern: /LTF FVG CE/,                          points: 8,  label: 'LTF FVG CE' },
+      { pattern: /LTF FVG Fill/,                        points: 6,  label: 'LTF FVG Fill' },
+      { pattern: /IOFED/,                               points: 7,  label: 'IOFED' },
+      { pattern: /LTF (BSL|SSL) sweep/,                points: 6,  label: 'LTF Sweep' },
+      { pattern: /LTF (BOS|CHoCH)/,                    points: 4,  label: 'LTF MSS' },
+      { pattern: /Range Sweep/,                          points: 5,  label: 'Session Range' },
+    ];
+
+    const breakdown = [];
+    let total = 0;
+
+    for (const c of confluence) {
+      for (const rule of rules) {
+        if (rule.pattern.test(c)) {
+          total += rule.points;
+          breakdown.push({ text: c, points: rule.points });
+          break; // 한 컨플루언스에 하나의 룰만 매칭
+        }
+      }
+    }
+
+    // R:R 보너스
+    let rrBonus = 0;
+    if (rr >= 4.0) rrBonus = 8;
+    else if (rr >= 3.0) rrBonus = 5;
+    else if (rr >= 2.5) rrBonus = 3;
+    if (rrBonus > 0) {
+      total += rrBonus;
+      breakdown.push({ text: `R:R ${rr} bonus`, points: rrBonus });
+    }
+
+    const score = Math.min(total, 100);
+
+    // 등급 결정
+    let grade, label;
+    if (score >= 90) { grade = 'S'; label = 'ELITE'; }
+    else if (score >= 80) { grade = 'A'; label = 'PREMIUM'; }
+    else if (score >= 70) { grade = 'B+'; label = 'STRONG'; }
+    else if (score >= 60) { grade = 'B'; label = 'SOLID'; }
+    else if (score >= 50) { grade = 'C'; label = 'MODERATE'; }
+    else if (score >= 40) { grade = 'D'; label = 'WEAK'; }
+    else { grade = 'F'; label = 'FRAGILE'; }
+
+    return { score, grade, label, breakdown };
   }
 }
 

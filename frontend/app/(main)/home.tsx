@@ -24,54 +24,74 @@ function buildChartFromTrades(
   const sorted = [...trades].sort((a, b) => +new Date(a.exitAt) - +new Date(b.exitAt));
   const totalPnl = sorted.reduce((s, t) => s + t.profit, 0);
   const currentTotal = balance?.total ?? 0;
-  // 시작 자본 = 현재 잔고 - 총 누적 손익
   const base = currentTotal > 0 ? currentTotal - totalPnl : 0;
 
-  // 일별 누적 손익 맵 구성
-  const dailyPnl = new Map<string, number>();
-  let running = 0;
-  for (const t of sorted) {
-    const d = t.exitAt.slice(0, 10);
-    running += t.profit;
-    dailyPnl.set(d, running);
-  }
-
-  // 기간 시작일 계산
-  const now = new Date();
-  let cutoff: string | null = null;
-  if (period === '1W') { const c = new Date(now); c.setDate(c.getDate() - 7);      cutoff = c.toISOString().slice(0, 10); }
-  if (period === '1M') { const c = new Date(now); c.setMonth(c.getMonth() - 1);     cutoff = c.toISOString().slice(0, 10); }
-  if (period === '6M') { const c = new Date(now); c.setMonth(c.getMonth() - 6);     cutoff = c.toISOString().slice(0, 10); }
-  if (period === '1Y') { const c = new Date(now); c.setFullYear(c.getFullYear() - 1); cutoff = c.toISOString().slice(0, 10); }
-
-  const allDates    = Array.from(dailyPnl.keys()).sort();
-  const periodDates = cutoff ? allDates.filter((d) => d >= cutoff!) : allDates;
-  if (!periodDates.length) return [];
-
-  // 기간 시작 직전까지의 누적 손익 (시작 기준점)
-  const preDates  = cutoff ? allDates.filter((d) => d < cutoff!) : [];
-  const startPnl  = preDates.length ? dailyPnl.get(preDates[preDates.length - 1])! : 0;
-
-  const fmtDate = (iso: string) => {
+  // 단위별 버킷 키 & 표시 형식
+  const bucketKey = (iso: string): string => {
     const d = new Date(iso);
-    return `${d.getMonth() + 1}/${d.getDate()}`;
+    if (period === '시간') return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}`;
+    if (period === '월')   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    if (period === '년')   return `${d.getFullYear()}`;
+    return d.toISOString().slice(0, 10); // 일 / 전체
   };
 
+  const fmtKey = (key: string): string => {
+    if (period === '시간') return `${parseInt(key.slice(11, 13), 10)}시`;
+    if (period === '월')   { const [y, m] = key.split('-'); return `${String(y).slice(2)}.${parseInt(m)}`; }
+    if (period === '년')   return `${key}`;
+    // 일 / 전체: M/D
+    const [, m, d] = key.split('-');
+    return `${parseInt(m)}/${parseInt(d)}`;
+  };
+
+  // 누적 손익 맵 (버킷 단위)
+  const bucketPnl = new Map<string, number>();
+  let running = 0;
+  for (const t of sorted) {
+    const k = bucketKey(t.exitAt);
+    running += t.profit;
+    bucketPnl.set(k, running);
+  }
+
+  // 기간 컷오프 (ms)
+  const now = new Date();
+  let cutoffMs: number | null = null;
+  if (period === '시간') cutoffMs = now.getTime() - 24 * 3600_000;
+  if (period === '일')   cutoffMs = now.getTime() - 30 * 86400_000;
+  if (period === '월')   cutoffMs = new Date(now.getFullYear(), now.getMonth() - 12, 1).getTime();
+  if (period === '년')   cutoffMs = new Date(now.getFullYear() - 5, 0, 1).getTime();
+
+  const allKeys    = Array.from(bucketPnl.keys()).sort();
+  const periodKeys = cutoffMs
+    ? allKeys.filter((k) => {
+        const ts = period === '시간' ? new Date(k.replace('T', ' ') + ':00:00').getTime()
+                 : period === '월'   ? new Date(k + '-01').getTime()
+                 : period === '년'   ? new Date(k + '-01-01').getTime()
+                 : new Date(k).getTime();
+        return ts >= cutoffMs!;
+      })
+    : allKeys;
+
+  if (!periodKeys.length) return [];
+
+  const preKeys  = allKeys.filter((k) => !periodKeys.includes(k));
+  const startPnl = preKeys.length ? bucketPnl.get(preKeys[preKeys.length - 1])! : 0;
+
   const result: { value: number; date: string }[] = [
-    { value: base + startPnl, date: fmtDate(periodDates[0]) },
+    { value: base + startPnl, date: fmtKey(periodKeys[0]) },
   ];
-  for (const d of periodDates) {
-    result.push({ value: base + dailyPnl.get(d)!, date: fmtDate(d) });
+  for (const k of periodKeys) {
+    result.push({ value: base + bucketPnl.get(k)!, date: fmtKey(k) });
   }
   return result;
 }
 
 const PERIODS = [
-  { key: '1W',  label: '최근 일주일' },
-  { key: '1M',  label: '최근 한달'   },
-  { key: '6M',  label: '최근 6개월'  },
-  { key: '1Y',  label: '최근 1년'    },
-  { key: 'ALL', label: '전체'        },
+  { key: '시간', label: '시간' },
+  { key: '일',   label: '일'   },
+  { key: '월',   label: '월'   },
+  { key: '년',   label: '년'   },
+  { key: '전체', label: '전체' },
 ] as const;
 type PeriodKey = typeof PERIODS[number]['key'];
 
@@ -556,7 +576,7 @@ function AccountRow({
 }
 
 export default function Home() {
-  const [period, setPeriod]         = useState<PeriodKey>('1M');
+  const [period, setPeriod]         = useState<PeriodKey>('일');
   const [showUsd, setShowUsd]       = useState(false);
   const [showPeriodSheet, setShowPeriodSheet] = useState(false);
   const { accounts, balances, balanceErrors, totalBalance, balancesLoading } = useAccounts();

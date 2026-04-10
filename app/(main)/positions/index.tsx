@@ -133,7 +133,7 @@ function TradeRow({ trade, isLast, showUsd, rate }: { trade: Trade; isLast: bool
   const typeLabel = trade.type === 'stop_loss' ? '손절' : (trade.direction === 'Long' ? '롱 청산' : '숏 청산');
 
   return (
-    <PressableScale onPress={() => router.push(`/(main)/history/${trade.id}`)} scaleTo={0.98}>
+    <PressableScale onPress={() => router.push(`/history/${trade.id}`)} scaleTo={0.98}>
       <View style={[hist.row, !isLast && hist.rowBorder]}>
         <Text style={hist.date}>{dateStr}</Text>
         <View style={{ flex: 1 }}>

@@ -28,7 +28,7 @@ function TradeCard({ trade, showUsd, rate }: { trade: Trade; showUsd: boolean; r
 
   return (
     <Pressable
-      onPress={() => router.push(`/(main)/history/${trade.id}`)}
+      onPress={() => router.push(`/history/${trade.id}`)}
       style={({ pressed }) => [{ marginBottom: spacing[3] }, pressed && { opacity: 0.85 }]}
     >
       <Card variant="outlined" padding={spacing[5]}>

@@ -297,7 +297,7 @@ function PeriodTabs({ period, onChange }: { period: Period; onChange: (p: Period
   );
 }
 const pt = StyleSheet.create({
-  scroll:        { borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
+  scroll:        { borderBottomWidth: 1, borderBottomColor: '#F0F0F0', flexGrow: 0 },
   container:     { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 10, gap: 8 },
   pill:          { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, backgroundColor: '#F5F5F5' },
   pillActive:    { backgroundColor: '#191919' },

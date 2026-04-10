@@ -59,7 +59,7 @@ function buildChartFromTrades(
   if (period === '시간') cutoffMs = now.getTime() - 24 * 3600_000;
   if (period === '일')   cutoffMs = now.getTime() - 30 * 86400_000;
   if (period === '월')   cutoffMs = new Date(now.getFullYear(), now.getMonth() - 12, 1).getTime();
-  if (period === '년')   cutoffMs = new Date(now.getFullYear() - 5, 0, 1).getTime();
+  if (period === '년')   cutoffMs = new Date(now.getFullYear() - 10, 0, 1).getTime();
 
   const allKeys    = Array.from(bucketPnl.keys()).sort();
   const periodKeys = cutoffMs

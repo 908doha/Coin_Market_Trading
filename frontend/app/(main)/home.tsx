@@ -112,6 +112,81 @@ function buildChartFromTrades(
   return result;
 }
 
+// ── 기간별 손익 바 차트 데이터 생성 ──────────────────────────────────────────
+function buildPeriodBarsFromTrades(
+  trades: Trade[],
+  balance: Balance | null,
+  period: PeriodKey,
+): { value: number; rate: number; date: string }[] {
+  if (!trades.length) return [];
+  const totalAssets = balance?.total ?? 0;
+  const sorted      = [...trades].sort((a, b) => +new Date(a.exitAt) - +new Date(b.exitAt));
+  const now         = new Date();
+
+  if (period === '전체') {
+    const bucketPnl = new Map<string, number>();
+    for (const t of sorted) {
+      const k = t.exitAt.slice(0, 10);
+      bucketPnl.set(k, (bucketPnl.get(k) ?? 0) + t.profit);
+    }
+    const keys = Array.from(bucketPnl.keys()).sort();
+    if (!keys.length) return [];
+    const fmt = (k: string) => { const [, m, d] = k.split('-'); return `${parseInt(m)}/${parseInt(d)}`; };
+    return keys.map((k) => {
+      const profit = bucketPnl.get(k)!;
+      return { value: profit, rate: totalAssets > 0 ? (profit / totalAssets) * 100 : 0, date: fmt(k) };
+    });
+  }
+
+  type Bucket = { key: string; label: string };
+  const buckets: Bucket[] = [];
+
+  if (period === '시간') {
+    for (let i = 23; i >= 0; i--) {
+      const d   = new Date(now.getTime() - i * 3600_000);
+      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}`;
+      buckets.push({ key, label: `${d.getHours()}시` });
+    }
+  } else if (period === '일') {
+    for (let i = 29; i >= 0; i--) {
+      const d   = new Date(now.getTime() - i * 86400_000);
+      const key = d.toISOString().slice(0, 10);
+      buckets.push({ key, label: `${d.getMonth()+1}/${d.getDate()}` });
+    }
+  } else if (period === '월') {
+    for (let i = 11; i >= 0; i--) {
+      const d   = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      buckets.push({ key, label: `${String(d.getFullYear()).slice(2)}.${d.getMonth()+1}` });
+    }
+  } else {
+    for (let i = 9; i >= 0; i--) {
+      const y = now.getFullYear() - i;
+      buckets.push({ key: `${y}`, label: `${y}` });
+    }
+  }
+
+  const getKey = (iso: string): string => {
+    const d = new Date(iso);
+    if (period === '시간') return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}`;
+    if (period === '월')   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    if (period === '년')   return `${d.getFullYear()}`;
+    return d.toISOString().slice(0, 10);
+  };
+
+  const firstBucketKey = buckets[0].key;
+  const deltaByKey     = new Map<string, number>();
+  for (const t of sorted) {
+    const k = getKey(t.exitAt);
+    if (k >= firstBucketKey) deltaByKey.set(k, (deltaByKey.get(k) ?? 0) + t.profit);
+  }
+
+  return buckets.map((b) => {
+    const profit = deltaByKey.get(b.key) ?? 0;
+    return { value: profit, rate: totalAssets > 0 ? (profit / totalAssets) * 100 : 0, date: b.label };
+  });
+}
+
 const PERIODS = [
   { key: '시간', label: '시간' },
   { key: '일',   label: '일'   },
@@ -210,13 +285,14 @@ const PAD_B    = 0;
 const DRAW_H   = CHART_H - PAD_T - PAD_B;
 
 interface AssetChartProps {
-  data:      { value: number; date?: string }[];
-  positive:  boolean;
-  showUsd:   boolean;
-  rate:      number;
+  data:         { value: number; date?: string }[];
+  positive:     boolean;
+  showUsd:      boolean;
+  rate:         number;
+  periodRate?:  number;  // 현재 기간(마지막 버킷) 수익률 — 없으면 전체 시리즈 변동률 사용
 }
 
-function AssetChart({ data, positive, showUsd, rate }: AssetChartProps) {
+function AssetChart({ data, positive, showUsd, rate, periodRate }: AssetChartProps) {
   const [tooltip, setTooltip] = useState<{ idx: number; x: number; y: number } | null>(null);
 
   if (!data?.length || data.length < 2) {
@@ -245,11 +321,13 @@ function AssetChart({ data, positive, showUsd, rate }: AssetChartProps) {
   const color  = positive ? colors.market.rise : colors.market.fall;
   const n      = values.length;
 
-  // 시작 → 끝 변동률
-  const startV   = values[0];
-  const endV     = values[n - 1];
-  const changePct = startV !== 0 ? ((endV - startV) / Math.abs(startV)) * 100 : 0;
-  const changeSign = changePct >= 0 ? '+' : '';
+  // 시작 → 끝 변동률 (기본값) / periodRate 있으면 그걸 사용
+  const startV     = values[0];
+  const endV       = values[n - 1];
+  const changePct  = startV !== 0 ? ((endV - startV) / Math.abs(startV)) * 100 : 0;
+  const pillRate   = periodRate !== undefined ? periodRate : changePct;
+  const pillSign   = pillRate >= 0 ? '+' : '';
+  const pillColor  = pillRate >= 0 ? colors.market.rise : colors.market.fall;
 
   const toY = (v: number) => PAD_T + (1 - (v - min) / range) * DRAW_H;
   const toX = (i: number) => PAD_L + (i / (n - 1)) * CHART_W;
@@ -287,8 +365,8 @@ function AssetChart({ data, positive, showUsd, rate }: AssetChartProps) {
     <View>
       {/* 기간 수익률 */}
       <View style={chartSt.changePill}>
-        <Text style={[chartSt.changePct, { color }]}>
-          {changeSign}{changePct.toFixed(2)}%
+        <Text style={[chartSt.changePct, { color: pillColor }]}>
+          {pillSign}{pillRate.toFixed(2)}%
         </Text>
         <Text style={chartSt.changeLabel}> 기간 수익률</Text>
       </View>
@@ -395,6 +473,69 @@ const chartSt = StyleSheet.create({
     marginTop: 4, paddingHorizontal: 2,
   },
 });
+
+// ── 기간별 수익률 바 차트 ─────────────────────────────────────────────────────
+const BARS_H = 100;
+
+function PeriodPnlBars({ data }: { data: { value: number; rate: number; date: string }[] }) {
+  const hasData = data.some((d) => d.value !== 0);
+
+  if (!hasData) {
+    return (
+      <View style={{ height: BARS_H, alignItems: 'center', justifyContent: 'center' }}>
+        <Text variant="caption1" color={colors.text.disabled}>데이터 없음</Text>
+      </View>
+    );
+  }
+
+  const maxAbs  = Math.max(...data.map((d) => Math.abs(d.value))) || 1;
+  const n       = data.length;
+  const barW    = Math.max((CHART_W / n) * 0.55, 4);
+  const midY    = BARS_H / 2;
+  const maxBarH = midY - 8;
+
+  return (
+    <View>
+      <View style={{ height: BARS_H }}>
+        <Svg
+          width="100%"
+          height={BARS_H}
+          viewBox={`0 0 ${CHART_W} ${BARS_H}`}
+          preserveAspectRatio="none"
+        >
+          <Line
+            x1={0} y1={midY}
+            x2={CHART_W} y2={midY}
+            stroke={colors.border.default}
+            strokeWidth="0.8"
+          />
+          {data.map((d, i) => {
+            const barH = (Math.abs(d.value) / maxAbs) * maxBarH;
+            const x    = PAD_L + (i / n) * CHART_W + ((CHART_W / n) - barW) / 2;
+            const y    = d.value >= 0 ? midY - barH : midY;
+            const c    = d.value >= 0 ? colors.market.rise : colors.market.fall;
+            return (
+              <Rect
+                key={i}
+                x={x}
+                y={y}
+                width={barW}
+                height={Math.max(barH, d.value !== 0 ? 2 : 0)}
+                rx="3"
+                fill={c}
+                fillOpacity="0.85"
+              />
+            );
+          })}
+        </Svg>
+      </View>
+      <View style={chartSt.dateRow}>
+        <Text variant="caption1" color={colors.text.disabled}>{data[0]?.date ?? ''}</Text>
+        <Text variant="caption1" color={colors.text.disabled}>{data[data.length - 1]?.date ?? ''}</Text>
+      </View>
+    </View>
+  );
+}
 
 // ── 거래소 로고 아이콘 ────────────────────────────────────────────────────────
 function ExchangeLogo({ exchange, size = 44 }: { exchange: ExchangeType; size?: number }) {
@@ -564,6 +705,13 @@ export default function Home() {
     () => buildChartFromTrades(allTrades ?? [], balance ?? null, period),
     [allTrades, balance, period],
   );
+  const barsData   = useMemo(
+    () => buildPeriodBarsFromTrades(allTrades ?? [], balance ?? null, period),
+    [allTrades, balance, period],
+  );
+  // 현재 기간(마지막 버킷) 수익률 → AssetChart "기간 수익률" 표시에 사용
+  const lastBar           = barsData[barsData.length - 1];
+  const currentPeriodRate = lastBar?.rate ?? 0;
 
   return (
     <FadeTabView style={styles.root}>
@@ -626,10 +774,17 @@ export default function Home() {
                     positive={isProfit}
                     showUsd={showUsd}
                     rate={balance?.usdtKrw ?? 1350}
+                    periodRate={currentPeriodRate}
                   />
                 </View>
               </>
             )}
+          </GlassCard>
+
+          {/* ── 기간 수익률 차트 ── */}
+          <GlassCard style={styles.rateCard} intensity="low" radius={20} padding={16}>
+            <Text variant="meta" color={colors.text.tertiary} style={{ marginBottom: 8 }}>기간 수익률</Text>
+            <PeriodPnlBars data={barsData} />
           </GlassCard>
 
           {/* ── 자산 분배 ── */}
@@ -767,6 +922,7 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: spacing[5] },
 
   heroCard:     { marginBottom: spacing[3] },
+  rateCard:     { marginBottom: spacing[3] },
   heroAmount:   { fontSize: 26, fontWeight: '700', color: colors.text.primary, letterSpacing: -0.5, marginTop: spacing[2], marginBottom: spacing[2] },
   heroSubRow:   { flexDirection: 'row', alignItems: 'center', gap: spacing[2], marginBottom: spacing[1] },
   heroPnl:      { fontSize: 15, fontWeight: '600' },

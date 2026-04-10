@@ -797,7 +797,7 @@ export default function Home() {
   const { data: singleBalance, isLoading: singleLoading } = useApi(
     () => accounts.length === 0 ? accountService.getBalance() : Promise.resolve(null),
     [accounts.length],
-    { pollingInterval: 30_000 },
+    { pollingInterval: 10_000 },
   );
   const { data: allTrades } = useApi(
     () => tradesService.getAllByAccounts(accounts),
@@ -805,7 +805,7 @@ export default function Home() {
   );
   const { data: positions } = useApi(
     () => positionsService.getAllByAccounts(accounts), [accounts],
-    { pollingInterval: 30_000 },
+    { pollingInterval: 10_000 },
   );
   const balance    = accounts.length > 0 ? totalBalance : singleBalance;
   const balLoading = accounts.length > 0 ? balancesLoading : singleLoading;

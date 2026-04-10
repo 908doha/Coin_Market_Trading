@@ -15,7 +15,7 @@ import Animated, {
   useSharedValue, useAnimatedStyle, withTiming,
 } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
-import { Text } from '@/design-system';
+import { Text, CurrencyToggle } from '@/design-system';
 import { tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS } from '@/store/accounts';
@@ -68,6 +68,13 @@ function fmtDay(key: string) {
 }
 function pnlColor(v: number) { return v >= 0 ? C.green : C.red; }
 
+function fmtPnl(krw: number, showUsd: boolean, rate: number) {
+  if (!showUsd) return formatKRWSigned(krw);
+  const usd  = krw / rate;
+  const sign = usd >= 0 ? '+' : '';
+  return `${sign}$${Math.abs(usd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 function calcStats(trades: Trade[]) {
   const total    = trades.length;
   const totalPnl = trades.reduce((s, t) => s + t.profit, 0);
@@ -81,20 +88,9 @@ function calcStats(trades: Trade[]) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ① Header  — 거래내역과 동일한 구조: [←] [수익분석] [계좌 ∨]
+// ① Header  — [←] [수익분석] [CurrencyToggle]
 // ─────────────────────────────────────────────────────────────────────────────
-function Header({
-  selectedId, onOpenPicker,
-}: {
-  selectedId: string | null;
-  onOpenPicker: () => void;
-}) {
-  const { accounts } = useAccounts();
-  const label = selectedId
-    ? (accounts.find((a) => a.id === selectedId)?.name
-        || EXCHANGE_LABELS[accounts.find((a) => a.id === selectedId)!.exchange])
-    : '전체';
-
+function Header({ showUsd, onToggleUsd }: { showUsd: boolean; onToggleUsd: () => void }) {
   return (
     <View style={hd.wrap}>
       <Pressable style={hd.backBtn} onPress={() => router.back()} hitSlop={12}>
@@ -103,20 +99,46 @@ function Header({
         </Svg>
       </Pressable>
       <Text style={hd.title}>수익분석</Text>
-      {accounts.length > 0 && (
-        <Pressable style={hd.accountBtn} onPress={onOpenPicker} hitSlop={8}>
-          <Text style={hd.accountText} numberOfLines={1}>{label} ∨</Text>
-        </Pressable>
-      )}
+      <CurrencyToggle showUsd={showUsd} onToggle={onToggleUsd} />
     </View>
   );
 }
 const hd = StyleSheet.create({
-  wrap      : { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, gap: 4 },
-  backBtn   : { padding: 4, marginRight: 4 },
-  title     : { flex: 1, fontSize: 18, fontWeight: '700', color: C.text },
-  accountBtn: { borderWidth: 1, borderColor: C.border, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 },
-  accountText: { fontSize: 13, color: C.textMid, maxWidth: 90 },
+  wrap   : { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, gap: 4 },
+  backBtn: { padding: 4, marginRight: 4 },
+  title  : { flex: 1, fontSize: 18, fontWeight: '700', color: C.text },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 계좌 선택 드롭다운 행 (기간탭 위)
+// ─────────────────────────────────────────────────────────────────────────────
+function AccountDropdownRow({
+  selectedId, onOpen,
+}: {
+  selectedId: string | null;
+  onOpen: () => void;
+}) {
+  const { accounts } = useAccounts();
+  const label = selectedId
+    ? (accounts.find((a) => a.id === selectedId)?.name
+        || EXCHANGE_LABELS[accounts.find((a) => a.id === selectedId)!.exchange])
+    : '전체 계좌';
+
+  return (
+    <Pressable
+      style={({ pressed }) => [adr.row, pressed && { backgroundColor: '#F8F8F8' }]}
+      onPress={onOpen}
+    >
+      <Text style={adr.label}>{label}</Text>
+      <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
+        <Path d="M7 10l5 5 5-5" stroke="#555" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </Svg>
+    </Pressable>
+  );
+}
+const adr = StyleSheet.create({
+  row  : { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F0F0F0', gap: 4 },
+  label: { flex: 1, fontSize: 15, fontWeight: '600', color: C.text },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -190,7 +212,7 @@ function PeriodTabs({ period, onChange }: { period: Period; onChange: (p: Period
   return (
     <View style={pt.row}>
       {TABS.map((p) => (
-        <Pressable key={p} style={pt.item} onPress={() => onChange(p)}>
+        <Pressable key={p} onPress={() => onChange(p)}>
           <View style={[pt.pill, period === p && pt.pillOn]}>
             <Text style={[pt.text, period === p && pt.textOn]}>{p}</Text>
           </View>
@@ -200,9 +222,8 @@ function PeriodTabs({ period, onChange }: { period: Period; onChange: (p: Period
   );
 }
 const pt = StyleSheet.create({
-  row  : { flexDirection: 'row', paddingHorizontal: 10, paddingVertical: 8 },
-  item : { flex: 1, alignItems: 'center' },
-  pill : { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 14 },
+  row  : { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 10, gap: 6 },
+  pill : { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 14 },
   pillOn: { backgroundColor: C.pillBg },
   text : { fontSize: 15, color: C.textLight, fontWeight: '500' },
   textOn: { color: C.text, fontWeight: '700' },
@@ -216,48 +237,40 @@ function NavRow({
 }: {
   label: string; canNext: boolean; onPrev: () => void; onNext: () => void;
 }) {
-  const ChevronL = () => (
-    <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
-      <Path d="M15 18l-6-6 6-6" stroke="#444" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-    </Svg>
-  );
-  const ChevronR = () => (
-    <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
-      <Path d="M9 18l6-6-6-6" stroke="#444" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-    </Svg>
-  );
   return (
     <View style={nr.row}>
-      <Pressable style={nr.btn} onPress={onPrev} hitSlop={10}>
-        <ChevronL />
-      </Pressable>
       <Text style={nr.label}>{label} 실현수익</Text>
-      <Pressable
-        style={[nr.btn, !canNext && nr.disabled]}
-        onPress={onNext}
-        disabled={!canNext}
-        hitSlop={10}
-      >
-        <ChevronR />
-      </Pressable>
+      <View style={nr.btns}>
+        <Pressable style={nr.btn} onPress={onPrev} hitSlop={10}>
+          <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+            <Path d="M15 18l-6-6 6-6" stroke="#444" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+          </Svg>
+        </Pressable>
+        <Pressable style={[nr.btn, !canNext && nr.disabled]} onPress={onNext} disabled={!canNext} hitSlop={10}>
+          <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+            <Path d="M9 18l6-6-6-6" stroke="#444" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+          </Svg>
+        </Pressable>
+      </View>
     </View>
   );
 }
 const nr = StyleSheet.create({
-  row     : { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, paddingHorizontal: 8, gap: 8 },
+  row     : { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, paddingHorizontal: 20 },
+  label   : { fontSize: 15, fontWeight: '700', color: C.text },
+  btns    : { flexDirection: 'row', gap: 4 },
   btn     : { padding: 6 },
   disabled: { opacity: 0.2 },
-  label   : { fontSize: 15, fontWeight: '700', color: C.text, minWidth: 140, textAlign: 'center' },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ⑤ HeroAmount  ← -253,059원  (대형 손익)
 // ─────────────────────────────────────────────────────────────────────────────
-function HeroAmount({ value, hasData }: { value: number; hasData: boolean }) {
+function HeroAmount({ value, hasData, showUsd, rate }: { value: number; hasData: boolean; showUsd: boolean; rate: number }) {
   return (
     <View style={ha.wrap}>
       <Text style={[ha.amount, { color: hasData ? pnlColor(value) : '#CCCCCC' }]}>
-        {hasData ? formatKRWSigned(value) : '—'}
+        {hasData ? fmtPnl(value, showUsd, rate) : '—'}
       </Text>
     </View>
   );
@@ -290,13 +303,13 @@ function SummaryRow({ item, isLast }: { item: SummaryItem; isLast?: boolean }) {
     </View>
   );
 }
-function SummaryList({ stats, hasData }: {
-  stats: ReturnType<typeof calcStats>; hasData: boolean;
+function SummaryList({ stats, hasData, showUsd, rate }: {
+  stats: ReturnType<typeof calcStats>; hasData: boolean; showUsd: boolean; rate: number;
 }) {
   const items: SummaryItem[] = [
     {
       label: '실현손익',
-      value: hasData ? formatKRWSigned(stats.totalPnl) : '0원',
+      value: hasData ? fmtPnl(stats.totalPnl, showUsd, rate) : (showUsd ? '$0.00' : '0원'),
       blue : hasData ? `(승률 ${stats.winRate.toFixed(0)}%)` : undefined,
       color: hasData ? pnlColor(stats.totalPnl) : C.textGray,
     },
@@ -446,7 +459,7 @@ const vt = StyleSheet.create({
 // ─────────────────────────────────────────────────────────────────────────────
 // ⑪ 거래 리스트 행
 // ─────────────────────────────────────────────────────────────────────────────
-function DayRow({ day, trades, isLast }: { day: string; trades: Trade[]; isLast: boolean }) {
+function DayRow({ day, trades, isLast, showUsd, rate }: { day: string; trades: Trade[]; isLast: boolean; showUsd: boolean; rate: number }) {
   const pnl = trades.reduce((s, t) => s + t.profit, 0);
   return (
     <View style={[tr.row, !isLast && tr.border]}>
@@ -454,12 +467,12 @@ function DayRow({ day, trades, isLast }: { day: string; trades: Trade[]; isLast:
         <Text style={tr.primary}>{fmtDay(day)}</Text>
         <Text style={tr.meta}>{trades.length}건 거래</Text>
       </View>
-      <Text style={[tr.pnl, { color: pnlColor(pnl) }]}>{formatKRWSigned(pnl)}</Text>
+      <Text style={[tr.pnl, { color: pnlColor(pnl) }]}>{fmtPnl(pnl, showUsd, rate)}</Text>
     </View>
   );
 }
 
-function CoinRow({ coin, trades, isLast }: { coin: string; trades: Trade[]; isLast: boolean }) {
+function CoinRow({ coin, trades, isLast, showUsd, rate }: { coin: string; trades: Trade[]; isLast: boolean; showUsd: boolean; rate: number }) {
   const pnl  = trades.reduce((s, t) => s + t.profit, 0);
   const wins = trades.filter((t) => t.profit > 0).length;
   const wr   = trades.length ? Math.round(wins / trades.length * 100) : 0;
@@ -472,7 +485,7 @@ function CoinRow({ coin, trades, isLast }: { coin: string; trades: Trade[]; isLa
           <Text style={tr.meta}>{trades.length}건 · 승률 {wr}%</Text>
         </View>
       </View>
-      <Text style={[tr.pnl, { color: pnlColor(pnl) }]}>{formatKRWSigned(pnl)}</Text>
+      <Text style={[tr.pnl, { color: pnlColor(pnl) }]}>{fmtPnl(pnl, showUsd, rate)}</Text>
     </View>
   );
 }
@@ -500,7 +513,8 @@ export default function ProfitAnalysis() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  const { accounts } = useAccounts();
+  const { accounts, totalBalance } = useAccounts();
+  const rate         = totalBalance?.usdtKrw ?? 1350;
   const listOpacity  = useSharedValue(1);
   const listStyle    = useAnimatedStyle(() => ({ opacity: listOpacity.value }));
 
@@ -602,8 +616,11 @@ export default function ProfitAnalysis() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.white }} edges={['top']}>
 
-      {/* ① 헤더 + 계좌 선택 */}
-      <Header selectedId={selectedId} onOpenPicker={() => setPickerOpen(true)} />
+      {/* ① 헤더 */}
+      <Header showUsd={showUsd} onToggleUsd={() => setShowUsd((v) => !v)} />
+
+      {/* 계좌 선택 드롭다운 (기간탭 위) */}
+      <AccountDropdownRow selectedId={selectedId} onOpen={() => setPickerOpen(true)} />
       <AccountPickerModal
         visible={pickerOpen}
         selectedId={selectedId}
@@ -631,10 +648,10 @@ export default function ProfitAnalysis() {
         )}
 
         {/* ⑤ 대형 손익 금액 */}
-        <HeroAmount value={periodStats.totalPnl} hasData={periodStats.total > 0} />
+        <HeroAmount value={periodStats.totalPnl} hasData={periodStats.total > 0} showUsd={showUsd} rate={rate} />
 
         {/* ⑥ 요약 행 5개 */}
-        <SummaryList stats={periodStats} hasData={periodStats.total > 0} />
+        <SummaryList stats={periodStats} hasData={periodStats.total > 0} showUsd={showUsd} rate={rate} />
 
         {/* 섹션 구분선 */}
         <View style={{ height: 10, backgroundColor: C.divSection }} />
@@ -645,7 +662,7 @@ export default function ProfitAnalysis() {
         {/* ⑧ 결과 필터 칩 (전체 | 수익 | 손실) */}
         <ResultChips active={result} onChange={(r) => fade(() => setResult(r))} />
 
-        {/* ⑨ 금액 바 + 통화 토글 */}
+        {/* ⑨ 금액 바 */}
         <AmountBar
           value={stats.totalPnl}
           winRate={stats.winRate}
@@ -667,11 +684,11 @@ export default function ProfitAnalysis() {
             </View>
           ) : viewMode === '일별' ? (
             dayGroups.map(({ day, trades }, i) => (
-              <DayRow key={day} day={day} trades={trades} isLast={i === dayGroups.length - 1} />
+              <DayRow key={day} day={day} trades={trades} isLast={i === dayGroups.length - 1} showUsd={showUsd} rate={rate} />
             ))
           ) : (
             coinGroups.map(({ coin, trades }, i) => (
-              <CoinRow key={coin} coin={coin} trades={trades} isLast={i === coinGroups.length - 1} />
+              <CoinRow key={coin} coin={coin} trades={trades} isLast={i === coinGroups.length - 1} showUsd={showUsd} rate={rate} />
             ))
           )}
         </Animated.View>

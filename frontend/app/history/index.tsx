@@ -163,6 +163,43 @@ const md = StyleSheet.create({
   rowTextActive: { fontWeight: '700' },
 });
 
+// ── 방향·결과 뱃지 ────────────────────────────────────────────────────────────
+function DirectionBadge({ direction }: { direction: 'Long' | 'Short' }) {
+  const isLong = direction === 'Long';
+  return (
+    <View style={[bdg.base, { backgroundColor: isLong ? '#EAF6F0' : '#FFF0F0' }]}>
+      <Text style={[bdg.text, { color: isLong ? '#1AC24E' : '#FF4747' }]}>
+        {isLong ? '롱' : '숏'}
+      </Text>
+    </View>
+  );
+}
+function ResultBadge({ isProfit, isLoss }: { isProfit: boolean; isLoss: boolean }) {
+  if (isProfit) {
+    return (
+      <View style={[bdg.base, { backgroundColor: '#FFF0F1' }]}>
+        <Text style={[bdg.text, { color: colors.market.rise }]}>익절</Text>
+      </View>
+    );
+  }
+  if (isLoss) {
+    return (
+      <View style={[bdg.base, { backgroundColor: '#EEF4FF' }]}>
+        <Text style={[bdg.text, { color: colors.market.fall }]}>손절</Text>
+      </View>
+    );
+  }
+  return (
+    <View style={[bdg.base, { backgroundColor: '#F5F5F5' }]}>
+      <Text style={[bdg.text, { color: colors.text.tertiary }]}>청산</Text>
+    </View>
+  );
+}
+const bdg = StyleSheet.create({
+  base: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6 },
+  text: { fontSize: 12, fontWeight: '700' },
+});
+
 // ── 거래 행 ───────────────────────────────────────────────────────────────────
 function TradeRow({
   trade, showDate, isLast, showUsd, rate, globalIndex,
@@ -177,16 +214,6 @@ function TradeRow({
   const isProfit  = trade.profit > 0;
   const isLoss    = trade.profit < 0;
   const pnlColor  = isProfit ? colors.market.rise : isLoss ? colors.market.fall : colors.text.tertiary;
-
-  const statusText =
-    trade.direction === 'Long'
-      ? isProfit ? '롱 익절 완료' : isLoss ? '롱 손절' : '롱 수동 청산'
-      : isProfit ? '숏 익절 완료' : isLoss ? '숏 손절' : '숏 수동 청산';
-
-  const statusColor = isProfit
-    ? colors.informative.text
-    : isLoss ? colors.negative.text : colors.text.tertiary;
-
   const amountText = showUsd ? fmtUsd(trade.profit, rate) : formatKRWSigned(trade.profit);
 
   return (
@@ -196,13 +223,12 @@ function TradeRow({
         onPress={() => router.push(`/history/${trade.id}`)}
       >
         <Text style={tr.date}>{showDate ? fmtDate(trade.exitAt) : ''}</Text>
-        <View style={{ flex: 1, paddingRight: 12 }}>
-          <Text style={[tr.symbol, !isProfit && !isLoss && { color: colors.text.tertiary }]} numberOfLines={1}>
-            {trade.symbol}
-          </Text>
-          <Text style={[tr.status, { color: statusColor }]} numberOfLines={1}>
-            {statusText}
-          </Text>
+        <View style={tr.middle}>
+          <Text style={tr.symbol} numberOfLines={1}>{trade.symbol}</Text>
+          <View style={tr.badges}>
+            <DirectionBadge direction={trade.direction} />
+            <ResultBadge isProfit={isProfit} isLoss={isLoss} />
+          </View>
         </View>
         {trade.profit !== 0 && (
           <View style={{ alignItems: 'flex-end' }}>
@@ -218,8 +244,9 @@ const tr = StyleSheet.create({
   wrap:   { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 20, backgroundColor: '#FFFFFF' },
   border: { borderBottomWidth: 1, borderBottomColor: '#F2F2F2' },
   date:   { width: 34, fontSize: 13, color: colors.text.tertiary, lineHeight: 18 },
-  symbol: { fontSize: 15, fontWeight: '700', color: colors.text.primary, lineHeight: 20 },
-  status: { fontSize: 13, fontWeight: '500', marginTop: 2, lineHeight: 18 },
+  middle: { flex: 1, paddingRight: 12 },
+  symbol: { fontSize: 15, fontWeight: '700', color: colors.text.primary, lineHeight: 20, marginBottom: 5 },
+  badges: { flexDirection: 'row', gap: 5 },
   amount: { fontSize: 15, fontWeight: '700' },
   rate:   { fontSize: 12, fontWeight: '600', marginTop: 2 },
 });

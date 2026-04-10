@@ -54,10 +54,9 @@ const C = {
 // ─────────────────────────────────────────────────────────────────────────────
 // 유틸
 // ─────────────────────────────────────────────────────────────────────────────
-function getWeek(iso: string) {
-  const d    = new Date(iso);
-  const jan1 = new Date(d.getFullYear(), 0, 1);
-  return Math.ceil(((d.getTime() - jan1.getTime()) / 86400000 + jan1.getDay() + 1) / 7);
+/** 해당 날짜가 그 달의 몇 번째 주인지 반환 (1~5) */
+function getWeekOfMonth(d: Date) {
+  return Math.ceil(d.getDate() / 7);
 }
 function getDay(iso: string) {
   const d = new Date(iso);
@@ -593,12 +592,12 @@ function ResultChips({ active, onChange }: { active: ResultFilter; onChange: (f:
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ⑨ AmountBar  ← -253,059원(8.6%)  |  $ 원
+// ⑨ AmountBar  ← -253,059원 (+8.6%)
 // ─────────────────────────────────────────────────────────────────────────────
 function AmountBar({
-  value, profitRate, hasData, showUsd, onToggle,
+  value, profitRate, hasData,
 }: {
-  value: number; profitRate: number; hasData: boolean; showUsd: boolean; onToggle: () => void;
+  value: number; profitRate: number; hasData: boolean;
 }) {
   const color = hasData ? pnlColor(value) : '#CCCCCC';
   const sign  = value >= 0 ? '+' : '';
@@ -606,26 +605,12 @@ function AmountBar({
   return (
     <View style={ab.row}>
       <Text style={[ab.amount, { color }]}>{text}</Text>
-      {/* $ 원 토글 — 스크린샷과 동일하게 두 박스 */}
-      <Pressable style={ab.toggle} onPress={onToggle}>
-        <View style={[ab.toggleBtn, showUsd && ab.toggleOn]}>
-          <Text style={[ab.toggleText, showUsd && ab.toggleTextOn]}>$</Text>
-        </View>
-        <View style={[ab.toggleBtn, !showUsd && ab.toggleOn]}>
-          <Text style={[ab.toggleText, !showUsd && ab.toggleTextOn]}>원</Text>
-        </View>
-      </Pressable>
     </View>
   );
 }
 const ab = StyleSheet.create({
-  row         : { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 12, paddingBottom: 4 },
-  amount      : { fontSize: 18, fontWeight: '700' },
-  toggle      : { flexDirection: 'row', borderWidth: 1, borderColor: C.border, borderRadius: 6, overflow: 'hidden' },
-  toggleBtn   : { paddingHorizontal: 10, paddingVertical: 5 },
-  toggleOn    : { backgroundColor: C.text },
-  toggleText  : { fontSize: 13, color: C.textGray },
-  toggleTextOn: { color: C.white, fontWeight: '600' },
+  row   : { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 4 },
+  amount: { fontSize: 18, fontWeight: '700' },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -736,7 +721,7 @@ export default function ProfitAnalysis() {
     if (period === '주') {
       const d = new Date(now);
       d.setDate(d.getDate() - offset * 7);
-      return `${String(d.getFullYear()).slice(2)}년 ${d.getMonth()+1}월 ${getWeek(d.toISOString())}주`;
+      return `${String(d.getFullYear()).slice(2)}년 ${d.getMonth()+1}월 ${getWeekOfMonth(d)}주`;
     }
     const d = new Date(now);
     d.setDate(d.getDate() - offset);
@@ -758,7 +743,9 @@ export default function ProfitAnalysis() {
       if (period === '주') {
         const ref = new Date(now);
         ref.setDate(ref.getDate() - offset * 7);
-        return d.getFullYear() === ref.getFullYear() && getWeek(t.exitAt) === getWeek(ref.toISOString());
+        return d.getFullYear() === ref.getFullYear()
+          && d.getMonth() === ref.getMonth()
+          && getWeekOfMonth(d) === getWeekOfMonth(ref);
       }
       const ref = new Date(now);
       ref.setDate(ref.getDate() - offset);
@@ -863,8 +850,6 @@ export default function ProfitAnalysis() {
           value={stats.totalPnl}
           profitRate={stats.profitRate}
           hasData={stats.total > 0}
-          showUsd={showUsd}
-          onToggle={() => setShowUsd((v) => !v)}
         />
 
         {/* ⑩ 일별 / 코인별 합계 토글 */}

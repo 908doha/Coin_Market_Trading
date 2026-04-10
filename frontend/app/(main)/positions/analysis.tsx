@@ -388,7 +388,7 @@ function SlidingPillTabs({
     left:            pillX.value,
     width:           pillWidth.value,
     height:          PILL_H,
-    borderRadius:    PILL_H / 2,
+    borderRadius:    8,
     backgroundColor: C.pillBg,
   }));
 
@@ -408,7 +408,7 @@ function SlidingPillTabs({
             });
           }}
         >
-          <View style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 14 }}>
+          <View style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8 }}>
             <Text style={[spt.text, active === t && spt.textOn]}>{t}</Text>
           </View>
         </Pressable>

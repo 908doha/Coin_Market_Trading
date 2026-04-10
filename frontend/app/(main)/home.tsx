@@ -129,12 +129,12 @@ function SlidingPillTabs({
     left:            pillX.value,
     width:           pillWidth.value,
     height:          PILL_H,
-    borderRadius:    PILL_H / 2,
+    borderRadius:    8,
     backgroundColor: 'rgba(0,0,0,0.07)',
   }));
 
   return (
-    <View style={{ flexDirection: 'row', paddingHorizontal: paddingH, paddingVertical: paddingV, gap }}>
+    <View style={{ flexDirection: 'row', alignSelf: 'flex-start', paddingHorizontal: paddingH, paddingVertical: paddingV, gap }}>
       <Animated.View style={pillStyle} />
       {tabs.map((t, i) => (
         <Pressable
@@ -149,7 +149,7 @@ function SlidingPillTabs({
             });
           }}
         >
-          <View style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 14 }}>
+          <View style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8 }}>
             <Text style={[hSpt.text, active === t && hSpt.textOn]}>{t}</Text>
           </View>
         </Pressable>

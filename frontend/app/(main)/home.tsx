@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { View, StyleSheet, ScrollView, TouchableWithoutFeedback, Modal, Pressable, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -6,11 +6,65 @@ import Svg, { Polyline, Defs, LinearGradient, Stop, Polygon, Path, Rect, Text as
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS } from 'react-native-reanimated';
 import { Text, GlassCard, PressableScale, FadeTabView, AssetCardSkeleton, PageHeader, CurrencyToggle } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
-import { accountService, positionsService } from '@/services';
+import { accountService, positionsService, tradesService } from '@/services';
+import type { Trade } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeAccount, ExchangeType } from '@/store/accounts';
 import type { Balance } from '@/services';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
+
+// ── 거래 내역으로 자산 차트 데이터 생성 ───────────────────────────────────────
+function buildChartFromTrades(
+  trades: Trade[],
+  balance: Balance | null,
+  period: PeriodKey,
+): { value: number; date: string }[] {
+  if (!trades.length) return [];
+
+  const sorted = [...trades].sort((a, b) => +new Date(a.exitAt) - +new Date(b.exitAt));
+  const totalPnl = sorted.reduce((s, t) => s + t.profit, 0);
+  const currentTotal = balance?.total ?? 0;
+  // 시작 자본 = 현재 잔고 - 총 누적 손익
+  const base = currentTotal > 0 ? currentTotal - totalPnl : 0;
+
+  // 일별 누적 손익 맵 구성
+  const dailyPnl = new Map<string, number>();
+  let running = 0;
+  for (const t of sorted) {
+    const d = t.exitAt.slice(0, 10);
+    running += t.profit;
+    dailyPnl.set(d, running);
+  }
+
+  // 기간 시작일 계산
+  const now = new Date();
+  let cutoff: string | null = null;
+  if (period === '1W') { const c = new Date(now); c.setDate(c.getDate() - 7);      cutoff = c.toISOString().slice(0, 10); }
+  if (period === '1M') { const c = new Date(now); c.setMonth(c.getMonth() - 1);     cutoff = c.toISOString().slice(0, 10); }
+  if (period === '6M') { const c = new Date(now); c.setMonth(c.getMonth() - 6);     cutoff = c.toISOString().slice(0, 10); }
+  if (period === '1Y') { const c = new Date(now); c.setFullYear(c.getFullYear() - 1); cutoff = c.toISOString().slice(0, 10); }
+
+  const allDates    = Array.from(dailyPnl.keys()).sort();
+  const periodDates = cutoff ? allDates.filter((d) => d >= cutoff!) : allDates;
+  if (!periodDates.length) return [];
+
+  // 기간 시작 직전까지의 누적 손익 (시작 기준점)
+  const preDates  = cutoff ? allDates.filter((d) => d < cutoff!) : [];
+  const startPnl  = preDates.length ? dailyPnl.get(preDates[preDates.length - 1])! : 0;
+
+  const fmtDate = (iso: string) => {
+    const d = new Date(iso);
+    return `${d.getMonth() + 1}/${d.getDate()}`;
+  };
+
+  const result: { value: number; date: string }[] = [
+    { value: base + startPnl, date: fmtDate(periodDates[0]) },
+  ];
+  for (const d of periodDates) {
+    result.push({ value: base + dailyPnl.get(d)!, date: fmtDate(d) });
+  }
+  return result;
+}
 
 const PERIODS = [
   { key: '1W',  label: '최근 일주일' },
@@ -511,13 +565,20 @@ export default function Home() {
     () => accounts.length === 0 ? accountService.getBalance() : Promise.resolve(null),
     [accounts.length],
   );
-  const { data: chart }   = useApi(() => accountService.getChart(period), [period]);
+  const { data: allTrades } = useApi(
+    () => tradesService.getAllByAccounts(accounts),
+    [accounts],
+  );
   const { data: positions } = useApi(
     () => positionsService.getAllByAccounts(accounts), [accounts],
   );
   const balance    = accounts.length > 0 ? totalBalance : singleBalance;
   const balLoading = accounts.length > 0 ? balancesLoading : singleLoading;
   const isProfit   = (balance?.profitTotal ?? 0) >= 0;
+  const chartData  = useMemo(
+    () => buildChartFromTrades(allTrades ?? [], balance ?? null, period),
+    [allTrades, balance, period],
+  );
 
   return (
     <FadeTabView style={styles.root}>
@@ -568,7 +629,7 @@ export default function Home() {
                 </View>
                 <View style={styles.chartArea}>
                   <AssetChart
-                    data={chart ?? []}
+                    data={chartData}
                     positive={isProfit}
                     showUsd={showUsd}
                     rate={balance?.usdtKrw ?? 1350}

@@ -803,8 +803,6 @@ export default function ProfitAnalysis() {
       {/* ① 헤더 */}
       <Header showUsd={showUsd} onToggleUsd={() => setShowUsd((v) => !v)} />
 
-      {/* 계좌 선택 드롭다운 (기간탭 위) */}
-      <AccountDropdownRow selectedId={selectedId} onOpen={() => setPickerOpen(true)} />
       <AccountPickerModal
         visible={pickerOpen}
         selectedId={selectedId}
@@ -812,10 +810,13 @@ export default function ProfitAnalysis() {
         onClose={() => setPickerOpen(false)}
       />
 
-      {/* ③ 기간 탭 */}
-      <PeriodTabs period={period} onChange={(p) => fade(() => { setPeriod(p); setOffset(0); })} />
-
       <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
+
+        {/* 계좌 선택 드롭다운 */}
+        <AccountDropdownRow selectedId={selectedId} onOpen={() => setPickerOpen(true)} />
+
+        {/* ③ 기간 탭 */}
+        <PeriodTabs period={period} onChange={(p) => fade(() => { setPeriod(p); setOffset(0); })} />
 
         {/* ④ 기간 내비게이션 */}
         {period !== '전체' ? (

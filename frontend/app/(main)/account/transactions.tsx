@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { router } from 'expo-router';
 import { Text, Card, Badge, SubPageHeader, ScreenTransition, TransactionListSkeleton } from '@/design-system';
 import { colors, spacing } from '@/design-system/tokens';
 import { accountService } from '@/services';

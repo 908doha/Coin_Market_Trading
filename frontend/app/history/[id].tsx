@@ -114,7 +114,7 @@ export default function TradeDetail() {
             <View style={{ alignItems: 'flex-end', gap: spacing[2] }}>
               <View>
                 <Text variant="caption1" color={colors.text.tertiary} align="right">투자금</Text>
-                <Text variant="body1Medium" align="right">{formatKRW(trade.amount)}</Text>
+                <Text variant="body1Medium" align="right">{formatKRW(trade.amount ?? 0)}</Text>
               </View>
               <View>
                 <Text variant="caption1" color={colors.text.tertiary} align="right">보유기간</Text>
@@ -127,9 +127,9 @@ export default function TradeDetail() {
         {/* ── 거래 정보 ── */}
         <Card variant="outlined" style={styles.section}>
           <Text variant="heading3" style={{ marginBottom: spacing[3] }}>거래 정보</Text>
-          <InfoRow label="진입가"  value={formatKRW(trade.entryPrice)} />
+          <InfoRow label="진입가"  value={formatKRW(trade.entryPrice ?? 0)} />
           <Divider />
-          <InfoRow label="청산가"  value={formatKRW(trade.exitPrice)} valueColor={isProfit ? colors.market.rise : colors.market.fall} />
+          <InfoRow label="청산가"  value={formatKRW(trade.exitPrice ?? 0)} valueColor={isProfit ? colors.market.rise : colors.market.fall} />
           <Divider />
           <InfoRow label="진입일시" value={trade.entryAt} />
           <Divider />

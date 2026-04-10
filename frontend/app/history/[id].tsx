@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, ScrollView, Platform } from 'react-native';
+import { View, StyleSheet, ScrollView, Platform, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
+import Svg, { Line, Rect, Text as SvgText, Defs, Pattern, Path } from 'react-native-svg';
 import { Text, GlassCard, SubPageHeader, ScreenTransition, PositionDetailSkeleton } from '@/design-system';
 import { colors, spacing } from '@/design-system/tokens';
 import { positionsService, tradesService } from '@/services';
@@ -332,6 +333,143 @@ function RiskGauge({ level }: { level: 1 | 2 | 3 | 4 | 5 }) {
   );
 }
 
+// ── ICT 레벨 차트 ────────────────────────────────────────────────────────
+
+interface LevelLine {
+  price:  number;
+  label:  string;
+  color:  string;
+  dashed: boolean;
+  thick:  boolean;
+}
+
+function IctLevelChart({ ict, currentPnlColor }: { ict: IctAnalysis; currentPnlColor: string }) {
+  const { width: screenW } = useWindowDimensions();
+  const chartW = Math.min(screenW - 40 - 40, 520); // card padding(20) x2 + inner padding(20) x2
+  const chartH = 300;
+  const padL   = 8;
+  const padR   = 80; // label area
+  const padT   = 16;
+  const padB   = 16;
+  const plotW  = chartW - padL - padR;
+  const plotH  = chartH - padT - padB;
+
+  // ── 가격 레벨 수집 ───────────────────────────────────────────────────
+
+  const levels: LevelLine[] = [];
+
+  const add = (price: number | null | undefined, label: string, color: string, dashed = false, thick = false) => {
+    if (price && price > 0) levels.push({ price, label, color, dashed, thick });
+  };
+
+  const { htf, mtf, summary, currentPrice, sessions } = ict;
+
+  add(summary.tp,            'TP',        '#1AC24E', true,  false);
+  add(htf.swingHigh,         'HTF SH',    '#A78BFA', true,  false);
+  add(htf.pdh,               'PDH',       '#9CA3AF', false, false);
+  add(htf.fvg.lastBull?.ce,  'HTF FVG↑', '#F59E0B', true,  false);
+  add(mtf.fvg.lastBull?.ce,  'MTF FVG↑', '#FCD34D', true,  false);
+  add(currentPrice,          '현재가',    currentPnlColor, false, true);
+  add(summary.entry,         '진입',      '#FFFFFF', true,  false);
+  add(mtf.fvg.lastBear?.ce,  'MTF FVG↓', '#FB923C', true,  false);
+  add(htf.fvg.lastBear?.ce,  'HTF FVG↓', '#F97316', true,  false);
+  add(htf.pdl,               'PDL',       '#9CA3AF', false, false);
+  add(htf.swingLow,          'HTF SL',    '#A78BFA', true,  false);
+  add(summary.sl,            'SL',        '#FF4747', true,  false);
+
+  if (levels.length < 2) return null;
+
+  const prices = levels.map((l) => l.price);
+  let minP = Math.min(...prices);
+  let maxP = Math.max(...prices);
+  const range = maxP - minP || minP * 0.01;
+  minP -= range * 0.08;
+  maxP += range * 0.08;
+  const totalRange = maxP - minP;
+
+  const toY = (price: number) => padT + (1 - (price - minP) / totalRange) * plotH;
+
+  // 가격 포맷 (차트용 짧게)
+  const fmtShort = (p: number) => {
+    if (p > 100000) return `${(p / 1000).toFixed(0)}K`;
+    if (p > 1000)   return p.toLocaleString('en-US', { maximumFractionDigits: 0 });
+    return p.toFixed(2);
+  };
+
+  // 세션 존 (반투명 박스)
+  const sessionZones = sessions.filter((s) => s.high > minP && s.low < maxP);
+
+  // 중복 Y 위치 충돌 해결 (라벨 겹침 방지)
+  const sortedLevels = [...levels].sort((a, b) => b.price - a.price);
+  const labelPositions: { y: number; level: LevelLine }[] = [];
+  const MIN_GAP = 14;
+  sortedLevels.forEach((level) => {
+    let y = toY(level.price);
+    // 이미 배치된 라벨과 너무 가까우면 아래로 밀기
+    for (const placed of labelPositions) {
+      if (Math.abs(placed.y - y) < MIN_GAP) {
+        y = placed.y + MIN_GAP;
+      }
+    }
+    labelPositions.push({ y, level });
+  });
+
+  return (
+    <View style={{ paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border.default }}>
+      <Text style={ict.blockTitle}>ICT 레벨 차트</Text>
+      <Svg width={chartW} height={chartH}>
+        {/* 배경 그리드 */}
+        {[0, 0.25, 0.5, 0.75, 1].map((t) => {
+          const y = padT + t * plotH;
+          return (
+            <Line key={t} x1={padL} y1={y} x2={padL + plotW} y2={y}
+              stroke={colors.border.default} strokeWidth={0.5} />
+          );
+        })}
+
+        {/* 세션 존 */}
+        {sessionZones.map((s) => {
+          const y1 = toY(s.high);
+          const y2 = toY(s.low);
+          return (
+            <Rect key={s.name} x={padL} y={y1} width={plotW} height={y2 - y1}
+              fill='#246CF9' fillOpacity={0.07} />
+          );
+        })}
+
+        {/* 레벨 선 */}
+        {levels.map((l) => {
+          const y = toY(l.price);
+          if (y < padT || y > padT + plotH) return null;
+          const dashArray = l.dashed ? '4 3' : undefined;
+          const sw = l.thick ? 2.5 : 1;
+          return (
+            <Line key={l.label + l.price}
+              x1={padL} y1={y} x2={padL + plotW} y2={y}
+              stroke={l.color} strokeWidth={sw}
+              strokeDasharray={dashArray}
+              strokeOpacity={l.thick ? 1 : 0.85}
+            />
+          );
+        })}
+
+        {/* 라벨 (충돌 회피 적용) */}
+        {labelPositions.map(({ y, level }) => {
+          const labelY = Math.max(padT + 6, Math.min(padT + plotH - 4, y));
+          return (
+            <SvgText key={level.label + level.price}
+              x={padL + plotW + 6} y={labelY + 4}
+              fontSize={10} fill={level.color} fontWeight={level.thick ? '700' : '500'}
+            >
+              {level.label} {fmtShort(level.price)}
+            </SvgText>
+          );
+        })}
+      </Svg>
+    </View>
+  );
+}
+
 // ── 메인 화면 ─────────────────────────────────────────────────────────────
 
 export default function DetailScreen() {
@@ -548,6 +686,9 @@ export default function DetailScreen() {
                         ))}
                       </View>
                     )}
+
+                    {/* ICT 레벨 차트 */}
+                    <IctLevelChart ict={ictAnalysis} currentPnlColor={pnlColor} />
 
                     {/* 종합 판단 */}
                     <View style={[ict.block, { borderBottomWidth: 0 }]}>

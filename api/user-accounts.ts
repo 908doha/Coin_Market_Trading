@@ -9,7 +9,7 @@
  */
 
 import crypto from 'crypto';
-import { Pool } from 'pg';
+import { Client } from 'pg';
 
 // ── JWT payload decode (검증 없이 userId 추출) ────────────────────────────────
 function decodeJwtPayload(token: string): { user_id?: number; id?: number; sub?: string } | null {
@@ -60,53 +60,48 @@ function decrypt(encoded: string): string {
   return decipher.update(enc).toString('utf8') + decipher.final('utf8');
 }
 
-// ── PostgreSQL ────────────────────────────────────────────────────────────────
-let pool: Pool | null = null;
-
-function getPool(): Pool | null {
+// ── PostgreSQL (Vercel 서버리스 — 매 요청마다 Client 생성) ──────────────────────
+async function withDb<T>(fn: (client: Client) => Promise<T>): Promise<T | null> {
   const url = process.env.DATABASE_URL;
   if (!url) return null;
-  if (!pool) {
-    pool = new Pool({
-      connectionString: url,
-      ssl: url.includes('railway') || url.includes('sslmode=require')
-        ? { rejectUnauthorized: false }
-        : undefined,
-      max: 3,
-      idleTimeoutMillis: 30000,
-    });
-  }
-  return pool;
-}
 
-async function ensureTable(p: Pool): Promise<void> {
-  await p.query(`
-    CREATE TABLE IF NOT EXISTS exchange_accounts (
-      user_id    TEXT PRIMARY KEY,
-      data       TEXT NOT NULL,
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
+  const client = new Client({
+    connectionString: url,
+    ssl: { rejectUnauthorized: false },
+    connectionTimeoutMillis: 5000,
+  });
+
+  await client.connect();
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS exchange_accounts (
+        user_id    TEXT PRIMARY KEY,
+        data       TEXT NOT NULL,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    return await fn(client);
+  } finally {
+    await client.end();
+  }
 }
 
 async function dbGet(userId: string): Promise<string | null> {
-  const p = getPool();
-  if (!p) return null;
-  await ensureTable(p);
-  const res = await p.query('SELECT data FROM exchange_accounts WHERE user_id = $1', [userId]);
-  return res.rows[0]?.data ?? null;
+  return withDb(async (c) => {
+    const res = await c.query('SELECT data FROM exchange_accounts WHERE user_id = $1', [userId]);
+    return res.rows[0]?.data ?? null;
+  });
 }
 
 async function dbUpsert(userId: string, enc: string): Promise<void> {
-  const p = getPool();
-  if (!p) return;
-  await ensureTable(p);
-  await p.query(
-    `INSERT INTO exchange_accounts (user_id, data, updated_at)
-     VALUES ($1, $2, NOW())
-     ON CONFLICT (user_id) DO UPDATE SET data = $2, updated_at = NOW()`,
-    [userId, enc],
-  );
+  await withDb(async (c) => {
+    await c.query(
+      `INSERT INTO exchange_accounts (user_id, data, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (user_id) DO UPDATE SET data = $2, updated_at = NOW()`,
+      [userId, enc],
+    );
+  });
 }
 
 // ── CORS 헤더 ─────────────────────────────────────────────────────────────────

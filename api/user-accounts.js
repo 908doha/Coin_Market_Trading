@@ -28,11 +28,16 @@ function getPool() {
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,
       ssl: { rejectUnauthorized: false },
-      max: 3,
-      idleTimeoutMillis: 10_000,
+      max: 1,                        // 서버리스는 1로
+      idleTimeoutMillis: 5_000,
+      connectionTimeoutMillis: 5_000, // 이거 추가
     });
+
+    // 에러 시 pool 리셋
+    pool.on('error', () => { pool = null; });
   }
   return pool;
+}
 }
 
 // ── AES-256-GCM 암호화 / 복호화 ─────────────────────────────────────────────

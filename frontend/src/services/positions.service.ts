@@ -11,6 +11,7 @@ export interface Position {
   profit:        number;
   profitRate:    number;
   leverage:      number;
+  accountId?:    string;   // 어느 계좌에서 온 포지션인지
   agentReason?:  string;
   // compat fields (상세 화면용)
   currentPrice?: number;
@@ -49,7 +50,7 @@ export const positionsService = {
     return res.json();
   },
 
-  /** 모든 계좌의 포지션 합산 (캐시에 저장) */
+  /** 모든 계좌의 포지션 합산 (각 포지션에 accountId 태깅 후 캐시에 저장) */
   getAllByAccounts: async (
     accounts: { id: string; exchange: ExchangeType; apiKey: string; apiSecret: string }[],
   ): Promise<Position[]> => {
@@ -58,6 +59,7 @@ export const positionsService = {
       accounts.map((acc) =>
         positionsService
           .getByAccount(acc)
+          .then((positions) => positions.map((p) => ({ ...p, accountId: acc.id })))
           .catch(() => [] as Position[]),
       ),
     );

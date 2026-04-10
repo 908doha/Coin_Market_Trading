@@ -662,45 +662,70 @@ export default function Home() {
               <View style={{ paddingTop: 16, alignItems: 'center' }}>
                 <Text style={styles.emptyText}>현재 활성 포지션이 없어요</Text>
               </View>
-            ) : (
-              positions.slice(0, 2).map((pos, idx) => {
-                const up = pos.profit >= 0;
-                return (
-                  <PressableScale
-                    key={pos.id}
-                    onPress={() => router.push(`/(main)/positions/${pos.id}`)}
-                    style={[styles.posItem, idx === 0 && { marginTop: 16 }]}
-                  >
-                    <View style={styles.posRow}>
-                      <View style={[styles.posIcon, { backgroundColor: up ? colors.market.riseSubtle : colors.bg.elevated }]}>
-                        <Text style={{ fontSize: 18, fontWeight: '700', color: up ? colors.negative.text : colors.market.fall }}>
-                          {pos.coin.slice(0, 2)}
-                        </Text>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing[2] }}>
-                          <Text style={styles.posSymbol}>{pos.symbol}</Text>
-                          <View style={[styles.dirBadge, { backgroundColor: pos.direction === 'Long' ? colors.bg.elevated : colors.market.riseSubtle }]}>
-                            <Text style={[styles.dirText, { color: pos.direction === 'Long' ? colors.text.secondary : colors.negative.text }]}>
-                              {pos.direction}
-                            </Text>
-                          </View>
-                        </View>
-                        <Text variant="meta" color={colors.text.tertiary}>{formatKRW(pos.amount)}</Text>
-                      </View>
-                      <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={[styles.posProfit, { color: up ? colors.market.rise : colors.market.fall }]}>
-                          {formatKRWSigned(pos.profit)}
-                        </Text>
-                        <Text style={[styles.posProfitRate, { color: up ? colors.market.rise : colors.market.fall }]}>
-                          {formatRate(pos.profitRate)}
-                        </Text>
-                      </View>
+            ) : (() => {
+              // 계정이 2개 이상이면 계정별 그룹 헤더 표시
+              const multiAccount = accounts.length >= 2;
+              // accountId 기준으로 그룹화 (없으면 단일 그룹)
+              const groups: { accountId: string | undefined; label: string; items: typeof positions }[] =
+                multiAccount
+                  ? accounts
+                      .map((acc) => ({
+                        accountId: acc.id,
+                        label:     acc.name || EXCHANGE_LABELS[acc.exchange] || acc.exchange,
+                        items:     positions.filter((p) => p.accountId === acc.id),
+                      }))
+                      .filter((g) => g.items.length > 0)
+                  : [{ accountId: undefined, label: '', items: positions }];
+
+              return (
+                <View style={{ marginTop: 16, gap: multiAccount ? 0 : 0 }}>
+                  {groups.map((group) => (
+                    <View key={group.accountId ?? 'all'}>
+                      {multiAccount && (
+                        <Text style={styles.posAccountLabel}>{group.label}</Text>
+                      )}
+                      {group.items.map((pos, idx) => {
+                        const up = pos.profit >= 0;
+                        return (
+                          <PressableScale
+                            key={pos.id}
+                            onPress={() => router.push(`/(main)/positions/${pos.id}`)}
+                            style={[styles.posItem, idx > 0 && { marginTop: 10 }]}
+                          >
+                            <View style={styles.posRow}>
+                              <View style={[styles.posIcon, { backgroundColor: up ? colors.market.riseSubtle : colors.bg.elevated }]}>
+                                <Text style={{ fontSize: 18, fontWeight: '700', color: up ? colors.negative.text : colors.market.fall }}>
+                                  {pos.coin.slice(0, 2)}
+                                </Text>
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing[2] }}>
+                                  <Text style={styles.posSymbol}>{pos.symbol}</Text>
+                                  <View style={[styles.dirBadge, { backgroundColor: pos.direction === 'Long' ? colors.bg.elevated : colors.market.riseSubtle }]}>
+                                    <Text style={[styles.dirText, { color: pos.direction === 'Long' ? colors.text.secondary : colors.negative.text }]}>
+                                      {pos.direction === 'Long' ? '롱' : '숏'}
+                                    </Text>
+                                  </View>
+                                </View>
+                                <Text variant="meta" color={colors.text.tertiary}>{formatKRW(pos.amount)}</Text>
+                              </View>
+                              <View style={{ alignItems: 'flex-end' }}>
+                                <Text style={[styles.posProfit, { color: up ? colors.market.rise : colors.market.fall }]}>
+                                  {formatKRWSigned(pos.profit)}
+                                </Text>
+                                <Text style={[styles.posProfitRate, { color: up ? colors.market.rise : colors.market.fall }]}>
+                                  {formatRate(pos.profitRate)}
+                                </Text>
+                              </View>
+                            </View>
+                          </PressableScale>
+                        );
+                      })}
                     </View>
-                  </PressableScale>
-                );
-              })
-            )}
+                  ))}
+                </View>
+              );
+            })()}
           </GlassCard>
 
           <View style={{ height: 120 }} />
@@ -739,10 +764,11 @@ const styles = StyleSheet.create({
   addBtn:            { paddingHorizontal: spacing[3] + 2, paddingVertical: spacing[1] + 2, borderRadius: borderRadius.md, backgroundColor: colors.primary.default },
   addBtnText:        { fontSize: 13, fontWeight: '600', color: colors.primary.foreground },
 
-  posHeader:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  posArrow:     { fontSize: 22, color: colors.text.disabled, lineHeight: 26 },
-  posItem:      { marginTop: spacing[3] },
-  posRow:       { flexDirection: 'row', alignItems: 'center', gap: spacing[3] },
+  posHeader:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  posArrow:        { fontSize: 22, color: colors.text.disabled, lineHeight: 26 },
+  posAccountLabel: { fontSize: 12, fontWeight: '600', color: colors.text.tertiary, marginTop: 14, marginBottom: 6, letterSpacing: 0.3 },
+  posItem:         { marginTop: 0 },
+  posRow:          { flexDirection: 'row', alignItems: 'center', gap: spacing[3], paddingVertical: 8 },
   posIcon:      { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
   posSymbol:    { fontSize: 15, fontWeight: '700', color: colors.text.primary },
   posProfit:    { fontSize: 15, fontWeight: '700' },

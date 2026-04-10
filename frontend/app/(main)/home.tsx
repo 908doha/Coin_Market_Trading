@@ -21,67 +21,93 @@ function buildChartFromTrades(
 ): { value: number; date: string }[] {
   if (!trades.length) return [];
 
-  const sorted = [...trades].sort((a, b) => +new Date(a.exitAt) - +new Date(b.exitAt));
-  const totalPnl = sorted.reduce((s, t) => s + t.profit, 0);
+  const sorted     = [...trades].sort((a, b) => +new Date(a.exitAt) - +new Date(b.exitAt));
+  const totalPnl   = sorted.reduce((s, t) => s + t.profit, 0);
   const currentTotal = balance?.total ?? 0;
-  const base = currentTotal > 0 ? currentTotal - totalPnl : 0;
+  const base       = currentTotal > 0 ? currentTotal - totalPnl : 0;
+  const now        = new Date();
 
-  // 단위별 버킷 키 & 표시 형식
-  const bucketKey = (iso: string): string => {
+  // ── 전체: 거래가 있는 날만 sparse하게 표시 ────────────────────────────────
+  if (period === '전체') {
+    const bucketPnl = new Map<string, number>();
+    let running = 0;
+    for (const t of sorted) {
+      const k = t.exitAt.slice(0, 10);
+      running += t.profit;
+      bucketPnl.set(k, running);
+    }
+    const keys = Array.from(bucketPnl.keys()).sort();
+    if (!keys.length) return [];
+    const fmt = (k: string) => { const [, m, d] = k.split('-'); return `${parseInt(m)}/${parseInt(d)}`; };
+    const result = [{ value: base, date: fmt(keys[0]) }];
+    for (const k of keys) result.push({ value: base + bucketPnl.get(k)!, date: fmt(k) });
+    return result;
+  }
+
+  // ── 고정 버킷 생성: 전체 시간 구간을 균등 분할 ───────────────────────────
+  type Bucket = { key: string; label: string };
+  const buckets: Bucket[] = [];
+
+  if (period === '시간') {
+    // 24개 시간 버킷 (24시간 전 ~ 현재)
+    for (let i = 23; i >= 0; i--) {
+      const d = new Date(now.getTime() - i * 3600_000);
+      const key   = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}`;
+      const label = `${d.getHours()}시`;
+      buckets.push({ key, label });
+    }
+  } else if (period === '일') {
+    // 30개 일별 버킷 (30일 전 ~ 오늘)
+    for (let i = 29; i >= 0; i--) {
+      const d   = new Date(now.getTime() - i * 86400_000);
+      const key = d.toISOString().slice(0, 10);
+      buckets.push({ key, label: `${d.getMonth()+1}/${d.getDate()}` });
+    }
+  } else if (period === '월') {
+    // 12개 월별 버킷 (12개월 전 ~ 이번 달)
+    for (let i = 11; i >= 0; i--) {
+      const d   = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      buckets.push({ key, label: `${String(d.getFullYear()).slice(2)}.${d.getMonth()+1}` });
+    }
+  } else {
+    // 10개 연도 버킷 (10년 전 ~ 올해)
+    for (let i = 9; i >= 0; i--) {
+      const y = now.getFullYear() - i;
+      buckets.push({ key: `${y}`, label: `${y}` });
+    }
+  }
+
+  // 버킷 키 함수
+  const getKey = (iso: string): string => {
     const d = new Date(iso);
     if (period === '시간') return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}`;
     if (period === '월')   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
     if (period === '년')   return `${d.getFullYear()}`;
-    return d.toISOString().slice(0, 10); // 일 / 전체
+    return d.toISOString().slice(0, 10);
   };
 
-  const fmtKey = (key: string): string => {
-    if (period === '시간') return `${parseInt(key.slice(11, 13), 10)}시`;
-    if (period === '월')   { const [y, m] = key.split('-'); return `${String(y).slice(2)}.${parseInt(m)}`; }
-    if (period === '년')   return `${key}`;
-    // 일 / 전체: M/D
-    const [, m, d] = key.split('-');
-    return `${parseInt(m)}/${parseInt(d)}`;
-  };
+  const firstBucketKey = buckets[0].key;
 
-  // 누적 손익 맵 (버킷 단위)
-  const bucketPnl = new Map<string, number>();
-  let running = 0;
+  // 기간 시작 이전 거래의 누적 손익 → 기준값
+  let prePnl = 0;
+  const deltaByKey = new Map<string, number>();
+
   for (const t of sorted) {
-    const k = bucketKey(t.exitAt);
-    running += t.profit;
-    bucketPnl.set(k, running);
+    const k = getKey(t.exitAt);
+    if (k < firstBucketKey) {
+      prePnl += t.profit;
+    } else {
+      deltaByKey.set(k, (deltaByKey.get(k) ?? 0) + t.profit);
+    }
   }
 
-  // 기간 컷오프 (ms)
-  const now = new Date();
-  let cutoffMs: number | null = null;
-  if (period === '시간') cutoffMs = now.getTime() - 24 * 3600_000;
-  if (period === '일')   cutoffMs = now.getTime() - 30 * 86400_000;
-  if (period === '월')   cutoffMs = new Date(now.getFullYear(), now.getMonth() - 12, 1).getTime();
-  if (period === '년')   cutoffMs = new Date(now.getFullYear() - 10, 0, 1).getTime();
-
-  const allKeys    = Array.from(bucketPnl.keys()).sort();
-  const periodKeys = cutoffMs
-    ? allKeys.filter((k) => {
-        const ts = period === '시간' ? new Date(k.replace('T', ' ') + ':00:00').getTime()
-                 : period === '월'   ? new Date(k + '-01').getTime()
-                 : period === '년'   ? new Date(k + '-01-01').getTime()
-                 : new Date(k).getTime();
-        return ts >= cutoffMs!;
-      })
-    : allKeys;
-
-  if (!periodKeys.length) return [];
-
-  const preKeys  = allKeys.filter((k) => !periodKeys.includes(k));
-  const startPnl = preKeys.length ? bucketPnl.get(preKeys[preKeys.length - 1])! : 0;
-
-  const result: { value: number; date: string }[] = [
-    { value: base + startPnl, date: fmtKey(periodKeys[0]) },
-  ];
-  for (const k of periodKeys) {
-    result.push({ value: base + bucketPnl.get(k)!, date: fmtKey(k) });
+  // 각 버킷에 누적 PnL carry-forward
+  const result: { value: number; date: string }[] = [];
+  let cumPnl = prePnl;
+  for (const bucket of buckets) {
+    cumPnl += deltaByKey.get(bucket.key) ?? 0;
+    result.push({ value: base + cumPnl, date: bucket.label });
   }
   return result;
 }

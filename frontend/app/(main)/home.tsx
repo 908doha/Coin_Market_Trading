@@ -297,11 +297,11 @@ function StatCard({ label, krw, showUsd, rate }: { label: string; krw: number; s
 }
 
 // ── 자산 차트 ──────────────────────────────────────────────────────────────────
-const CHART_H  = 148;
+const CHART_H  = 120;
 const CHART_W  = 600; // SVG viewBox width
 const PAD_L    = 0;
-const PAD_T    = 16;
-const PAD_B    = 20;  // X축 라벨 공간
+const PAD_T    = 14;
+const PAD_B    = 4;
 const DRAW_H   = CHART_H - PAD_T - PAD_B;
 
 interface AssetChartProps {
@@ -369,8 +369,9 @@ function AssetChart({ data, positive, showUsd, rate, periodRate }: AssetChartPro
   const tipY = tooltip !== null ? tooltip.y : null;
 
   const handleTouch = (evt: any) => {
-    const { locationX } = evt.nativeEvent;
-    const ratio = locationX / chartWidth;
+    const lx: number = evt.nativeEvent?.locationX ?? evt.nativeEvent?.offsetX ?? -1;
+    if (!isFinite(lx) || lx < 0) return;
+    const ratio = lx / chartWidth;
     const svgX  = ratio * CHART_W;
     const idx   = Math.max(0, Math.min(n - 1, Math.round((svgX / CHART_W) * (n - 1))));
     setTooltip({ idx, x: toX(idx), y: toY(values[idx]) });
@@ -401,121 +402,130 @@ function AssetChart({ data, positive, showUsd, rate, periodRate }: AssetChartPro
         <Text style={chartSt.changeLabel}> 기간 수익률</Text>
       </View>
 
-      {/* SVG 차트 */}
+      {/* SVG 차트 + Y축 라벨 overlay */}
       <TouchableWithoutFeedback onPress={handleTouch} onPressOut={() => setTooltip(null)}>
-        <View
-          style={{ height: CHART_H }}
-          onLayout={(e) => setChartWidth(e.nativeEvent.layout.width)}
-        >
-          <Svg
-            width="100%"
-            height={CHART_H}
-            viewBox={`0 0 ${CHART_W} ${CHART_H}`}
-            preserveAspectRatio="none"
+        <View style={{ position: 'relative' }}>
+          <View
+            style={{ height: CHART_H }}
+            onLayout={(e) => setChartWidth(e.nativeEvent.layout.width)}
           >
-            <Defs>
-              <LinearGradient id="aFill" x1="0" y1="0" x2="0" y2="1">
-                <Stop offset="0%"   stopColor={color} stopOpacity="0.22" />
-                <Stop offset="100%" stopColor={color} stopOpacity="0"    />
-              </LinearGradient>
-            </Defs>
+            <Svg
+              width="100%"
+              height={CHART_H}
+              viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+              preserveAspectRatio="none"
+            >
+              <Defs>
+                <LinearGradient id="aFill" x1="0" y1="0" x2="0" y2="1">
+                  <Stop offset="0%"   stopColor={color} stopOpacity="0.22" />
+                  <Stop offset="100%" stopColor={color} stopOpacity="0"    />
+                </LinearGradient>
+              </Defs>
 
-            {/* 수평 격자선 + Y축 라벨 */}
-            {gridValues.map((gv, gi) => (
-              <React.Fragment key={gi}>
+              {/* 수평 격자선만 (텍스트 없음 — preserveAspectRatio:none 때문에 찌그러짐) */}
+              {gridValues.map((gv, gi) => (
                 <Line
+                  key={gi}
                   x1={PAD_L} y1={toY(gv)}
                   x2={CHART_W} y2={toY(gv)}
                   stroke={colors.border.default}
                   strokeWidth="0.8"
                   strokeDasharray="4,4"
                 />
-                <SvgText
-                  x={4}
-                  y={toY(gv) - 3}
-                  fontSize="9"
-                  fill={colors.text.disabled}
-                  textAnchor="start"
-                >
-                  {formatYLabel(gv)}
-                </SvgText>
-              </React.Fragment>
-            ))}
+              ))}
 
-            {/* 채우기 */}
-            <Polygon points={fillPts} fill="url(#aFill)" />
+              {/* 채우기 */}
+              <Polygon points={fillPts} fill="url(#aFill)" />
 
-            {/* 라인 */}
-            <Polyline
-              points={pts.join(' ')}
-              fill="none"
-              stroke={color}
-              strokeWidth="2.2"
-              strokeLinejoin="round"
-              strokeLinecap="round"
-            />
+              {/* 라인 */}
+              <Polyline
+                points={pts.join(' ')}
+                fill="none"
+                stroke={color}
+                strokeWidth="2.2"
+                strokeLinejoin="round"
+                strokeLinecap="round"
+              />
 
-            {/* 마지막 포인트 */}
-            <Circle cx={lastX} cy={lastY} r="4" fill={color} />
-            <Circle cx={lastX} cy={lastY} r="7" fill={color} fillOpacity="0.2" />
+              {/* 마지막 포인트 */}
+              <Circle cx={lastX} cy={lastY} r="4" fill={color} />
+              <Circle cx={lastX} cy={lastY} r="7" fill={color} fillOpacity="0.2" />
 
-            {/* X축 시간 라벨 */}
-            {(() => {
-              const step = Math.max(1, Math.floor((n - 1) / 4));
-              return data.map((d, i) => {
-                if (i % step !== 0 && i !== n - 1) return null;
-                const lx = toX(i);
-                return (
-                  <SvgText
-                    key={`xl-${i}`}
-                    x={Math.max(20, Math.min(lx, CHART_W - 20))}
-                    y={CHART_H - 4}
-                    fontSize="9"
-                    fill={colors.text.disabled}
-                    textAnchor="middle"
-                  >
-                    {d.date ?? ''}
-                  </SvgText>
-                );
-              });
-            })()}
+              {/* 툴팁 — SVG 선 + 포인트만 (텍스트는 밖에서 렌더) */}
+              {tooltip !== null && tipV != null && isFinite(tipX!) && isFinite(tipY!) && (
+                <>
+                  <Line
+                    x1={tipX!} y1={PAD_T}
+                    x2={tipX!} y2={CHART_H - PAD_B}
+                    stroke={color} strokeWidth="1.2" strokeDasharray="3,3"
+                  />
+                  <Circle cx={tipX!} cy={tipY!} r="5" fill={color} />
+                  <Circle cx={tipX!} cy={tipY!} r="9" fill={color} fillOpacity="0.15" />
+                </>
+              )}
+            </Svg>
+          </View>
 
-            {/* 툴팁 */}
-            {tooltip !== null && tipX !== null && tipY !== null && (
-              <>
-                {/* 수직선 */}
-                <Line
-                  x1={tipX} y1={PAD_T}
-                  x2={tipX} y2={CHART_H - PAD_B}
-                  stroke={color} strokeWidth="1.2" strokeDasharray="3,3"
-                />
-                {/* 포인트 */}
-                <Circle cx={tipX} cy={tipY} r="5" fill={color} />
-                <Circle cx={tipX} cy={tipY} r="9" fill={color} fillOpacity="0.15" />
-                {/* 값 라벨 */}
-                <Rect
-                  x={Math.min(tipX - 60, CHART_W - 130)}
-                  y={PAD_T - 2}
-                  width="120"
-                  height="22"
-                  rx="6"
-                  fill={color}
-                />
-                <SvgText
-                  x={Math.min(tipX, CHART_W - 70)}
-                  y={PAD_T + 14}
-                  textAnchor="middle"
-                  fontSize="13"
-                  fontWeight="700"
-                  fill="white"
-                >
-                  {formatTip(tipV!)}
-                </SvgText>
-              </>
-            )}
-          </Svg>
+          {/* Y축 라벨 — 절대 포지션 RN Text (찌그러짐 없음) */}
+          {gridValues.map((gv, gi) => (
+            <Text
+              key={`yl-${gi}`}
+              style={{
+                position: 'absolute',
+                left: 4,
+                top: toY(gv) - 10,
+                fontSize: 10,
+                color: colors.text.disabled,
+              }}
+            >
+              {formatYLabel(gv)}
+            </Text>
+          ))}
+
+          {/* 툴팁 값 라벨 — RN View (찌그러짐 없음) */}
+          {tooltip !== null && tipV != null && isFinite(tipX!) && isFinite(tipY!) && (
+            <View
+              style={{
+                position: 'absolute',
+                top: PAD_T - 2,
+                left: Math.max(0, Math.min((tipX! / CHART_W) * chartWidth - 44, chartWidth - 88)),
+                backgroundColor: color,
+                borderRadius: 6,
+                paddingHorizontal: 8,
+                paddingVertical: 3,
+              }}
+            >
+              <Text style={{ fontSize: 12, fontWeight: '700', color: 'white' }}>
+                {formatTip(tipV)}
+              </Text>
+            </View>
+          )}
         </View>
       </TouchableWithoutFeedback>
+
+      {/* X축 시간 라벨 행 — SVG 밖 (찌그러짐 없음) */}
+      <View style={{ position: 'relative', height: 18, marginTop: 2 }}>
+        {(() => {
+          const step = Math.max(1, Math.floor((n - 1) / 4));
+          return data.map((d, i) => {
+            if (i % step !== 0 && i !== n - 1) return null;
+            const px = (toX(i) / CHART_W) * chartWidth;
+            return (
+              <Text
+                key={`xl-${i}`}
+                style={{
+                  position: 'absolute',
+                  left: Math.max(0, Math.min(px - 16, chartWidth - 32)),
+                  fontSize: 10,
+                  color: colors.text.disabled,
+                }}
+              >
+                {d.date ?? ''}
+              </Text>
+            );
+          });
+        })()}
+      </View>
     </View>
   );
 }
@@ -528,12 +538,24 @@ const chartSt = StyleSheet.create({
     flexDirection: 'row', justifyContent: 'space-between',
     marginTop: 4, paddingHorizontal: 2,
   },
+  barInfo: {
+    flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8,
+    marginTop: 4, paddingVertical: 5, paddingHorizontal: 12,
+    backgroundColor: colors.bg.elevated, borderRadius: 8,
+  },
+  barInfoDate:   { fontSize: 11, color: colors.text.tertiary },
+  barInfoProfit: { fontSize: 13, fontWeight: '700' },
 });
 
 // ── 기간별 수익률 바 차트 ─────────────────────────────────────────────────────
 const BARS_H = 100;
 
-function PeriodPnlBars({ data }: { data: { value: number; rate: number; date: string }[] }) {
+function PeriodPnlBars({
+  data, showUsd, rate,
+}: { data: { value: number; rate: number; date: string }[]; showUsd: boolean; rate: number }) {
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  const [barWidth,    setBarWidth]    = useState(390);
+
   const hasData = data.some((d) => d.value !== 0);
 
   if (!hasData) {
@@ -550,45 +572,74 @@ function PeriodPnlBars({ data }: { data: { value: number; rate: number; date: st
   const midY    = BARS_H / 2;
   const maxBarH = midY - 8;
 
+  const handleBarTouch = (evt: any) => {
+    const lx: number = evt.nativeEvent?.locationX ?? evt.nativeEvent?.offsetX ?? -1;
+    if (!isFinite(lx) || lx < 0) return;
+    const idx = Math.max(0, Math.min(n - 1, Math.floor((lx / barWidth) * n)));
+    setSelectedIdx(idx);
+  };
+
+  const sel = selectedIdx !== null ? data[selectedIdx] : null;
+
   return (
     <View>
-      <View style={{ height: BARS_H }}>
-        <Svg
-          width="100%"
-          height={BARS_H}
-          viewBox={`0 0 ${CHART_W} ${BARS_H}`}
-          preserveAspectRatio="none"
+      <TouchableWithoutFeedback onPress={handleBarTouch} onPressOut={() => setSelectedIdx(null)}>
+        <View
+          style={{ height: BARS_H }}
+          onLayout={(e) => setBarWidth(e.nativeEvent.layout.width)}
         >
-          <Line
-            x1={0} y1={midY}
-            x2={CHART_W} y2={midY}
-            stroke={colors.border.default}
-            strokeWidth="0.8"
-          />
-          {data.map((d, i) => {
-            const barH = (Math.abs(d.value) / maxAbs) * maxBarH;
-            const x    = PAD_L + (i / n) * CHART_W + ((CHART_W / n) - barW) / 2;
-            const y    = d.value >= 0 ? midY - barH : midY;
-            const c    = d.value >= 0 ? colors.market.rise : colors.market.fall;
-            return (
-              <Rect
-                key={i}
-                x={x}
-                y={y}
-                width={barW}
-                height={Math.max(barH, d.value !== 0 ? 2 : 0)}
-                rx="3"
-                fill={c}
-                fillOpacity="0.85"
-              />
-            );
-          })}
-        </Svg>
-      </View>
-      <View style={chartSt.dateRow}>
-        <Text variant="caption1" color={colors.text.disabled}>{data[0]?.date ?? ''}</Text>
-        <Text variant="caption1" color={colors.text.disabled}>{data[data.length - 1]?.date ?? ''}</Text>
-      </View>
+          <Svg
+            width="100%"
+            height={BARS_H}
+            viewBox={`0 0 ${CHART_W} ${BARS_H}`}
+            preserveAspectRatio="none"
+          >
+            <Line
+              x1={0} y1={midY}
+              x2={CHART_W} y2={midY}
+              stroke={colors.border.default}
+              strokeWidth="0.8"
+            />
+            {data.map((d, i) => {
+              const barH = (Math.abs(d.value) / maxAbs) * maxBarH;
+              const x    = PAD_L + (i / n) * CHART_W + ((CHART_W / n) - barW) / 2;
+              const y    = d.value >= 0 ? midY - barH : midY;
+              const c    = d.value >= 0 ? colors.market.rise : colors.market.fall;
+              return (
+                <Rect
+                  key={i}
+                  x={x}
+                  y={y}
+                  width={barW}
+                  height={Math.max(barH, d.value !== 0 ? 2 : 0)}
+                  rx="3"
+                  fill={c}
+                  fillOpacity={selectedIdx === i ? 1 : 0.7}
+                />
+              );
+            })}
+          </Svg>
+        </View>
+      </TouchableWithoutFeedback>
+
+      {/* 선택 정보 박스 */}
+      {sel !== null ? (
+        <View style={chartSt.barInfo}>
+          <Text style={chartSt.barInfoDate}>{sel.date}</Text>
+          <Text style={[chartSt.barInfoProfit, { color: sel.value >= 0 ? colors.market.rise : colors.market.fall }]}>
+            {sel.value >= 0 ? '+' : ''}
+            {showUsd && rate > 0
+              ? `$${(sel.value / rate).toFixed(0)}`
+              : `${Math.round(sel.value / 10000)}만원`}
+            {'  '}{sel.rate >= 0 ? '+' : ''}{sel.rate.toFixed(2)}%
+          </Text>
+        </View>
+      ) : (
+        <View style={chartSt.dateRow}>
+          <Text variant="caption1" color={colors.text.disabled}>{data[0]?.date ?? ''}</Text>
+          <Text variant="caption1" color={colors.text.disabled}>{data[data.length - 1]?.date ?? ''}</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -840,7 +891,7 @@ export default function Home() {
           {/* ── 기간 수익률 차트 ── */}
           <GlassCard style={styles.rateCard} intensity="low" radius={20} padding={16}>
             <Text variant="meta" color={colors.text.tertiary} style={{ marginBottom: 8 }}>기간 수익률</Text>
-            <PeriodPnlBars data={barsData} />
+            <PeriodPnlBars data={barsData} showUsd={showUsd} rate={balance?.usdtKrw ?? 1350} />
           </GlassCard>
 
           {/* ── 자산 분배 ── */}

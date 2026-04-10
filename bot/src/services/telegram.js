@@ -542,6 +542,7 @@ class TelegramService {
       `진입가: ${signal.entry}`,
       `손절(SL): ${signal.sl}`,
       `익절(TP): ${signal.tp}`,
+      `R:R: 1:${signal.rr || '?'}`,
       `수량: ${qtyText}`,
       ``,
       `📋 컨플루언스:`,

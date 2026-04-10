@@ -97,18 +97,38 @@ class IctStrategy {
     const direction = htfBias.direction;
     const signal = direction === 'bullish' ? 'long' : 'short';
 
-    const { sl, tp } = this._calculateSLTP(
+    const { sl, tp, rr } = this._calculateSLTP(
       currentPrice, direction, mtfStructure, ltfEntry, htfBias
     );
 
-    logger.info(`[ICT v2] ${signal.toUpperCase()} | ${confluence.length}개 컨플루언스`);
+    // ========== R:R 필터 (7-B: 컨플루언스 강도별 최소 R:R) ==========
+    let minRR;
+    if (hasHtfPoi && confluence.length >= 6) {
+      minRR = 1.5; // Strong setup
+    } else if (hasHtfPoi || confluence.length >= 5) {
+      minRR = 2.0; // Medium setup
+    } else {
+      minRR = 2.5; // Weak setup
+    }
+
+    if (rr < minRR) {
+      logger.info(`[ICT v2] ${signal.toUpperCase()} R:R ${rr} < 최소 ${minRR} (컨플루언스 ${confluence.length}개) → 스킵`);
+      return {
+        signal: null,
+        reason: `R:R ${rr} 부족 (최소 ${minRR}, 컨플루언스 ${confluence.length}개)`,
+        confluence,
+      };
+    }
+
+    logger.info(`[ICT v2] ${signal.toUpperCase()} | R:R ${rr} | ${confluence.length}개 컨플루언스`);
 
     return {
       signal,
-      reason: `ICT v2 ${signal.toUpperCase()} - ${confluence.length}개 컨플루언스`,
+      reason: `ICT v2 ${signal.toUpperCase()} - R:R ${rr} | ${confluence.length}개 컨플루언스`,
       entry: currentPrice,
       sl: parseFloat(sl.toFixed(2)),
       tp: parseFloat(tp.toFixed(2)),
+      rr,
       confluence,
       hasHtfPoi,
       hasHtfSweep: !!htfBias.htfActiveSweep,
@@ -260,6 +280,12 @@ class IctStrategy {
         return ob.low > currentPrice;
       }
     });
+    // 반대 방향 OB = TP 구조적 타겟용
+    const opposingRawOBs = htfDirection === 'bullish' ? orderBlocks.bearish : orderBlocks.bullish;
+    const opposingOBs = opposingRawOBs.filter((ob) => {
+      if (htfDirection === 'bullish') return ob.low > currentPrice; // 위쪽 저항
+      return ob.high < currentPrice; // 아래쪽 지지
+    });
     if (relevantOBs.length > 0) {
       const ob = relevantOBs[relevantOBs.length - 1];
       confluence.push(`MTF OB [${ob.low.toFixed(2)}-${ob.high.toFixed(2)}]`);
@@ -325,6 +351,7 @@ class IctStrategy {
       reason: hasStructure && hasPOI ? '구조 확인됨' : 'MSS 또는 POI 부족 (위치 검증 후)',
       confluence,
       orderBlocks: relevantOBs,
+      opposingOBs,
       fvgs: unfilled,
       swingHighs,
       swingLows,
@@ -439,141 +466,168 @@ class IctStrategy {
   }
 
   /**
-   * SL/TP 계산
+   * SL/TP 계산 (ICT 구조적 R:R)
    *
-   * SL 후보 우선순위 (정통 ICT 탑다운):
-   *   1순위: HTF OB 경계 (최대 리스크 3% 이내일 때만)
-   *   2순위: MTF OB 경계
-   *   3순위: LTF 스윙 로우/하이
-   *   4순위: PDL/PDH
-   *   5순위: 고정 비율 폴백
+   * SL: 구조 기반 (HTF OB → MTF OB → LTF Swing → PDH/PDL → 고정 %)
+   * TP: 구조적 타겟 (opposing liquidity → opposing OB → PDH/PDL → risk × 2.5)
    *
-   * HTF OB는 멀어서 리스크가 maxRiskPct(3%)를 초과하면 안전장치로 MTF OB에 폴백.
+   * R:R 가드레일:
+   *   - max R:R 5.0 (타겟 너무 멀면 캡)
+   *   - min R:R은 컨플루언스 강도별 차등 (analyze()에서 필터)
+   *
+   * @param confluenceCount  컨플루언스 개수 (R:R 산출 후 반환용)
    */
   _calculateSLTP(price, direction, mtfStructure, ltfEntry, htfBias) {
-    let sl, tp;
     const slPct = config.stopLossPercent / 100;
-    const maxRiskPct = 0.03; // HTF OB SL 최대 허용 리스크 (3%)
+    const maxRiskPct = 0.03;
+    const maxRR = 5.0;
+    const fallbackRR = 2.5;
+
+    // ===== SL 계산 (기존 구조 기반 — 변경 없음) =====
+    let sl;
+    const slCandidates = [];
 
     if (direction === 'bullish') {
-      // Long: SL은 반드시 진입가보다 낮아야 함
-      const candidates = [];
-
-      // 1순위: HTF OB 하단 (진입가보다 아래 + 리스크 ≤ 3%)
+      // 1. HTF OB
       if (htfBias && htfBias.orderBlocks) {
         for (let i = htfBias.orderBlocks.length - 1; i >= 0; i--) {
           const ob = htfBias.orderBlocks[i];
-          if (ob.low < price) {
-            const candidate = ob.low * (1 - 0.001);
-            const risk = (price - candidate) / price;
-            if (risk <= maxRiskPct) {
-              candidates.push(candidate);
-              break;
-            }
-          }
-        }
-      }
-
-      // 2순위: MTF OB 하단 (진입가보다 아래인 경우만)
-      if (candidates.length === 0) {
-        for (let i = mtfStructure.orderBlocks.length - 1; i >= 0; i--) {
-          const ob = mtfStructure.orderBlocks[i];
-          if (ob.low < price) {
-            candidates.push(ob.low * (1 - slPct * 0.3));
+          if (ob.low < price && (price - ob.low * (1 - 0.001)) / price <= maxRiskPct) {
+            slCandidates.push(ob.low * (1 - 0.001));
             break;
           }
         }
       }
-
-      // 3순위: LTF 스윙 로우 (진입가보다 아래)
-      if (candidates.length === 0 && ltfEntry.swingLows) {
+      // 2. MTF OB
+      if (slCandidates.length === 0) {
+        for (let i = mtfStructure.orderBlocks.length - 1; i >= 0; i--) {
+          const ob = mtfStructure.orderBlocks[i];
+          if (ob.low < price) { slCandidates.push(ob.low * (1 - slPct * 0.3)); break; }
+        }
+      }
+      // 3. LTF Swing Low
+      if (slCandidates.length === 0 && ltfEntry.swingLows) {
         for (let i = ltfEntry.swingLows.length - 1; i >= 0; i--) {
-          const slow = ltfEntry.swingLows[i].price;
-          if (slow < price) {
-            candidates.push(slow * (1 - 0.001));
-            break;
-          }
+          if (ltfEntry.swingLows[i].price < price) { slCandidates.push(ltfEntry.swingLows[i].price * (1 - 0.001)); break; }
         }
       }
-
-      // 4순위: PDL (진입가보다 아래)
-      if (candidates.length === 0 && htfBias.pdhl && htfBias.pdhl.pdl < price) {
-        candidates.push(htfBias.pdhl.pdl * (1 - 0.001));
+      // 4. PDL
+      if (slCandidates.length === 0 && htfBias.pdhl && htfBias.pdhl.pdl < price) {
+        slCandidates.push(htfBias.pdhl.pdl * (1 - 0.001));
       }
+      // 5. 고정
+      if (slCandidates.length === 0) slCandidates.push(price * (1 - slPct));
 
-      // 폴백: 고정 비율
-      if (candidates.length === 0) {
-        candidates.push(price * (1 - slPct));
-      }
-
-      sl = candidates[0];
-      // 최종 검증: Long SL은 반드시 진입가보다 낮아야 함
-      if (sl >= price) {
-        sl = price * (1 - slPct);
-      }
-      const risk = price - sl;
-      tp = price + risk * 3;
+      sl = slCandidates[0];
+      if (sl >= price) sl = price * (1 - slPct);
     } else {
-      // Short: SL은 반드시 진입가보다 높아야 함
-      const candidates = [];
-
-      // 1순위: HTF OB 상단 (진입가보다 위 + 리스크 ≤ 3%)
+      // Short SL
       if (htfBias && htfBias.orderBlocks) {
         for (let i = htfBias.orderBlocks.length - 1; i >= 0; i--) {
           const ob = htfBias.orderBlocks[i];
-          if (ob.high > price) {
-            const candidate = ob.high * (1 + 0.001);
-            const risk = (candidate - price) / price;
-            if (risk <= maxRiskPct) {
-              candidates.push(candidate);
-              break;
-            }
+          if (ob.high > price && (ob.high * (1 + 0.001) - price) / price <= maxRiskPct) {
+            slCandidates.push(ob.high * (1 + 0.001));
+            break;
           }
         }
       }
-
-      // 2순위: MTF OB 상단 (진입가보다 위인 경우만)
-      if (candidates.length === 0) {
+      if (slCandidates.length === 0) {
         for (let i = mtfStructure.orderBlocks.length - 1; i >= 0; i--) {
           const ob = mtfStructure.orderBlocks[i];
-          if (ob.high > price) {
-            candidates.push(ob.high * (1 + slPct * 0.3));
-            break;
-          }
+          if (ob.high > price) { slCandidates.push(ob.high * (1 + slPct * 0.3)); break; }
         }
       }
-
-      // 3순위: LTF 스윙 하이 (진입가보다 위)
-      if (candidates.length === 0 && ltfEntry.swingHighs) {
+      if (slCandidates.length === 0 && ltfEntry.swingHighs) {
         for (let i = ltfEntry.swingHighs.length - 1; i >= 0; i--) {
-          const shigh = ltfEntry.swingHighs[i].price;
-          if (shigh > price) {
-            candidates.push(shigh * (1 + 0.001));
-            break;
-          }
+          if (ltfEntry.swingHighs[i].price > price) { slCandidates.push(ltfEntry.swingHighs[i].price * (1 + 0.001)); break; }
         }
       }
-
-      // 4순위: PDH (진입가보다 위)
-      if (candidates.length === 0 && htfBias.pdhl && htfBias.pdhl.pdh > price) {
-        candidates.push(htfBias.pdhl.pdh * (1 + 0.001));
+      if (slCandidates.length === 0 && htfBias.pdhl && htfBias.pdhl.pdh > price) {
+        slCandidates.push(htfBias.pdhl.pdh * (1 + 0.001));
       }
+      if (slCandidates.length === 0) slCandidates.push(price * (1 + slPct));
 
-      // 폴백
-      if (candidates.length === 0) {
-        candidates.push(price * (1 + slPct));
-      }
-
-      sl = candidates[0];
-      // 최종 검증: Short SL은 반드시 진입가보다 높아야 함
-      if (sl <= price) {
-        sl = price * (1 + slPct);
-      }
-      const risk = sl - price;
-      tp = price - risk * 3;
+      sl = slCandidates[0];
+      if (sl <= price) sl = price * (1 + slPct);
     }
 
-    return { sl, tp };
+    const risk = Math.abs(price - sl);
+
+    // ===== TP 계산 (구조적 타겟) =====
+    let tp;
+    const tpCandidates = [];
+
+    if (direction === 'bullish') {
+      // Long TP: 위쪽 타겟 (가격 가까운 순)
+      // 1. HTF swing high (opposing BSL)
+      if (htfBias.swingHighs) {
+        for (const sh of htfBias.swingHighs) {
+          if (sh.price > price) { tpCandidates.push(sh.price); break; }
+        }
+      }
+      // 2. PDH
+      if (htfBias.pdhl && htfBias.pdhl.pdh > price) tpCandidates.push(htfBias.pdhl.pdh);
+      // 3. MTF opposing OB (bearish OB 하단 = 저항)
+      if (mtfStructure.opposingOBs) {
+        for (const ob of mtfStructure.opposingOBs) {
+          if (ob.low > price) { tpCandidates.push(ob.low); break; }
+        }
+      }
+      // 4. HTF opposing FVG
+      if (htfBias.fvgs) {
+        // bullish 방향이면 bearish FVG가 opposing
+        const oppFVGs = indicators.findFairValueGaps([]); // 빈 배열 — htfBias에서 이미 필터됨
+        // htfBias.fvgs는 같은 방향만 있으므로 원본에서 반대 방향 FVG를 찾아야 함
+      }
+
+      // 가장 가까운 후보를 TP로 선택 (가격과 가장 가까운 위쪽)
+      tpCandidates.sort((a, b) => a - b); // 오름차순 (가까운 순)
+      const structuralTP = tpCandidates.find((t) => {
+        const reward = t - price;
+        return reward / risk >= 1.5; // 최소 R:R 1.5 이상인 타겟만
+      });
+
+      if (structuralTP) {
+        const rr = (structuralTP - price) / risk;
+        tp = rr > maxRR ? price + risk * maxRR : structuralTP;
+      } else {
+        tp = price + risk * fallbackRR;
+      }
+    } else {
+      // Short TP: 아래쪽 타겟 (가격 가까운 순)
+      // 1. HTF swing low (opposing SSL)
+      if (htfBias.swingLows) {
+        for (let i = htfBias.swingLows.length - 1; i >= 0; i--) {
+          if (htfBias.swingLows[i].price < price) { tpCandidates.push(htfBias.swingLows[i].price); break; }
+        }
+      }
+      // 2. PDL
+      if (htfBias.pdhl && htfBias.pdhl.pdl < price) tpCandidates.push(htfBias.pdhl.pdl);
+      // 3. MTF opposing OB (bullish OB 상단 = 지지)
+      if (mtfStructure.opposingOBs) {
+        for (let i = mtfStructure.opposingOBs.length - 1; i >= 0; i--) {
+          if (mtfStructure.opposingOBs[i].high < price) { tpCandidates.push(mtfStructure.opposingOBs[i].high); break; }
+        }
+      }
+
+      // 가장 가까운 아래쪽 후보 (가격과 가까운 순)
+      tpCandidates.sort((a, b) => b - a); // 내림차순 (가까운 순)
+      const structuralTP = tpCandidates.find((t) => {
+        const reward = price - t;
+        return reward / risk >= 1.5;
+      });
+
+      if (structuralTP) {
+        const rr = (price - structuralTP) / risk;
+        tp = rr > maxRR ? price - risk * maxRR : structuralTP;
+      } else {
+        tp = price - risk * fallbackRR;
+      }
+    }
+
+    const actualRR = Math.abs(tp - price) / risk;
+
+    return { sl, tp, rr: parseFloat(actualRR.toFixed(2)) };
   }
 }
 

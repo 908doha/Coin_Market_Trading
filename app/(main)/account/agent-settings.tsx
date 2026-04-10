@@ -217,7 +217,7 @@ export default function AgentSettings() {
   return (
     <ScreenTransition>
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <SubPageHeader title="에이전트 설정" onBack={() => router.navigate('/(main)/account')} />
+        <SubPageHeader title="에이전트 설정" onBack={() => router.back()} />
 
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 

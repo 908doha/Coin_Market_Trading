@@ -7,7 +7,7 @@
  */
 import React, { useState, useMemo } from 'react';
 import {
-  View, StyleSheet, ScrollView, Pressable,
+  View, StyleSheet, ScrollView, Pressable, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -18,7 +18,7 @@ import Svg, { Path } from 'react-native-svg';
 import { Text } from '@/design-system';
 import { tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
-import { useAccounts } from '@/store/accounts';
+import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS } from '@/store/accounts';
 import { formatKRWSigned } from '@/utils/format';
 import type { Trade } from '@/services/trades.service';
 
@@ -81,59 +81,105 @@ function calcStats(trades: Trade[]) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ① Header  ← back | title (없음) | 오른쪽 없음
+// ① Header  — 거래내역과 동일한 구조: [←] [수익분석] [계좌 ∨]
 // ─────────────────────────────────────────────────────────────────────────────
-function Header() {
+function Header({
+  selectedId, onOpenPicker,
+}: {
+  selectedId: string | null;
+  onOpenPicker: () => void;
+}) {
+  const { accounts } = useAccounts();
+  const label = selectedId
+    ? (accounts.find((a) => a.id === selectedId)?.name
+        || EXCHANGE_LABELS[accounts.find((a) => a.id === selectedId)!.exchange])
+    : '전체';
+
   return (
-    <View style={hd.row}>
-      <Pressable style={hd.back} onPress={() => router.back()} hitSlop={12}>
-        <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+    <View style={hd.wrap}>
+      <Pressable style={hd.backBtn} onPress={() => router.back()} hitSlop={12}>
+        <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
           <Path d="M15 18l-6-6 6-6" stroke={C.text} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
         </Svg>
       </Pressable>
+      <Text style={hd.title}>수익분석</Text>
+      {accounts.length > 0 && (
+        <Pressable style={hd.accountBtn} onPress={onOpenPicker} hitSlop={8}>
+          <Text style={hd.accountText} numberOfLines={1}>{label} ∨</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
 const hd = StyleSheet.create({
-  row : { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10 },
-  back: { padding: 4 },
+  wrap      : { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, gap: 4 },
+  backBtn   : { padding: 4, marginRight: 4 },
+  title     : { flex: 1, fontSize: 18, fontWeight: '700', color: C.text },
+  accountBtn: { borderWidth: 1, borderColor: C.border, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 },
+  accountText: { fontSize: 13, color: C.textMid, maxWidth: 90 },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ② TopTabs  ← [자산   수익분석] + [기본계좌 ∨]
-//    적용: 자산 → router.back(), 수익분석 → 현재, 계좌명 표시
+// 계좌 선택 Modal
 // ─────────────────────────────────────────────────────────────────────────────
-function TopTabs({ accountName }: { accountName: string }) {
+function AccountPickerModal({
+  visible, selectedId, onSelect, onClose,
+}: {
+  visible: boolean;
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+  onClose: () => void;
+}) {
+  const { accounts } = useAccounts();
   return (
-    <View style={tt.row}>
-      <View style={tt.tabs}>
-        {/* 자산 탭 → 뒤로 */}
-        <Pressable style={tt.tab} onPress={() => router.back()}>
-          <Text style={tt.tabText}>자산</Text>
+    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent onRequestClose={onClose}>
+      <Pressable style={am.overlay} onPress={onClose}>
+        <Pressable style={am.sheet} onPress={() => {}}>
+          <View style={am.handle} />
+          <Text style={am.sheetTitle}>계좌 선택</Text>
+          <Pressable
+            style={[am.row, selectedId === null && am.rowActive]}
+            onPress={() => { onSelect(null); onClose(); }}
+          >
+            <Text style={[am.rowText, selectedId === null && am.rowTextActive]}>전체</Text>
+            {selectedId === null && <Text style={am.check}>✓</Text>}
+          </Pressable>
+          {accounts.map((acc) => {
+            const isSel = selectedId === acc.id;
+            const dot   = EXCHANGE_COLORS[acc.exchange];
+            return (
+              <Pressable
+                key={acc.id}
+                style={[am.row, isSel && am.rowActive]}
+                onPress={() => { onSelect(acc.id); onClose(); }}
+              >
+                <View style={am.rowLeft}>
+                  {dot && <View style={[am.dot, { backgroundColor: dot }]} />}
+                  <Text style={[am.rowText, isSel && am.rowTextActive]}>
+                    {acc.name || EXCHANGE_LABELS[acc.exchange]}
+                  </Text>
+                </View>
+                {isSel && <Text style={am.check}>✓</Text>}
+              </Pressable>
+            );
+          })}
         </Pressable>
-        {/* 수익분석 탭 → 현재 (active) */}
-        <Pressable style={[tt.tab, tt.tabActive]}>
-          <Text style={[tt.tabText, tt.tabTextActive]}>수익분석</Text>
-          <View style={tt.underline} />
-        </Pressable>
-      </View>
-      {/* 계좌 선택 드롭다운 */}
-      <Pressable style={tt.accountBtn}>
-        <Text style={tt.accountText} numberOfLines={1}>{accountName} ∨</Text>
       </Pressable>
-    </View>
+    </Modal>
   );
 }
-const tt = StyleSheet.create({
-  row         : { flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderColor: '#EDEDED', paddingHorizontal: 4 },
-  tabs        : { flexDirection: 'row', flex: 1 },
-  tab         : { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 12 },
-  tabActive   : { position: 'relative' },
-  tabText     : { fontSize: 16, fontWeight: '500', color: C.textLight },
-  tabTextActive: { fontWeight: '700', color: C.text },
-  underline   : { position: 'absolute', bottom: 0, left: 14, right: 14, height: 2, backgroundColor: C.text },
-  accountBtn  : { borderWidth: 1, borderColor: C.border, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5, marginRight: 10 },
-  accountText : { fontSize: 13, color: C.textMid, maxWidth: 80 },
+const am = StyleSheet.create({
+  overlay  : { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  sheet    : { backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingBottom: 40, paddingTop: 12 },
+  handle   : { width: 40, height: 4, borderRadius: 2, backgroundColor: '#DDDDDD', alignSelf: 'center', marginBottom: 16 },
+  sheetTitle: { fontSize: 15, fontWeight: '700', color: C.text, marginBottom: 12 },
+  row      : { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, borderTopWidth: 1, borderTopColor: '#F2F2F2' },
+  rowActive: {},
+  rowLeft  : { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  dot      : { width: 8, height: 8, borderRadius: 4 },
+  rowText  : { fontSize: 15, color: C.text },
+  rowTextActive: { fontWeight: '700', color: C.text },
+  check    : { fontSize: 16, fontWeight: '700', color: C.text },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -445,24 +491,28 @@ const tr = StyleSheet.create({
 // 메인
 // ─────────────────────────────────────────────────────────────────────────────
 export default function ProfitAnalysis() {
-  const [period,  setPeriod]  = useState<Period>('월');
-  const [viewMode,setViewMode]= useState<ViewMode>('일별');
-  const [subTab,  setSubTab]  = useState<SubTab>('실현손익');
-  const [result,  setResult]  = useState<ResultFilter>('전체');
-  const [offset,  setOffset]  = useState(0);
-  const [showUsd, setShowUsd] = useState(false);
+  const [period,     setPeriod]     = useState<Period>('월');
+  const [viewMode,   setViewMode]   = useState<ViewMode>('일별');
+  const [subTab,     setSubTab]     = useState<SubTab>('실현손익');
+  const [result,     setResult]     = useState<ResultFilter>('전체');
+  const [offset,     setOffset]     = useState(0);
+  const [showUsd,    setShowUsd]    = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const { accounts } = useAccounts();
   const listOpacity  = useSharedValue(1);
   const listStyle    = useAnimatedStyle(() => ({ opacity: listOpacity.value }));
 
-  const { data: allTrades } = useApi(
-    () => tradesService.getAllByAccounts(accounts),
-    [accounts],
-  );
+  // 선택된 계좌 (null = 전체)
+  const selectedAccounts = selectedId
+    ? accounts.filter((a) => a.id === selectedId)
+    : accounts;
 
-  // 첫 번째 계좌명 표시
-  const accountName = accounts[0]?.name ?? '기본 계좌';
+  const { data: allTrades } = useApi(
+    () => tradesService.getAllByAccounts(selectedAccounts),
+    [selectedId, accounts.length],
+  );
 
   // 기간 레이블
   const periodLabel = useMemo(() => {
@@ -552,11 +602,14 @@ export default function ProfitAnalysis() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.white }} edges={['top']}>
 
-      {/* ① 헤더 */}
-      <Header />
-
-      {/* ② 상단 탭 + 계좌 */}
-      <TopTabs accountName={accountName} />
+      {/* ① 헤더 + 계좌 선택 */}
+      <Header selectedId={selectedId} onOpenPicker={() => setPickerOpen(true)} />
+      <AccountPickerModal
+        visible={pickerOpen}
+        selectedId={selectedId}
+        onSelect={setSelectedId}
+        onClose={() => setPickerOpen(false)}
+      />
 
       {/* ③ 기간 탭 */}
       <PeriodTabs period={period} onChange={(p) => fade(() => { setPeriod(p); setOffset(0); })} />

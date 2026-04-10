@@ -149,7 +149,6 @@ export default function MainLayout() {
     >
       <Tabs.Screen name="home"      options={{ title: '홈' }} />
       <Tabs.Screen name="positions" options={{ title: '트레이딩' }} />
-      <Tabs.Screen name="history"   options={{ href: null }} />
       <Tabs.Screen name="account"   options={{ title: '계정' }} />
     </Tabs>
   );

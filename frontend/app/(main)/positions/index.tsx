@@ -355,7 +355,7 @@ export default function Trading() {
           <View style={st.menuSection}>
             <Pressable
               style={({ pressed }) => [st.menuRow, pressed && { backgroundColor: '#F8F8F8' }]}
-              onPress={() => router.push('/(main)/history')}
+              onPress={() => router.push('/history')}
             >
               <Text style={st.menuText}>거래 내역</Text>
               <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">

@@ -104,7 +104,7 @@ function TradeRow({ trade, isLast }: { trade: Trade; isLast: boolean }) {
   return (
     <Pressable
       style={({ pressed }) => [row.wrap, !isLast && row.border, pressed && { backgroundColor: '#F8F8F8' }]}
-      onPress={() => router.push(`/(main)/history/${trade.id}`)}
+      onPress={() => router.push(`/history/${trade.id}`)}
     >
       <Text style={row.date}>{date}</Text>
       <View style={{ flex: 1, paddingRight: 12 }}>

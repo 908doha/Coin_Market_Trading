@@ -94,7 +94,7 @@ export default function Deposit() {
   return (
     <ScreenTransition>
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <SubPageHeader title="충전하기" onBack={() => router.navigate('/(main)/account')} />
+      <SubPageHeader title="충전하기" onBack={() => router.back()} />
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}

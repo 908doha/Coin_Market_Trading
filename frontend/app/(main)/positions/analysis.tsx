@@ -77,15 +77,17 @@ function fmtPnl(krw: number, showUsd: boolean, rate: number) {
 }
 
 function calcStats(trades: Trade[]) {
-  const total    = trades.length;
-  const totalPnl = trades.reduce((s, t) => s + t.profit, 0);
-  const wins     = trades.filter((t) => t.profit > 0);
-  const losses   = trades.filter((t) => t.profit < 0);
-  const avgWin   = wins.length   ? wins.reduce((s,t)   => s + t.profit, 0) / wins.length   : 0;
-  const avgLoss  = losses.length ? Math.abs(losses.reduce((s,t) => s + t.profit, 0) / losses.length) : 0;
-  const plRatio  = avgLoss > 0 ? avgWin / avgLoss : null;
-  const winRate  = total ? (wins.length / total) * 100 : 0;
-  return { total, totalPnl, wins: wins.length, losses: losses.length, plRatio, winRate };
+  const total       = trades.length;
+  const totalPnl    = trades.reduce((s, t) => s + t.profit, 0);
+  const totalAmount = trades.reduce((s, t) => s + (t.amount ?? 0), 0);
+  const profitRate  = totalAmount > 0 ? (totalPnl / totalAmount) * 100 : 0;
+  const wins        = trades.filter((t) => t.profit > 0);
+  const losses      = trades.filter((t) => t.profit < 0);
+  const avgWin      = wins.length   ? wins.reduce((s,t)   => s + t.profit, 0) / wins.length   : 0;
+  const avgLoss     = losses.length ? Math.abs(losses.reduce((s,t) => s + t.profit, 0) / losses.length) : 0;
+  const plRatio     = avgLoss > 0 ? avgWin / avgLoss : null;
+  const winRate     = total ? (wins.length / total) * 100 : 0;
+  return { total, totalPnl, totalAmount, profitRate, wins: wins.length, losses: losses.length, plRatio, winRate };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -311,7 +313,7 @@ function SummaryList({ stats, hasData, showUsd, rate }: {
     {
       label: '실현손익',
       value: hasData ? fmtPnl(stats.totalPnl, showUsd, rate) : (showUsd ? '$0.00' : '0원'),
-      blue : hasData ? `(승률 ${stats.winRate.toFixed(0)}%)` : undefined,
+      blue : hasData ? `(${stats.profitRate >= 0 ? '+' : ''}${stats.profitRate.toFixed(1)}%)` : undefined,
       color: hasData ? pnlColor(stats.totalPnl) : C.textGray,
     },
     {
@@ -331,7 +333,7 @@ function SummaryList({ stats, hasData, showUsd, rate }: {
         ? stats.plRatio >= 1 ? C.green : C.red
         : C.textGray,
     },
-    { label: '승률', value: hasData ? `${stats.winRate.toFixed(0)}%` : '—', color: C.textGray },
+    { label: '수익률', value: hasData ? `${stats.profitRate >= 0 ? '+' : ''}${stats.profitRate.toFixed(1)}%` : '—', color: hasData ? pnlColor(stats.totalPnl) : C.textGray },
   ];
   return (
     <View style={sl.block}>
@@ -402,12 +404,13 @@ const rc = StyleSheet.create({
 // ⑨ AmountBar  ← -253,059원(8.6%)  |  $ 원
 // ─────────────────────────────────────────────────────────────────────────────
 function AmountBar({
-  value, winRate, hasData, showUsd, onToggle,
+  value, profitRate, hasData, showUsd, onToggle,
 }: {
-  value: number; winRate: number; hasData: boolean; showUsd: boolean; onToggle: () => void;
+  value: number; profitRate: number; hasData: boolean; showUsd: boolean; onToggle: () => void;
 }) {
   const color = hasData ? pnlColor(value) : '#CCCCCC';
-  const text  = hasData ? `${formatKRWSigned(value)}(${winRate.toFixed(0)}%)` : '—';
+  const sign  = value >= 0 ? '+' : '';
+  const text  = hasData ? `${formatKRWSigned(value)} (${sign}${profitRate.toFixed(1)}%)` : '—';
   return (
     <View style={ab.row}>
       <Text style={[ab.amount, { color }]}>{text}</Text>
@@ -666,7 +669,7 @@ export default function ProfitAnalysis() {
         {/* ⑨ 금액 바 */}
         <AmountBar
           value={stats.totalPnl}
-          winRate={stats.winRate}
+          profitRate={stats.profitRate}
           hasData={stats.total > 0}
           showUsd={showUsd}
           onToggle={() => setShowUsd((v) => !v)}

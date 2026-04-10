@@ -16,7 +16,7 @@ import { colors } from '../../tokens';
 // ── 아이콘 ──────────────────────────────────────────────────────────────────
 function SuccessIcon() {
   return (
-    <Svg width={36} height={36} viewBox="0 0 36 36">
+    <Svg width={24} height={24} viewBox="0 0 36 36">
       <Circle cx="18" cy="18" r="18" fill="#1AC24E" />
       <Path
         d="M10 18.5l5.5 5.5 10.5-11"
@@ -32,7 +32,7 @@ function SuccessIcon() {
 
 function ErrorIcon() {
   return (
-    <Svg width={36} height={36} viewBox="0 0 36 36">
+    <Svg width={24} height={24} viewBox="0 0 36 36">
       <Circle cx="18" cy="18" r="18" fill="#FF4747" />
       <Path
         d="M12 12l12 12M24 12l-12 12"
@@ -134,22 +134,22 @@ const toastSt = StyleSheet.create({
     zIndex:         9999,
     flexDirection: 'row',
     alignItems:    'center',
-    gap:            12,
+    gap:            10,
     backgroundColor: '#FFFFFF',
-    borderRadius:   16,
-    paddingVertical:   14,
-    paddingHorizontal: 16,
+    borderRadius:   14,
+    paddingVertical:   11,
+    paddingHorizontal: 14,
     shadowColor:    '#000',
-    shadowOffset:   { width: 0, height: 4 },
-    shadowOpacity:  0.12,
-    shadowRadius:   16,
-    elevation:      10,
+    shadowOffset:   { width: 0, height: 2 },
+    shadowOpacity:  0.10,
+    shadowRadius:   12,
+    elevation:      8,
   },
   message: {
     flex:       1,
-    fontSize:   15,
-    fontWeight: '600',
+    fontSize:   14,
+    fontWeight: '500',
     color:      '#191919',
-    lineHeight: 22,
+    lineHeight: 20,
   },
 });

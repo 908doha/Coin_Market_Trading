@@ -1,6 +1,25 @@
 import React, { createContext, useContext, useEffect, useReducer } from 'react';
+import { Platform } from 'react-native';
 import { tokenStorage, authService } from '@/services';
 import type { AuthResponse } from '@/services';
+
+const USER_KEY = 'auth_user_v1';
+
+function saveUser(user: User) {
+  try {
+    if (Platform.OS === 'web') localStorage.setItem(USER_KEY, JSON.stringify(user));
+  } catch {}
+}
+
+function loadUser(): User | null {
+  try {
+    if (Platform.OS === 'web') {
+      const raw = localStorage.getItem(USER_KEY);
+      return raw ? JSON.parse(raw) : null;
+    }
+  } catch {}
+  return null;
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -61,17 +80,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isLoggedIn: false,
   });
 
-  // 앱 시작 시 저장된 토큰으로 자동 로그인 체크
+  // 앱 시작 시 저장된 토큰 + 유저 정보로 자동 로그인
   useEffect(() => {
     (async () => {
       dispatch({ type: 'INIT_START' });
       try {
         const token = await tokenStorage.getAccess();
         if (token) {
-          // TODO: GET /auth/me 로 유저 정보 가져오기
-          // const user = await client.get<User>('/auth/me');
-          // dispatch({ type: 'INIT_DONE', payload: user });
-          dispatch({ type: 'INIT_DONE', payload: null }); // 임시: 토큰 있어도 재로그인
+          // 저장된 유저 정보 복원 → 재로그인 불필요
+          const saved = loadUser();
+          dispatch({ type: 'INIT_DONE', payload: saved });
         } else {
           dispatch({ type: 'INIT_DONE', payload: null });
         }
@@ -84,16 +102,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (email: string, password: string) => {
     const res = await authService.login({ email, password });
+    saveUser(res.user);
     dispatch({ type: 'LOGIN', payload: res.user });
   };
 
   const signup = async (email: string, password: string) => {
     const res = await authService.signup({ email, password });
+    saveUser(res.user);
     dispatch({ type: 'LOGIN', payload: res.user });
   };
 
   const logout = async () => {
     await authService.logout();
+    try { if (Platform.OS === 'web') localStorage.removeItem(USER_KEY); } catch {}
     dispatch({ type: 'LOGOUT' });
   };
 

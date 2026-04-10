@@ -1,8 +1,8 @@
 /**
  * Exchange Accounts Store
- * - localStorage / SecureStore 를 즉시 캐시로 사용
- * - /api/user-accounts (Railway PostgreSQL) 와 자동 동기화
- * - DB 없어도 로컬 스토리지만으로 정상 동작
+ * - localStorage를 주 저장소로 사용 (즉시 작동, 오프라인 지원)
+ * - 로그인 상태일 때 /api/user-accounts 와 자동 동기화 (기기 간 유지)
+ * - 백엔드 없어도 localStorage로 정상 동작
  */
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
@@ -27,23 +27,18 @@ export interface ExchangeAccount {
 const STORAGE_KEY = 'exchange_accounts_v1';
 const TOKEN_KEY   = 'jwt_access';
 
-// ── 토큰 읽기 ─────────────────────────────────────────────────────────────────
-async function getToken(): Promise<string | null> {
-  if (Platform.OS === 'web') return localStorage.getItem(TOKEN_KEY);
-  return SecureStore.getItemAsync(TOKEN_KEY);
-}
-
 // ── 로컬 저장소 ───────────────────────────────────────────────────────────────
+
 async function localLoad(): Promise<ExchangeAccount[]> {
   try {
     const raw = Platform.OS === 'web'
       ? localStorage.getItem(STORAGE_KEY)
       : await SecureStore.getItemAsync(STORAGE_KEY);
     const result = raw ? (JSON.parse(raw) as ExchangeAccount[]) : [];
-    console.log(`[accounts] local: ${result.length}개 로드`);
+    console.log(`[accounts] loaded ${result.length} accounts from local`);
     return result;
   } catch (e) {
-    console.error('[accounts] localLoad 오류:', e);
+    console.error('[accounts] load error:', e);
     return [];
   }
 }
@@ -52,47 +47,76 @@ async function localSave(accounts: ExchangeAccount[]): Promise<void> {
   const raw = JSON.stringify(accounts);
   if (Platform.OS === 'web') {
     localStorage.setItem(STORAGE_KEY, raw);
+    const check = localStorage.getItem(STORAGE_KEY);
+    if (!check) throw new Error('localStorage 저장 실패 — 브라우저가 저장을 차단했을 수 있어요');
   } else {
     await SecureStore.setItemAsync(STORAGE_KEY, raw);
   }
+  console.log(`[accounts] saved ${accounts.length} accounts to local`);
+}
+
+function makeId(): string {
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
 // ── 백엔드 동기화 ─────────────────────────────────────────────────────────────
+
+function getToken(): string | null {
+  if (Platform.OS !== 'web') return null;
+  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
+}
+
 async function backendLoad(): Promise<ExchangeAccount[] | null> {
+  const token = getToken();
+  if (!token) {
+    console.warn('[accounts] backendLoad: 토큰 없음 — 로그인 상태 확인 필요');
+    return null;
+  }
   try {
-    const token = await getToken();
-    if (!token) return null;
     const res = await fetch('/api/user-accounts', {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (res.status === 204) return null;  // DB 미설정
-    if (!res.ok) return null;
+    if (res.status === 204) {
+      console.warn('[accounts] backendLoad: DATABASE_URL 미설정 — Vercel 환경변수 확인 필요');
+      return null;
+    }
+    console.log('[accounts] backendLoad status:', res.status);
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.error('[accounts] backendLoad 실패:', res.status, body);
+      return null;
+    }
     const data = await res.json();
     return Array.isArray(data) ? data : null;
   } catch (e) {
-    console.warn('[accounts] backendLoad 실패:', e);
+    console.error('[accounts] backendLoad 네트워크 오류:', e);
     return null;
   }
 }
 
 async function backendSave(accounts: ExchangeAccount[]): Promise<void> {
+  const token = getToken();
+  if (!token) {
+    console.warn('[accounts] backendSave: 토큰 없음 — DB 동기화 건너뜀');
+    return;
+  }
   try {
-    const token = await getToken();
-    if (!token) return;
     const res = await fetch('/api/user-accounts', {
       method:  'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body:    JSON.stringify(accounts),
     });
-    if (!res.ok) console.warn('[accounts] backendSave 실패:', res.status);
-    else console.log(`[accounts] backend: ${accounts.length}개 저장`);
+    if (res.status === 204) {
+      console.warn('[accounts] backendSave: DATABASE_URL 미설정 — Vercel 환경변수 확인 필요');
+    } else if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.error('[accounts] backendSave 실패:', res.status, body);
+    } else {
+      console.log('[accounts] backendSave 성공 ✓', res.status);
+    }
   } catch (e) {
-    console.warn('[accounts] backendSave 오류:', e);
+    console.error('[accounts] backendSave 네트워크 오류:', e);
   }
-}
-
-function makeId(): string {
-  return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
 // ── Context ───────────────────────────────────────────────────────────────────
@@ -140,31 +164,30 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
   const accountsRef = useRef(accounts);
   accountsRef.current = accounts;
 
-  // ── 시작 시: 로컬 즉시 로드 → 백엔드 동기화 ──────────────────────────────────
+  // 앱 시작: 로컬 → 백엔드 순서로 로드
   useEffect(() => {
     (async () => {
-      // 1) 로컬 즉시 로드 (빠름)
+      // ① 로컬 즉시 로드 (빠름)
       const local = await localLoad();
       setAccounts(local);
       setIsLoading(false);
 
-      // 2) 백엔드에서 최신 데이터 가져오기
+      // ② 백엔드에서 최신 데이터 가져오기 (기기 간 동기화)
       const remote = await backendLoad();
-
-      if (remote !== null && remote.length > 0) {
-        // 백엔드에 데이터 있음 → 백엔드 우선
-        await localSave(remote);
+      if (remote && remote.length > 0) {
+        // 원격 데이터를 로컬보다 우선시 (서버가 source-of-truth)
         setAccounts(remote);
-        console.log(`[accounts] 백엔드 동기화: ${remote.length}개`);
-      } else if (remote !== null && remote.length === 0 && local.length > 0) {
-        // 백엔드 비어있고 로컬에 데이터 있음 → 로컬 → 백엔드 업로드
+        await localSave(remote);
+        console.log(`[accounts] synced ${remote.length} accounts from backend`);
+      } else if (local.length > 0 && remote !== null) {
+        // 서버에 없고 로컬에 있을 때 → 서버로 업로드
         await backendSave(local);
-        console.log('[accounts] 로컬 데이터 백엔드 업로드');
+        console.log('[accounts] uploaded local accounts to backend');
       }
     })();
   }, []);
 
-  // ── 잔고 자동 fetch ───────────────────────────────────────────────────────────
+  // 잔고 자동 fetch
   const refreshBalances = useCallback(async () => {
     const list = accountsRef.current;
     if (!list.length) return;
@@ -179,7 +202,9 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
           });
           return { id: acc.id, bal, err: null };
         } catch (e: any) {
-          return { id: acc.id, bal: null, err: e?.message ?? '잔고 조회 실패' };
+          const msg = e?.message ?? '잔고 조회 실패';
+          console.error(`[balance:${acc.id}]`, msg);
+          return { id: acc.id, bal: null, err: msg };
         }
       }),
     );
@@ -199,7 +224,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     ? sumBalances(accounts.map((a) => balances[a.id] ?? null))
     : null;
 
-  // ── CRUD ─────────────────────────────────────────────────────────────────────
+  // ── CRUD — 로컬 우선, 백엔드 background sync ─────────────────────────────────
 
   const addAccount = useCallback(async (
     input: Omit<ExchangeAccount, 'id' | 'createdAt'>,
@@ -212,7 +237,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     const next = [...accountsRef.current, account];
     await localSave(next);
     setAccounts(next);
-    backendSave(next);  // fire-and-forget
+    backendSave(next);   // background
     return account;
   }, []);
 
@@ -223,7 +248,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     const next = accountsRef.current.map((a) => a.id === id ? { ...a, ...updates } : a);
     await localSave(next);
     setAccounts(next);
-    backendSave(next);
+    backendSave(next);   // background
   }, []);
 
   const removeAccount = useCallback(async (id: string): Promise<void> => {
@@ -231,7 +256,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     await localSave(next);
     setAccounts(next);
     setBalances((prev) => { const n = { ...prev }; delete n[id]; return n; });
-    backendSave(next);
+    backendSave(next);   // background
   }, []);
 
   return (

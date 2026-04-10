@@ -1,181 +1,204 @@
 import React from 'react';
-import { View, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import {
+  View,
+  StyleSheet,
+  ScrollView,
+  Pressable,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
-import { Text, SubPageHeader, GlassCard, ScreenTransition } from '@/design-system';
-import { colors } from '@/design-system/tokens';
+import Svg, { Path } from 'react-native-svg';
+import { Text, Card, Badge, Divider, SubPageHeader, GlassCard, TradeDetailSkeleton } from '@/design-system';
+import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
-import { formatKRWSigned, formatRate } from '@/utils/format';
+import { useAccounts } from '@/store/accounts';
+import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 
-function fmt$(v?: number) {
-  if (!v || v === 0) return '-';
-  return `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function InfoRow({ label, value, valueColor, isLast }: {
-  label: string; value: string; valueColor?: string; isLast?: boolean;
-}) {
+function InfoRow({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
   return (
-    <View style={[row.wrap, !isLast && row.border]}>
-      <Text style={row.label}>{label}</Text>
-      <Text style={[row.value, valueColor ? { color: valueColor } : {}]}>{value}</Text>
+    <View style={rowStyles.row}>
+      <Text variant="body2" color={colors.text.tertiary}>{label}</Text>
+      <Text variant="body1Medium" color={valueColor ?? colors.text.primary}>{value}</Text>
     </View>
   );
 }
-const row = StyleSheet.create({
-  wrap:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14 },
-  border: { borderBottomWidth: 1, borderBottomColor: colors.border.default },
-  label:  { fontSize: 14, color: colors.text.tertiary, fontWeight: '500' },
-  value:  { fontSize: 14, fontWeight: '600', color: colors.text.primary },
+const rowStyles = StyleSheet.create({
+  row: {
+    flexDirection:   'row',
+    justifyContent:  'space-between',
+    alignItems:      'center',
+    paddingVertical: spacing[2],
+  },
 });
 
 export default function TradeDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { accounts } = useAccounts();
   const { data: trade, isLoading, error } = useApi(
-    () => tradesService.getById(id),
+    () => tradesService.getById(id, accounts),
     [id],
   );
 
-  const isProfit  = (trade?.profit ?? 0) >= 0;
-  const pnlColor  = isProfit ? colors.market.rise : colors.market.fall;
-
-  const typeLabel =
-    trade?.type === 'take_profit' ? '익절' :
-    trade?.type === 'stop_loss'   ? '손절' : '수동청산';
-
-  const exitLabel =
-    trade?.type === 'take_profit' ? '익절가' :
-    trade?.type === 'stop_loss'   ? '손절가' : '청산가';
-
-  const dirColor = trade?.direction === 'Long' ? colors.market.rise : colors.market.fall;
-
-  const exitAt = trade?.exitAt
-    ? new Date(trade.exitAt).toLocaleString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-    : '-';
-  const entryAt = trade?.entryAt && trade.entryAt !== trade.exitAt
-    ? new Date(trade.entryAt).toLocaleString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-    : '-';
-
   if (isLoading) {
     return (
-      <ScreenTransition>
-        <SafeAreaView style={st.safe} edges={['top']}>
-          <SubPageHeader title="거래 상세" onBack={() => router.back()} />
-          <View style={st.center}><ActivityIndicator color={colors.text.tertiary} /></View>
-        </SafeAreaView>
-      </ScreenTransition>
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <SubPageHeader title="거래 상세" onBack={() => router.back()} />
+        <ScrollView showsVerticalScrollIndicator={false}>
+          <TradeDetailSkeleton />
+        </ScrollView>
+      </SafeAreaView>
     );
   }
 
   if (error || !trade) {
     return (
-      <ScreenTransition>
-        <SafeAreaView style={st.safe} edges={['top']}>
-          <SubPageHeader title="거래 상세" onBack={() => router.back()} />
-          <View style={st.center}>
-            <Text style={{ color: colors.text.tertiary }}>거래 내역을 찾을 수 없어요</Text>
-          </View>
-        </SafeAreaView>
-      </ScreenTransition>
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <SubPageHeader title="거래 상세" onBack={() => router.back()} />
+        <View style={styles.center}>
+          <Text variant="body1" color={colors.text.tertiary}>거래 내역을 찾을 수 없어요</Text>
+        </View>
+      </SafeAreaView>
     );
   }
 
+  const isProfit = trade.profit >= 0;
+
   return (
-    <ScreenTransition>
-      <SafeAreaView style={st.safe} edges={['top']}>
-        <SubPageHeader title="거래 상세" onBack={() => router.back()} />
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      <SubPageHeader title="거래 상세" onBack={() => router.back()} />
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={st.content}>
-
-          {/* ── 코인 헤더 ── */}
-          <GlassCard intensity="medium" radius={24} padding={20} style={st.section}>
-            <View style={st.headerRow}>
-              <View style={[st.coinIcon, { backgroundColor: isProfit ? colors.market.riseSubtle : colors.market.fallSubtle }]}>
-                <Text style={[st.coinText, { color: pnlColor }]}>{trade.symbol.slice(0, 2)}</Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                  <Text style={st.symbol}>{trade.symbol}</Text>
-                  <View style={[st.badge, { backgroundColor: trade.direction === 'Long' ? '#EAF6F0' : '#FFF0F0' }]}>
-                    <Text style={[st.badgeText, { color: dirColor }]}>
-                      {trade.direction === 'Long' ? '롱' : '숏'}
-                    </Text>
-                  </View>
-                  <View style={[st.badge, { backgroundColor: isProfit ? colors.market.riseSubtle : colors.market.fallSubtle }]}>
-                    <Text style={[st.badgeText, { color: pnlColor }]}>{typeLabel}</Text>
-                  </View>
-                </View>
-                <Text style={st.subText}>{exitAt} 청산</Text>
-              </View>
-            </View>
-          </GlassCard>
-
-          {/* ── 손익 히어로 ── */}
-          <GlassCard intensity="medium" radius={24} padding={24} style={st.section}>
-            <Text style={st.pnlLabel}>실현 손익</Text>
-            <Text style={[st.pnlAmount, { color: pnlColor }]}>
-              {formatKRWSigned(trade.profit)}
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* ── 코인 헤더 ── */}
+        <View style={styles.coinHeader}>
+          <View style={[styles.coinIcon, {
+            backgroundColor: isProfit ? colors.positive.subtle : colors.negative.subtle,
+          }]}>
+            <Text variant="heading2" color={isProfit ? colors.positive.text : colors.negative.text}>
+              {trade.symbol.slice(0, 2)}
             </Text>
-            <View style={[st.rateBadge, { backgroundColor: isProfit ? colors.market.riseSubtle : '#FFF0F0', marginTop: 6 }]}>
-              <Text style={[st.rateText, { color: pnlColor }]}>
+          </View>
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing[2] }}>
+              <Text variant="title2">{trade.symbol}</Text>
+              <Badge label={trade.direction} variant={trade.direction === 'Long' ? 'positive' : 'negative'} />
+              {trade.type === 'stop_loss' && <Badge label="손절" variant="negative" />}
+            </View>
+            <Text variant="body2" color={colors.text.tertiary}>{trade.coin}</Text>
+          </View>
+        </View>
+
+        {/* ── 손익 요약 ── */}
+        <Card variant="filled" style={styles.profitCard}>
+          <View style={styles.profitRow}>
+            <View>
+              <Text variant="caption1" color={colors.text.tertiary}>실현 손익</Text>
+              <Text
+                variant="numericLarge"
+                color={isProfit ? colors.market.rise : colors.market.fall}
+                style={{ marginTop: spacing[1] }}
+              >
+                {formatKRWSigned(trade.profit)}
+              </Text>
+              <Text
+                variant="heading3"
+                color={isProfit ? colors.market.rise : colors.market.fall}
+              >
                 {formatRate(trade.profitRate)}
               </Text>
             </View>
-          </GlassCard>
+            <View style={{ alignItems: 'flex-end', gap: spacing[2] }}>
+              <View>
+                <Text variant="caption1" color={colors.text.tertiary} align="right">투자금</Text>
+                <Text variant="body1Medium" align="right">{formatKRW(trade.amount ?? 0)}</Text>
+              </View>
+              <View>
+                <Text variant="caption1" color={colors.text.tertiary} align="right">보유기간</Text>
+                <Text variant="body1Medium" align="right">{trade.holdingDays}일</Text>
+              </View>
+            </View>
+          </View>
+        </Card>
 
-          {/* ── 가격 정보 ── */}
-          <GlassCard intensity="medium" radius={24} padding={20} style={st.section}>
-            <Text style={st.sectionTitle}>가격 정보</Text>
-            <InfoRow label="진입가"   value={fmt$((trade as any).entryPrice)} />
-            <InfoRow
-              label={exitLabel}
-              value={fmt$((trade as any).exitPrice)}
-              valueColor={pnlColor}
-              isLast
-            />
-          </GlassCard>
-
-          {/* ── 거래 정보 ── */}
-          <GlassCard intensity="medium" radius={24} padding={20} style={st.section}>
-            <Text style={st.sectionTitle}>거래 정보</Text>
-            <InfoRow label="방향"     value={trade.direction === 'Long' ? '롱 (매수)' : '숏 (매도)'} valueColor={dirColor} />
-            <InfoRow label="결과"     value={typeLabel} valueColor={pnlColor} />
-            <InfoRow label="청산일시" value={exitAt} />
-            {entryAt !== '-' && <InfoRow label="진입일시" value={entryAt} />}
-            <InfoRow label="보유기간" value={trade.holdingDays > 0 ? `${trade.holdingDays}일` : '-'} isLast />
-          </GlassCard>
+        {/* ── 거래 정보 ── */}
+        <Card variant="outlined" style={styles.section}>
+          <Text variant="heading3" style={{ marginBottom: spacing[3] }}>거래 정보</Text>
+          <InfoRow label="진입가"  value={formatKRW(trade.entryPrice ?? 0)} />
+          <Divider />
+          <InfoRow label="청산가"  value={formatKRW(trade.exitPrice ?? 0)} valueColor={isProfit ? colors.market.rise : colors.market.fall} />
+          <Divider />
+          <InfoRow label="진입일시" value={trade.entryAt} />
+          <Divider />
+          <InfoRow label="청산일시" value={trade.exitAt} />
+          <Divider />
+          <InfoRow label="보유기간" value={`${trade.holdingDays}일`} />
+        </Card>
 
 
-          <View style={{ height: 120 }} />
-        </ScrollView>
-      </SafeAreaView>
-    </ScreenTransition>
+        <View style={{ height: spacing[10] }} />
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
-const st = StyleSheet.create({
-  safe:    { flex: 1, backgroundColor: colors.bg.elevated },
-  center:  { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  content: { paddingHorizontal: 20, paddingTop: 8 },
-  section: { marginBottom: 12 },
+const styles = StyleSheet.create({
+  safe:   { flex: 1, backgroundColor: colors.bg.default },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  navBar: {
+    flexDirection:    'row',
+    alignItems:       'center',
+    justifyContent:   'space-between',
+    paddingHorizontal: spacing[5],
+    paddingVertical:  spacing[3],
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border.default,
+  },
+  backBtn: { width: 40, paddingVertical: spacing[1] },
+  scroll:  { flex: 1 },
+  content: { paddingHorizontal: spacing[5], paddingTop: spacing[5] },
 
-  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  coinIcon:  { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
-  coinText:  { fontSize: 16, fontWeight: '700' },
-  symbol:    { fontSize: 18, fontWeight: '700', color: colors.text.primary },
-  badge:     { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
-  badgeText: { fontSize: 12, fontWeight: '700' },
-  subText:   { fontSize: 13, color: colors.text.tertiary, marginTop: 2 },
+  coinHeader: {
+    flexDirection: 'row',
+    gap:           spacing[4],
+    marginBottom:  spacing[5],
+  },
+  coinIcon: {
+    width:           56,
+    height:          56,
+    borderRadius:    28,
+    alignItems:      'center',
+    justifyContent:  'center',
+  },
 
-  pnlLabel:  { fontSize: 13, color: colors.text.tertiary, marginBottom: 6 },
-  pnlAmount: { fontSize: 30, fontWeight: '700', letterSpacing: -0.5 },
-  rateBadge: { alignSelf: 'flex-start', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },
-  rateText:  { fontSize: 14, fontWeight: '700' },
+  profitCard: { marginBottom: spacing[4] },
+  profitRow:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
 
-  sectionTitle: { fontSize: 15, fontWeight: '700', color: colors.text.primary, marginBottom: 12 },
+  section: { marginBottom: spacing[4] },
 
-  reasonBox:   { backgroundColor: colors.bg.subtle, borderRadius: 12, padding: 14 },
-  reasonLabel: { fontSize: 12, fontWeight: '600', color: colors.text.tertiary, marginBottom: 6 },
-  reasonText:  { fontSize: 14, color: colors.text.secondary, lineHeight: 22 },
+  agentHeader: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           spacing[2],
+    marginBottom:  spacing[4],
+  },
+  block: {
+    backgroundColor: colors.bg.subtle,
+    borderRadius:    borderRadius.md,
+    padding:         spacing[4],
+  },
+  blockLabel: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           spacing[2],
+    marginBottom:  spacing[2],
+  },
+  dot: {
+    width:        8,
+    height:       8,
+    borderRadius: 4,
+  },
 });

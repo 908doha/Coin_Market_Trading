@@ -95,18 +95,6 @@ function AccountCard({
 
       <Text style={styles.apiKeyText}>{maskKey(account.apiKey)}</Text>
 
-      {/* 에이전트 뱃지 */}
-      {account.agentId ? (
-        <View style={styles.agentRow}>
-          <Text style={{ fontSize: 12 }}>🤖</Text>
-          <Text style={styles.agentText}>{account.agentId}</Text>
-        </View>
-      ) : (
-        <View style={styles.agentRow}>
-          <Text style={{ fontSize: 12 }}>📊</Text>
-          <Text style={[styles.agentText, { color: '#AEAEB2' }]}>데이터 전용</Text>
-        </View>
-      )}
 
       {/* 하단: 삭제 버튼 */}
       <View style={styles.cardFooter}>

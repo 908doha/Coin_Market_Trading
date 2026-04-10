@@ -1,538 +1,473 @@
-import React, { useState, useCallback } from 'react';
-import { View, StyleSheet, ScrollView, Pressable, Modal } from 'react-native';
+import React, { useState } from 'react';
+import {
+  View, StyleSheet, ScrollView, Pressable, Modal, LayoutAnimation, Platform, UIManager,
+} from 'react-native';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Animated, {
-  useSharedValue, useAnimatedStyle, withTiming, withSpring, runOnJS, Easing,
+  useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS,
 } from 'react-native-reanimated';
-import {
-  Text, GlassCard, Chip, PressableScale, FadeTabView, TradingListSkeleton, PageHeader, CurrencyToggle,
-} from '@/design-system';
+import Svg, { Path, Polygon, Rect, Text as SvgText, Circle } from 'react-native-svg';
+import { Text, FadeTabView, PressableScale, BalanceCardsSkeleton } from '@/design-system';
 import { colors } from '@/design-system/tokens';
-import { positionsService, tradesService } from '@/services';
+import { positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
-import { formatKRWSigned, formatRate } from '@/utils/format';
-import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS } from '@/store/accounts';
-import type { Trade, Position } from '@/services';
+import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
+import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType, ExchangeAccount } from '@/store/accounts';
+import type { Balance } from '@/services/account.service';
 
-type MainTab       = 'positions' | 'history';
-type HistoryFilter = '전체' | '수익' | '손실';
-const HISTORY_FILTERS: HistoryFilter[] = ['전체', '수익', '손실'];
-const EASE_OUT = Easing.out(Easing.cubic);
-
-// ─────────────────────────────────────────────
-//  Format helpers
-// ─────────────────────────────────────────────
-function fmtSigned(krw: number, showUsd: boolean, rate: number) {
-  if (!showUsd) return formatKRWSigned(krw);
-  const usd  = krw / rate;
-  const sign = usd >= 0 ? '+' : '';
-  return `${sign}$${Math.abs(usd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-// ─────────────────────────────────────────────
-//  Account Picker — header button + bottom sheet
-// ─────────────────────────────────────────────
-function AccountPickerButton({
-  selectedId,
-  onPress,
-}: {
-  selectedId: string | null;
-  onPress: () => void;
-}) {
-  const { accounts } = useAccounts();
-  const label = selectedId
-    ? (accounts.find((a) => a.id === selectedId)?.name || EXCHANGE_LABELS[accounts.find((a) => a.id === selectedId)!.exchange])
-    : '전체';
-
+// ── 거래소 로고 ───────────────────────────────────────────────────────────────
+function ExchangeLogo({ exchange, size = 40 }: { exchange: ExchangeType; size?: number }) {
+  const s = size;
+  const color = EXCHANGE_COLORS[exchange];
+  if (exchange === 'gate') {
+    return (
+      <View style={{ width: s, height: s, borderRadius: s / 2, backgroundColor: '#2354E6', alignItems: 'center', justifyContent: 'center' }}>
+        <Svg width={s} height={s} viewBox="0 0 48 48">
+          <Path d="M36 22 L24 22 L24 27 L31 27 Q30 33 24 33 Q17 33 17 24 Q17 15 24 15 Q29 15 31 19 L37 17 Q33 9 24 9 Q13 9 13 24 Q13 39 24 39 Q35 39 36 28 Z" fill="white" />
+        </Svg>
+      </View>
+    );
+  }
+  if (exchange === 'binance') {
+    return (
+      <View style={{ width: s, height: s, borderRadius: s / 2, backgroundColor: '#F0B90B', alignItems: 'center', justifyContent: 'center' }}>
+        <Svg width={s} height={s} viewBox="0 0 48 48">
+          <Polygon points="24,18 30,24 24,30 18,24" fill="white" />
+          <Polygon points="24,7 28,11 24,15 20,11" fill="white" />
+          <Polygon points="24,33 28,37 24,41 20,37" fill="white" />
+          <Polygon points="7,24 11,20 15,24 11,28" fill="white" />
+          <Polygon points="41,24 37,20 33,24 37,28" fill="white" />
+        </Svg>
+      </View>
+    );
+  }
+  if (exchange === 'upbit') {
+    return (
+      <View style={{ width: s, height: s, borderRadius: s / 2, backgroundColor: '#0062FF', alignItems: 'center', justifyContent: 'center' }}>
+        <Svg width={s} height={s} viewBox="0 0 48 48">
+          <Path d="M15 12 L15 30 Q15 38 24 38 Q33 38 33 30 L33 12" stroke="white" strokeWidth="5" fill="none" strokeLinecap="round" />
+        </Svg>
+      </View>
+    );
+  }
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [styles.pickerBtn, pressed && { opacity: 0.7 }]}
-      hitSlop={8}
-    >
-      <Text variant="label1Bold" color={colors.text.primary}>{label}</Text>
-      <Text style={styles.chevron}>›</Text>
-    </Pressable>
+    <View style={{ width: s, height: s, borderRadius: s / 2, backgroundColor: color + '25', alignItems: 'center', justifyContent: 'center' }}>
+      <Svg width={s} height={s} viewBox="0 0 48 48">
+        <SvgText x="24" y="30" textAnchor="middle" fontSize="14" fontWeight="800" fill={color}>
+          {EXCHANGE_LABELS[exchange].slice(0, 2).toUpperCase()}
+        </SvgText>
+      </Svg>
+    </View>
   );
 }
 
-function AccountPickerModal({
-  visible,
-  selectedId,
-  onSelect,
-  onClose,
+// ── 계좌 선택 바텀시트 (토스 스타일) ──────────────────────────────────────────
+function AccountBottomSheet({
+  visible, selectedId, onSelect, onClose,
+  accounts, balances, totalBalance,
 }: {
-  visible:    boolean;
-  selectedId: string | null;
-  onSelect:   (id: string | null) => void;
-  onClose:    () => void;
+  visible:      boolean;
+  selectedId:   string | null;
+  onSelect:     (id: string | null) => void;
+  onClose:      () => void;
+  accounts:     ExchangeAccount[];
+  balances:     Record<string, Balance | null>;
+  totalBalance: Balance | null;
 }) {
-  const { accounts } = useAccounts();
+  const translateY = useSharedValue(600);
+  const [mounted, setMounted] = React.useState(false);
+
+  React.useEffect(() => {
+    if (visible) {
+      setMounted(true);
+      translateY.value = withSpring(0, { damping: 28, stiffness: 300, mass: 0.9 });
+    } else {
+      translateY.value = withTiming(600, { duration: 260 }, () => runOnJS(setMounted)(false));
+    }
+  }, [visible]);
+
+  const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: translateY.value }] }));
+  if (!mounted) return null;
+
+  const totalKrw = totalBalance?.total ?? 0;
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      statusBarTranslucent
-      onRequestClose={onClose}
-    >
-      <Pressable style={styles.overlay} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={() => {}}>
-          <View style={styles.sheetHandle} />
-          <Text variant="label1Bold" style={styles.sheetTitle}>계좌 선택</Text>
+    <Modal visible transparent animationType="none" onRequestClose={onClose}>
+      <Pressable style={bs.overlay} onPress={onClose}>
+        <Animated.View style={[bs.sheet, sheetStyle]}>
+          <Pressable>
+            {/* 핸들 */}
+            <View style={bs.handle} />
 
-          {/* 전체 row */}
-          <Pressable
-            onPress={() => { onSelect(null); onClose(); }}
-            style={[styles.sheetRow, selectedId === null && styles.sheetRowActive]}
-          >
-            <Text variant="body2Medium" color={selectedId === null ? colors.primary.default : colors.text.primary}>
-              전체
-            </Text>
-            {selectedId === null && <Text style={styles.checkmark}>✓</Text>}
-          </Pressable>
-
-          {accounts.map((acc) => {
-            const isSelected = selectedId === acc.id;
-            const dot = EXCHANGE_COLORS[acc.exchange];
-            return (
-              <Pressable
-                key={acc.id}
-                onPress={() => { onSelect(acc.id); onClose(); }}
-                style={[styles.sheetRow, isSelected && styles.sheetRowActive]}
-              >
-                <View style={styles.sheetRowLeft}>
-                  {dot && <View style={[styles.dot, { backgroundColor: dot }]} />}
-                  <Text variant="body2Medium" color={isSelected ? colors.primary.default : colors.text.primary}>
-                    {acc.name || EXCHANGE_LABELS[acc.exchange]}
-                  </Text>
-                </View>
-                {isSelected && <Text style={styles.checkmark}>✓</Text>}
+            {/* 헤더 */}
+            <View style={bs.header}>
+              <Text style={bs.title}>계좌 선택</Text>
+              <Pressable style={bs.closeBtn} onPress={onClose} hitSlop={12}>
+                <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+                  <Path d="M18 6L6 18M6 6l12 12" stroke="#AEAEB2" strokeWidth="2.2" strokeLinecap="round" />
+                </Svg>
               </Pressable>
-            );
-          })}
-        </Pressable>
+            </View>
+
+            {/* 내 계좌 헤더 */}
+            <View style={bs.sectionRow}>
+              <Text style={bs.sectionLabel}>내 계좌</Text>
+              <Pressable style={bs.totalRow} onPress={() => { onClose(); router.push('/(main)/account/api-accounts'); }}>
+                <Text style={bs.totalText}>총 자산 {formatKRW(totalKrw)}</Text>
+                <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
+                  <Path d="M9 18l6-6-6-6" stroke="#AEAEB2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </Svg>
+              </Pressable>
+            </View>
+
+            {/* 모든 계좌 행 */}
+            <Pressable
+              style={({ pressed }) => [bs.accRow, pressed && { backgroundColor: '#F8F8F8' }]}
+              onPress={() => { onSelect(null); onClose(); }}
+            >
+              <View style={bs.accIcon}>
+                <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+                  <Rect x="3" y="6" width="18" height="13" rx="2" stroke="#555" strokeWidth="1.8" />
+                  <Path d="M3 10h18" stroke="#555" strokeWidth="1.8" strokeLinecap="round" />
+                </Svg>
+              </View>
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={bs.accName}>모든 계좌</Text>
+                <Text style={bs.accBalance}>{formatKRW(totalKrw)}</Text>
+              </View>
+              {selectedId === null && (
+                <View style={bs.checkCircle}>
+                  <Svg width={22} height={22} viewBox="0 0 24 24">
+                    <Circle cx="12" cy="12" r="12" fill="#246CF9" />
+                    <Path d="M7 12.5l3.5 3.5 6.5-7" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                  </Svg>
+                </View>
+              )}
+            </Pressable>
+
+            {/* 개별 계좌들 */}
+            {accounts.map((acc) => {
+              const bal = balances[acc.id];
+              const isSelected = selectedId === acc.id;
+              return (
+                <Pressable
+                  key={acc.id}
+                  style={({ pressed }) => [bs.accRow, pressed && { backgroundColor: '#F8F8F8' }]}
+                  onPress={() => { onSelect(acc.id); onClose(); }}
+                >
+                  <ExchangeLogo exchange={acc.exchange} size={40} />
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={bs.accName}>{acc.name || EXCHANGE_LABELS[acc.exchange]}</Text>
+                    <Text style={bs.accBalance}>
+                      {bal ? formatKRW(bal.total) : '—'}
+                    </Text>
+                  </View>
+                  {isSelected && (
+                    <View style={bs.checkCircle}>
+                      <Svg width={22} height={22} viewBox="0 0 24 24">
+                        <Circle cx="12" cy="12" r="12" fill="#246CF9" />
+                        <Path d="M7 12.5l3.5 3.5 6.5-7" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                      </Svg>
+                    </View>
+                  )}
+                </Pressable>
+              );
+            })}
+
+            {/* 구분선 + 계좌 추가 */}
+            <View style={bs.divider} />
+            <Pressable
+              style={({ pressed }) => [bs.addRow, pressed && { backgroundColor: '#F8F8F8' }]}
+              onPress={() => { onClose(); router.push('/(main)/account/add-api'); }}
+            >
+              <View style={bs.addIcon}>
+                <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+                  <Path d="M12 5v14M5 12h14" stroke="#555" strokeWidth="2.2" strokeLinecap="round" />
+                </Svg>
+              </View>
+              <Text style={bs.addText}>API 연결하기</Text>
+            </Pressable>
+
+            <View style={{ height: 32 }} />
+          </Pressable>
+        </Animated.View>
       </Pressable>
     </Modal>
   );
 }
 
-// ─────────────────────────────────────────────
-//  Animated list item (stagger entrance)
-// ─────────────────────────────────────────────
-function AnimatedRow({ index, children }: { index: number; children: React.ReactNode }) {
-  const opacity    = useSharedValue(0);
-  const translateY = useSharedValue(16);
-  React.useEffect(() => {
-    const timer = setTimeout(() => {
-      opacity.value    = withTiming(1, { duration: 300, easing: Easing.out(Easing.cubic) });
-      translateY.value = withSpring(0, { damping: 20, stiffness: 220 });
-    }, index * 60);
-    return () => clearTimeout(timer);
-  }, [index]);
-  const style = useAnimatedStyle(() => ({
-    opacity:   opacity.value,
-    transform: [{ translateY: translateY.value }],
-  }));
-  return <Animated.View style={style}>{children}</Animated.View>;
-}
+const bs = StyleSheet.create({
+  overlay:  { flex: 1, backgroundColor: 'rgba(0,0,0,0.40)', justifyContent: 'flex-end' },
+  sheet:    { backgroundColor: '#FFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 10 },
+  handle:   { width: 32, height: 4, borderRadius: 2, backgroundColor: '#E5E5EA', alignSelf: 'center', marginBottom: 12 },
+  header:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 20 },
+  title:    { fontSize: 20, fontWeight: '700', color: '#191919' },
+  closeBtn: { padding: 4 },
 
-// ─────────────────────────────────────────────
-//  Position Card Row
-// ─────────────────────────────────────────────
-function PositionCard({
-  pos, isLast, showUsd, rate,
-}: {
-  pos: Position; isLast: boolean; showUsd: boolean; rate: number;
-}) {
-  const up       = pos.profit >= 0;
+  sectionRow:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 8 },
+  sectionLabel: { fontSize: 13, color: colors.text.tertiary, fontWeight: '500' },
+  totalRow:     { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  totalText:    { fontSize: 13, color: colors.text.tertiary },
+
+  accRow:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14 },
+  accIcon:    { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F5F5F5', alignItems: 'center', justifyContent: 'center' },
+  accName:    { fontSize: 16, fontWeight: '600', color: '#191919', marginBottom: 3 },
+  accBalance: { fontSize: 13, color: colors.text.tertiary },
+  checkCircle: {},
+
+  divider: { height: 1, backgroundColor: '#F2F2F2', marginVertical: 8, marginHorizontal: 20 },
+  addRow:  { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, gap: 12 },
+  addIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F5F5F5', alignItems: 'center', justifyContent: 'center' },
+  addText: { fontSize: 16, fontWeight: '500', color: '#555' },
+});
+
+// ── 포지션 미리보기 행 ─────────────────────────────────────────────────────────
+function PositionRow({ pos, isLast }: { pos: any; isLast: boolean }) {
+  const up = pos.profit >= 0;
   const pnlColor = up ? colors.market.rise : colors.market.fall;
-
   return (
-    <PressableScale onPress={() => router.push(`/(main)/positions/${pos.id}`)} scaleTo={0.98}>
-      <View style={[card.row, !isLast && card.rowBorder]}>
-        <View style={card.icon}>
-          <Text variant="label1Bold" color={colors.text.secondary}>{pos.coin.slice(0, 2)}</Text>
-        </View>
-        <View style={{ flex: 1 }}>
-          <View style={card.symbolRow}>
-            <Text variant="body1Medium" color={colors.text.primary}>{pos.symbol}</Text>
-            <View style={[card.badge, {
-              backgroundColor: pos.direction === 'Long' ? colors.bg.elevated : colors.negative.subtle,
-            }]}>
-              <Text variant="caption2" color={pos.direction === 'Long' ? colors.text.secondary : colors.negative.text}>
-                {pos.direction === 'Long' ? '롱' : '숏'}
-              </Text>
-            </View>
+    <Pressable
+      style={({ pressed }) => [pr.row, !isLast && pr.border, pressed && { backgroundColor: '#F8F8F8' }]}
+      onPress={() => router.push(`/(main)/positions/${pos.id}`)}
+    >
+      <View style={[pr.icon, { backgroundColor: up ? colors.market.riseSubtle : colors.market.fallSubtle }]}>
+        <Text style={[pr.iconText, { color: pnlColor }]}>{pos.coin?.slice(0, 2) ?? 'BT'}</Text>
+      </View>
+      <View style={{ flex: 1 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Text style={pr.symbol}>{pos.symbol}</Text>
+          <View style={[pr.badge, { backgroundColor: pos.direction === 'Long' ? '#EAF6F0' : '#FFF0F0' }]}>
+            <Text style={[pr.badgeText, { color: pos.direction === 'Long' ? '#1AC24E' : '#FF4747' }]}>
+              {pos.direction === 'Long' ? '롱' : '숏'}
+            </Text>
           </View>
-          <Text variant="label2" color={colors.text.tertiary} style={{ marginTop: 3 }}>
-            {showUsd
-              ? `$${(pos.amount / rate).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-              : pos.amount.toLocaleString('ko-KR') + '원'}
-          </Text>
         </View>
-        <View style={{ alignItems: 'flex-end' }}>
-          <Text variant="body1Medium" color={pnlColor}>
-            {fmtSigned(pos.profit, showUsd, rate)}
-          </Text>
-          <Text variant="label2" color={pnlColor} style={{ marginTop: 3 }}>
-            {formatRate(pos.profitRate)}
-          </Text>
-        </View>
+        <Text style={pr.sub}>{formatKRW(pos.amount)} 투자</Text>
       </View>
-    </PressableScale>
+      <View style={{ alignItems: 'flex-end' }}>
+        <Text style={[pr.profit, { color: pnlColor }]}>{formatKRWSigned(pos.profit)}</Text>
+        <Text style={[pr.rate, { color: pnlColor }]}>{formatRate(pos.profitRate)}</Text>
+      </View>
+    </Pressable>
   );
 }
+const pr = StyleSheet.create({
+  row:      { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16 },
+  border:   { borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
+  icon:     { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  iconText: { fontSize: 13, fontWeight: '700' },
+  symbol:   { fontSize: 15, fontWeight: '700', color: '#191919' },
+  badge:    { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  badgeText:{ fontSize: 11, fontWeight: '700' },
+  sub:      { fontSize: 13, color: colors.text.tertiary, marginTop: 3 },
+  profit:   { fontSize: 15, fontWeight: '700' },
+  rate:     { fontSize: 13, fontWeight: '600', marginTop: 2 },
+});
 
-// ─────────────────────────────────────────────
-//  Trade History Row
-// ─────────────────────────────────────────────
-function TradeRow({
-  trade, isLast, showUsd, rate,
-}: {
-  trade: Trade; isLast: boolean; showUsd: boolean; rate: number;
-}) {
-  const up       = trade.profit >= 0;
-  const pnlColor = up ? colors.market.rise : colors.market.fall;
-  const dateStr  = (() => {
-    const d = new Date(trade.exitAt);
-    if (isNaN(d.getTime())) return trade.exitAt?.slice(5, 10)?.replace('-', '.') ?? '';
-    return `${d.getMonth() + 1}.${String(d.getDate()).padStart(2, '0')}`;
-  })();
-  const typeLabel = trade.type === 'stop_loss' ? '손절' : (trade.direction === 'Long' ? '롱 청산' : '숏 청산');
-
-  return (
-    <PressableScale onPress={() => router.push(`/history/${trade.id}`)} scaleTo={0.98}>
-      <View style={[hist.row, !isLast && hist.rowBorder]}>
-        <Text variant="caption1Medium" color={colors.text.tertiary} style={hist.date}>
-          {dateStr}
-        </Text>
-        <View style={{ flex: 1 }}>
-          <Text variant="body2Medium" color={colors.text.primary}>{trade.symbol}</Text>
-          <Text variant="label2" color={colors.text.tertiary} style={{ marginTop: 3 }}>
-            {typeLabel} · {trade.holdingDays}일
-          </Text>
-        </View>
-        <View style={{ alignItems: 'flex-end' }}>
-          <Text variant="body2Medium" color={pnlColor}>
-            {fmtSigned(trade.profit, showUsd, rate)}
-          </Text>
-          <Text variant="caption1Medium" color={pnlColor} style={{ marginTop: 3 }}>
-            {formatRate(trade.profitRate)}
-          </Text>
-        </View>
-      </View>
-    </PressableScale>
-  );
-}
-
-// ─────────────────────────────────────────────
-//  History Tab Content
-// ─────────────────────────────────────────────
-function HistoryContent({
-  trades, showUsd, rate,
-}: {
-  trades: Trade[] | null; showUsd: boolean; rate: number;
-}) {
-  const [filter, setFilter] = useState<HistoryFilter>('전체');
-
-  const listOpacity    = useSharedValue(1);
-  const listTranslateY = useSharedValue(0);
-
-  const animateFilterChange = (newFilter: HistoryFilter) => {
-    if (newFilter === filter) return;
-    listOpacity.value = withTiming(0, { duration: 100, easing: Easing.in(Easing.ease) }, () => {
-      runOnJS(setFilter)(newFilter);
-      listTranslateY.value = 10;
-      listOpacity.value    = withTiming(1, { duration: 200, easing: EASE_OUT });
-      listTranslateY.value = withTiming(0, { duration: 200, easing: EASE_OUT });
-    });
-  };
-
-  const listAnimStyle = useAnimatedStyle(() => ({
-    opacity:   listOpacity.value,
-    transform: [{ translateY: listTranslateY.value }],
-  }));
-
-  const list     = trades ?? [];
-  const filtered = list.filter((t) =>
-    filter === '수익' ? t.profit >= 0 : filter === '손실' ? t.profit < 0 : true,
-  );
-  const wins    = list.filter((t) => t.profit >= 0).length;
-  const total   = list.reduce((s, t) => s + t.profit, 0);
-  const winRate = list.length ? Math.round((wins / list.length) * 100) : 0;
-
-  const winRateColor = !list.length ? colors.text.tertiary : winRate >= 50 ? colors.market.rise : colors.market.fall;
-  const totalColor   = !list.length ? colors.text.tertiary : total > 0 ? colors.market.rise : total < 0 ? colors.market.fall : colors.text.tertiary;
-
-  const stats = [
-    { label: '총 거래', value: `${list.length}건`,             color: colors.text.primary },
-    { label: '승률',    value: `${winRate}%`,                  color: winRateColor },
-    { label: '총 손익', value: fmtSigned(total, showUsd, rate), color: totalColor },
-  ];
-
-  return (
-    <>
-      <GlassCard intensity="medium" radius={20} padding={24} style={styles.mb14}>
-        <View style={styles.statsRow}>
-          {stats.map((s, i) => (
-            <React.Fragment key={s.label}>
-              {i > 0 && <View style={styles.statsDivider} />}
-              <View style={{ flex: 1, alignItems: 'center' }}>
-                <Text variant="label2" color={colors.text.tertiary} style={styles.mb6}>{s.label}</Text>
-                <Text variant="heading3" color={s.color}>{s.value}</Text>
-              </View>
-            </React.Fragment>
-          ))}
-        </View>
-      </GlassCard>
-
-      <View style={styles.filterRow}>
-        {HISTORY_FILTERS.map((f) => (
-          <Chip key={f} label={f} size="md" selected={filter === f} onPress={() => animateFilterChange(f)} />
-        ))}
-      </View>
-
-      <Animated.View style={listAnimStyle}>
-        {filtered.length === 0 ? (
-          <GlassCard intensity="low" radius={20} padding={40} style={{ alignItems: 'center' }}>
-            <Text variant="body2" color={colors.text.tertiary}>해당하는 거래 내역이 없어요</Text>
-          </GlassCard>
-        ) : (
-          <GlassCard intensity="medium" radius={20} padding={0} style={{ overflow: 'hidden' }}>
-            {filtered.map((trade, i) => (
-              <AnimatedRow key={trade.id} index={i}>
-                <TradeRow trade={trade} isLast={i === filtered.length - 1} showUsd={showUsd} rate={rate} />
-              </AnimatedRow>
-            ))}
-          </GlassCard>
-        )}
-      </Animated.View>
-    </>
-  );
-}
-
-// ─────────────────────────────────────────────
-//  Main Screen
-// ─────────────────────────────────────────────
+// ── 메인 ──────────────────────────────────────────────────────────────────────
 export default function Trading() {
-  const [tab, setTab]                         = useState<MainTab>('positions');
+  const [showSheet, setShowSheet]           = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
-  const [pickerVisible, setPickerVisible]     = useState(false);
-  const [showUsd, setShowUsd]                 = useState(false);
-  const { accounts, totalBalance }            = useAccounts();
-  const rate = totalBalance?.usdtKrw ?? 1350;
+  const [posExpanded, setPosExpanded]       = useState(true);
+  const { accounts, balances, totalBalance, balancesLoading } = useAccounts();
 
   const selectedAccounts = selectedAccountId
     ? accounts.filter((a) => a.id === selectedAccountId)
     : accounts;
 
-  const fetchPositions = useCallback(async () => {
-    if (!selectedAccounts.length) return [];
-    return positionsService.getAllByAccounts(selectedAccounts);
-  }, [selectedAccountId, accounts.length]);
+  const { data: positions } = useApi(
+    () => positionsService.getAllByAccounts(selectedAccounts),
+    [selectedAccountId, accounts.length],
+  );
 
-  const fetchTrades = useCallback(async () => {
-    if (!selectedAccounts.length) return [];
-    return tradesService.getAllByAccounts(selectedAccounts);
-  }, [selectedAccountId, accounts.length]);
+  const selectedAccount = accounts.find((a) => a.id === selectedAccountId) ?? null;
+  const displayBalance  = selectedAccountId
+    ? (balances[selectedAccountId] ?? null)
+    : totalBalance;
 
-  const { data: positions, isLoading: posLoading }  = useApi(fetchPositions, [selectedAccountId, accounts.length]);
-  const { data: trades,    isLoading: tradeLoading } = useApi(fetchTrades,    [selectedAccountId, accounts.length]);
+  const selectedLabel = selectedAccount
+    ? (selectedAccount.name || EXCHANGE_LABELS[selectedAccount.exchange])
+    : accounts.length === 1
+      ? (accounts[0].name || EXCHANGE_LABELS[accounts[0].exchange])
+      : '모든 계좌';
 
-  // Tab content animation
-  const tabOpacity    = useSharedValue(1);
-  const tabTranslateX = useSharedValue(0);
-
-  const switchTab = (newTab: MainTab) => {
-    if (newTab === tab) return;
-    const dir = newTab === 'history' ? 1 : -1;
-    tabOpacity.value = withTiming(0, { duration: 120, easing: Easing.in(Easing.ease) }, () => {
-      runOnJS(setTab)(newTab);
-      tabTranslateX.value = 24 * dir;
-      tabOpacity.value    = withTiming(1, { duration: 220, easing: EASE_OUT });
-      tabTranslateX.value = withTiming(0, { duration: 220, easing: EASE_OUT });
-    });
-  };
-
-  const tabAnimStyle = useAnimatedStyle(() => ({
-    opacity:   tabOpacity.value,
-    transform: [{ translateX: tabTranslateX.value }],
-  }));
-
-  const isLoading       = tab === 'positions' ? posLoading : tradeLoading;
-  const filteredPositions = positions ?? [];
-  const filteredTrades    = trades    ?? [];
+  const krwAvail = displayBalance?.available ?? 0;
+  const usdTotal = displayBalance?.totalUsd  ?? 0;
+  const posCount = positions?.length ?? 0;
 
   return (
-    <FadeTabView style={styles.root}>
+    <FadeTabView style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
 
-        <PageHeader
-          title="트레이딩"
-          rightElement={
-            <View style={styles.headerRight}>
-              {accounts.length > 0 && (
-                <AccountPickerButton
-                  selectedId={selectedAccountId}
-                  onPress={() => setPickerVisible(true)}
-                />
-              )}
-              <CurrencyToggle showUsd={showUsd} onToggle={() => setShowUsd((v) => !v)} />
-            </View>
-          }
-        />
-
-        <AccountPickerModal
-          visible={pickerVisible}
-          selectedId={selectedAccountId}
-          onSelect={setSelectedAccountId}
-          onClose={() => setPickerVisible(false)}
-        />
-
-        {/* ── Segment Control ── */}
-        <View style={styles.segWrap}>
-          <GlassCard intensity="medium" radius={16} padding={4} style={styles.seg}>
-            {(['positions', 'history'] as MainTab[]).map((t) => (
-              <PressableScale
-                key={t}
-                style={[styles.segBtn, tab === t && styles.segBtnActive]}
-                onPress={() => switchTab(t)}
-                scaleTo={0.97}
-              >
-                <View style={styles.segBtnInner}>
-                  <Text variant="label1Bold" color={tab === t ? colors.text.primary : colors.text.tertiary}>
-                    {t === 'positions' ? '보유 포지션' : '거래 내역'}
-                  </Text>
-                </View>
-              </PressableScale>
-            ))}
-          </GlassCard>
+        {/* ── 헤더 ── */}
+        <View style={st.header}>
+          <Text style={st.headerTitle}>트레이딩</Text>
         </View>
 
-        {/* ── Content ── */}
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <Animated.View style={tabAnimStyle}>
-            {isLoading ? (
-              <TradingListSkeleton />
-            ) : tab === 'positions' ? (
-              !filteredPositions.length ? (
-                <GlassCard intensity="low" radius={20} padding={48} style={{ alignItems: 'center' }}>
-                  <Text variant="body2" color={colors.text.tertiary}>활성 포지션이 없어요</Text>
-                </GlassCard>
-              ) : (
-                <GlassCard intensity="medium" radius={20} padding={0} style={{ overflow: 'hidden' }}>
-                  {filteredPositions.map((pos, i) => (
-                    <AnimatedRow key={pos.id} index={i}>
-                      <PositionCard pos={pos} isLast={i === filteredPositions.length - 1} showUsd={showUsd} rate={rate} />
-                    </AnimatedRow>
-                  ))}
-                </GlassCard>
-              )
+        <ScrollView showsVerticalScrollIndicator={false}>
+
+          {/* ── 계좌 선택 행 ── */}
+          <Pressable style={st.accountRow} onPress={() => setShowSheet(true)}>
+            {selectedAccount ? (
+              <ExchangeLogo exchange={selectedAccount.exchange} size={28} />
             ) : (
-              <HistoryContent trades={filteredTrades} showUsd={showUsd} rate={rate} />
+              <View style={st.allIcon}>
+                <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
+                  <Rect x="3" y="6" width="18" height="13" rx="2" stroke="#555" strokeWidth="1.8" />
+                  <Path d="M3 10h18" stroke="#555" strokeWidth="1.8" strokeLinecap="round" />
+                </Svg>
+              </View>
             )}
-          </Animated.View>
+            <Text style={st.accountLabel}>{selectedLabel}</Text>
+            <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
+              <Path d="M7 10l5-5 5 5M7 14l5 5 5-5" stroke="#AEAEB2" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </Svg>
+            <View style={{ flex: 1 }} />
+            <Pressable onPress={() => router.push('/(main)/account/api-accounts')}>
+              <Text style={st.accountViewAll}>계좌 보기</Text>
+            </Pressable>
+          </Pressable>
+
+          {/* ── 잔고 카드 2열 ── */}
+          {balancesLoading ? (
+            <BalanceCardsSkeleton />
+          ) : (
+            <View style={st.balanceGrid}>
+              <View style={st.balanceCard}>
+                <Text style={st.balanceCardLabel}>원화</Text>
+                <Text style={st.balanceCardValue}>{formatKRW(krwAvail)}</Text>
+              </View>
+              <View style={st.balanceCard}>
+                <Text style={st.balanceCardLabel}>달러</Text>
+                <Text style={st.balanceCardValue}>
+                  {`$${usdTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {/* ── 메뉴: 거래 내역 + 수익 분석 ── */}
+          <View style={st.menuSection}>
+            <Pressable
+              style={({ pressed }) => [st.menuRow, pressed && { backgroundColor: '#F8F8F8' }]}
+              onPress={() => router.push('/history')}
+            >
+              <Text style={st.menuText}>거래 내역</Text>
+              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                <Path d="M9 18l6-6-6-6" stroke="#C4C4C4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </Svg>
+            </Pressable>
+            <View style={st.menuDivider} />
+            <Pressable
+              style={({ pressed }) => [st.menuRow, pressed && { backgroundColor: '#F8F8F8' }]}
+              onPress={() => router.push('/(main)/positions/analysis')}
+            >
+              <Text style={st.menuText}>수익 분석</Text>
+              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                <Path d="M9 18l6-6-6-6" stroke="#C4C4C4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </Svg>
+            </Pressable>
+          </View>
+
+          {/* ── 포지션 현황 (접기/펼치기) ── */}
+          <View style={st.posSection}>
+            <Pressable
+              style={st.posSectionHeader}
+              onPress={() => {
+                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                setPosExpanded((v) => !v);
+              }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={st.posSectionTitle}>포지션 현황</Text>
+                {posCount > 0 && (
+                  <View style={st.menuBadge}>
+                    <Text style={st.menuBadgeText}>{posCount}</Text>
+                  </View>
+                )}
+              </View>
+              <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+                <Path
+                  d={posExpanded ? 'M18 15l-6-6-6 6' : 'M6 9l6 6 6-6'}
+                  stroke="#AEAEB2"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </Svg>
+            </Pressable>
+
+            {posExpanded && (
+              positions && positions.length > 0 ? (
+                positions.map((pos, i) => (
+                  <PositionRow key={pos.id} pos={pos} isLast={i === positions.length - 1} />
+                ))
+              ) : (
+                <View style={st.emptyPos}>
+                  <Text style={st.emptyPosText}>활성 포지션이 없어요</Text>
+                </View>
+              )
+            )}
+          </View>
+
           <View style={{ height: 120 }} />
         </ScrollView>
 
+        {/* ── 계좌 선택 바텀시트 ── */}
+        <AccountBottomSheet
+          visible={showSheet}
+          selectedId={selectedAccountId}
+          onSelect={setSelectedAccountId}
+          onClose={() => setShowSheet(false)}
+          accounts={accounts}
+          balances={balances}
+          totalBalance={totalBalance}
+        />
       </SafeAreaView>
     </FadeTabView>
   );
 }
 
-// ─────────────────────────────────────────────
-//  Styles
-// ─────────────────────────────────────────────
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg.elevated },
+const st = StyleSheet.create({
+  // 헤더
+  header:      { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16 },
+  headerTitle: { fontSize: 24, fontWeight: '700', color: '#191919' },
 
-  // Header right area
-  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  pickerBtn: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    gap:            4,
-    paddingHorizontal: 12,
-    paddingVertical:   7,
-    borderRadius:   20,
-    borderWidth:    1.5,
-    borderColor:    colors.border.default,
-    backgroundColor: colors.bg.default,
+  // 계좌 선택 행
+  accountRow:   { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingVertical: 14, borderTopWidth: 1, borderTopColor: '#F5F5F5' },
+  allIcon:      { width: 28, height: 28, borderRadius: 14, backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center' },
+  accountLabel: { fontSize: 15, fontWeight: '600', color: '#191919' },
+  accountViewAll: { fontSize: 14, color: colors.text.tertiary },
+
+  // 잔고 카드
+  balanceGrid: { flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingVertical: 16 },
+  balanceCard: {
+    flex: 1, backgroundColor: '#F5F5F5', borderRadius: 16,
+    paddingVertical: 18, paddingHorizontal: 16,
   },
-  chevron: { fontSize: 12, color: colors.text.tertiary, transform: [{ rotate: '90deg' }] },
+  balanceCardLabel: { fontSize: 13, color: colors.text.tertiary, marginBottom: 8 },
+  balanceCardValue: { fontSize: 18, fontWeight: '700', color: '#191919' },
 
-  // Account picker modal
-  overlay: {
-    flex:            1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent:  'flex-end',
+  // 메뉴
+  menuSection: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8 },
+  menuRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 20 },
+  menuText:    { fontSize: 17, fontWeight: '600', color: '#191919' },
+  menuDivider: { height: 1, backgroundColor: '#F5F5F5' },
+  menuBadge:   { backgroundColor: '#FF4747', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2 },
+  menuBadgeText: { fontSize: 11, fontWeight: '700', color: '#FFFFFF' },
+
+  // 포지션 섹션
+  posSection:       { borderTopWidth: 8, borderTopColor: '#F5F5F5' },
+  posSectionHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingVertical: 18,
   },
-  sheet: {
-    backgroundColor: colors.bg.default,
-    borderTopLeftRadius:  24,
-    borderTopRightRadius: 24,
-    paddingHorizontal:    20,
-    paddingBottom:        40,
-    paddingTop:           12,
-  },
-  sheetHandle: {
-    width:           40,
-    height:          4,
-    borderRadius:    2,
-    backgroundColor: colors.border.strong,
-    alignSelf:       'center',
-    marginBottom:    16,
-  },
-  sheetTitle: {
-    color:         colors.text.primary,
-    marginBottom:  12,
-  },
-  sheetRow: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    justifyContent: 'space-between',
-    paddingVertical: 14,
-    borderTopWidth: 1,
-    borderTopColor: colors.border.default,
-  },
-  sheetRowActive: {
-    // no extra background; checkmark indicates selection
-  },
-  sheetRowLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-  checkmark: { fontSize: 16, color: colors.primary.default, fontWeight: '700' },
-
-  // Segment control
-  segWrap:      { paddingHorizontal: 20, paddingBottom: 20 },
-  seg:          { flexDirection: 'row' },
-  segBtn:       { flex: 1, borderRadius: 12, overflow: 'hidden' },
-  segBtnActive: { backgroundColor: colors.bg.elevated },
-  segBtnInner:  { paddingVertical: 13, alignItems: 'center', justifyContent: 'center' },
-
-  content:  { paddingHorizontal: 20, paddingTop: 4 },
-
-  statsRow:     { flexDirection: 'row', alignItems: 'center' },
-  statsDivider: { width: 1, height: 40, backgroundColor: colors.border.default },
-
-  filterRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
-
-  mb6:  { marginBottom: 6 },
-  mb14: { marginBottom: 14 },
-});
-
-const card = StyleSheet.create({
-  row:       { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 20, paddingHorizontal: 20 },
-  rowBorder: { borderBottomWidth: 1, borderBottomColor: colors.bg.elevated },
-  icon:      { width: 48, height: 48, borderRadius: 24, backgroundColor: colors.bg.elevated, alignItems: 'center', justifyContent: 'center' },
-  symbolRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  badge:     { borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3 },
-});
-
-const hist = StyleSheet.create({
-  row:       { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 18, paddingHorizontal: 20 },
-  rowBorder: { borderBottomWidth: 1, borderBottomColor: colors.bg.elevated },
-  date:      { width: 36, flexShrink: 0 },
+  posSectionTitle:  { fontSize: 17, fontWeight: '700', color: '#191919' },
+  emptyPos:         { paddingHorizontal: 20, paddingVertical: 28, alignItems: 'center' },
+  emptyPosText:     { fontSize: 14, color: colors.text.tertiary },
 });

@@ -1,17 +1,207 @@
-import React, { useEffect } from 'react';
-import { View, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, StyleSheet, ScrollView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
-import Animated, {
-  useSharedValue, useAnimatedStyle, withTiming, withSpring, Easing,
-} from 'react-native-reanimated';
-import { Text, SubPageHeader } from '@/design-system';
+import { Text, GlassCard, Badge, SubPageHeader, ScreenTransition, PositionDetailSkeleton } from '@/design-system';
+import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
+import { useAccounts } from '@/store/accounts';
 
+interface FvgInfo { ce: number; fillPct: number; }
+interface IctAnalysis {
+  contract:     string;
+  currentPrice: number;
+  session:      { active: boolean; name: string };
+  htf: {
+    timeframe: string; direction: string | null; structure: string | null;
+    swingHigh: number | null; swingLow: number | null;
+    pdh: number | null; pdl: number | null;
+    pdhSweep: boolean; pdlSweep: boolean;
+    ob: { bull: number; bear: number };
+    fvg: { bull: number; bear: number; lastBull: FvgInfo | null; lastBear: FvgInfo | null };
+    inPOI: boolean; poiType: string | null;
+  };
+  mtf: {
+    timeframe: string;
+    mss: { found: boolean; label?: string; kind?: string };
+    ob: { bull: number; bear: number };
+    fvg: { bull: number; bear: number; lastBull: FvgInfo | null; lastBear: FvgInfo | null };
+  };
+  ltf: {
+    timeframe:  string;
+    fvgCE:   { bull: number; bear: number };
+    fvgFill: { bull: number; bear: number };
+    iofed:   Array<{ type: string; bars: number }>;
+  };
+  sessions: Array<{ name: string; low: number; high: number; sweep: boolean }>;
+  summary: {
+    signal: string | null; reason: string;
+    confluence: string[];
+    entry: number | null; sl: number | null; tp: number | null;
+  };
+}
 
-// ─── 플랫 정보 행 ──────────────────────────────────────────────────────────────
+// 구 BotSignal 호환 (폴백용)
+interface BotSignal {
+  signal:     string;
+  reason:     string;
+  confluence: string[];
+  entry:      number;
+  sl?:        number;
+  tp?:        number;
+  entryAt?:   string;
+}
+
+// ─── ICT 섹션 (HTF / MTF) ────────────────────────────────────────────────────
+function IctSection({
+  title, direction, structure, swingHigh, swingLow,
+  pdh, pdl, pdhSweep, pdlSweep, ob, fvg, inPOI, poiType, mss,
+}: {
+  title: string;
+  direction?: string | null; structure?: string | null;
+  swingHigh?: number | null; swingLow?: number | null;
+  pdh?: number | null; pdl?: number | null;
+  pdhSweep?: boolean; pdlSweep?: boolean;
+  ob: { bull: number; bear: number };
+  fvg: { bull: number; bear: number; lastBull: any; lastBear: any };
+  inPOI?: boolean; poiType?: string | null;
+  mss?: { found: boolean; label?: string };
+}) {
+  const dirColor = direction === 'BULLISH' ? '#1AC24E' : direction === 'BEARISH' ? '#FF4747' : colors.text.tertiary;
+  return (
+    <View style={ict.block}>
+      <Text style={ict.blockTitle}>{title}</Text>
+      {direction && (
+        <View style={ict.row}>
+          <Text style={[ict.val, { color: dirColor, fontWeight: '700' }]}>
+            {direction === 'BULLISH' ? '✅' : direction === 'BEARISH' ? '✅' : '⚠️'} {direction}
+            {structure ? ` (${structure})` : ''}
+          </Text>
+        </View>
+      )}
+      {mss !== undefined && (
+        <View style={ict.kv}>
+          <Text style={ict.kvKey}>MSS</Text>
+          <Text style={[ict.kvVal, mss.found && { color: '#1AC24E', fontWeight: '700' }]}>
+            {mss.found ? `✅ ${(mss.label ?? '').toUpperCase()}` : '❌ 없음'}
+          </Text>
+        </View>
+      )}
+      {swingHigh != null && swingLow != null && (
+        <View style={ict.kv}>
+          <Text style={ict.kvKey}>SH / SL</Text>
+          <Text style={ict.kvVal}>{swingHigh.toFixed(2)} / {swingLow.toFixed(2)}</Text>
+        </View>
+      )}
+      {pdh != null && (
+        <View style={ict.kv}>
+          <Text style={ict.kvKey}>PDH</Text>
+          <Text style={[ict.kvVal, pdhSweep && { color: '#FF8A00' }]}>
+            {pdh.toFixed(2)}{pdhSweep ? '  🔄 Sweep!' : ''}
+          </Text>
+        </View>
+      )}
+      {pdl != null && (
+        <View style={ict.kv}>
+          <Text style={ict.kvKey}>PDL</Text>
+          <Text style={[ict.kvVal, pdlSweep && { color: '#FF8A00' }]}>
+            {pdl.toFixed(2)}{pdlSweep ? '  🔄 Sweep!' : ''}
+          </Text>
+        </View>
+      )}
+      <View style={ict.kv}>
+        <Text style={ict.kvKey}>OB</Text>
+        <Text style={ict.kvVal}>
+          Bull {ob.bull}개 / Bear {ob.bear}개
+        </Text>
+      </View>
+      <View style={ict.kv}>
+        <Text style={ict.kvKey}>FVG (미메움)</Text>
+        <Text style={ict.kvVal}>Bull {fvg.bull}개 / Bear {fvg.bear}개</Text>
+      </View>
+      {fvg.lastBull && (
+        <View style={ict.subRow}>
+          <Text style={ict.subText}>└ Bull CE: {fvg.lastBull.ce.toFixed(2)} ({fvg.lastBull.fillPct}% filled)</Text>
+        </View>
+      )}
+      {fvg.lastBear && (
+        <View style={ict.subRow}>
+          <Text style={ict.subText}>└ Bear CE: {fvg.lastBear.ce.toFixed(2)} ({fvg.lastBear.fillPct}% filled)</Text>
+        </View>
+      )}
+      {inPOI && (
+        <View style={ict.poiBadge}>
+          <Text style={ict.poiText}>⭐ 현재가 HTF POI 진입 중 ({poiType})</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+function IctLtfSection({ ltf }: { ltf: IctAnalysis['ltf'] }) {
+  return (
+    <View style={ict.block}>
+      <Text style={ict.blockTitle}>LTF ({ltf.timeframe})</Text>
+      <View style={ict.kv}>
+        <Text style={ict.kvKey}>FVG CE 진입</Text>
+        <Text style={ict.kvVal}>Bull {ltf.fvgCE.bull}개 / Bear {ltf.fvgCE.bear}개</Text>
+      </View>
+      <View style={ict.kv}>
+        <Text style={ict.kvKey}>FVG Fill 진입</Text>
+        <Text style={ict.kvVal}>Bull {ltf.fvgFill.bull}개 / Bear {ltf.fvgFill.bear}개</Text>
+      </View>
+      <View style={ict.kv}>
+        <Text style={ict.kvKey}>IOFED</Text>
+        <Text style={[ict.kvVal, ltf.iofed.length > 0 && { color: '#1AC24E', fontWeight: '700' }]}>
+          {ltf.iofed.length > 0
+            ? `✅ ${ltf.iofed.map(d => `${d.type}(${d.bars}봉)`).join(', ')}`
+            : '❌ 없음'}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+const ict = StyleSheet.create({
+  header:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border.default },
+  headerTitle: { fontSize: 14, fontWeight: '700', color: colors.text.primary },
+  badge:       { fontSize: 12, color: colors.text.disabled },
+  sessionBadge: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, backgroundColor: colors.bg.elevated },
+  sessionText: { fontSize: 12, fontWeight: '600', color: colors.text.tertiary },
+
+  priceRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border.default },
+  priceLabel:  { fontSize: 13, color: colors.text.tertiary },
+  priceValue:  { fontSize: 15, fontWeight: '700', color: colors.text.primary },
+
+  block:       { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border.default },
+  blockTitle:  { fontSize: 13, fontWeight: '700', color: colors.text.tertiary, marginBottom: 8, letterSpacing: 0.3 },
+
+  row:   { marginBottom: 4 },
+  val:   { fontSize: 13, color: colors.text.secondary },
+
+  kv:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingVertical: 3 },
+  kvKey: { fontSize: 13, color: colors.text.tertiary, flex: 1 },
+  kvVal: { fontSize: 13, color: colors.text.primary, fontWeight: '500', flex: 2, textAlign: 'right' },
+
+  subRow:  { paddingLeft: 8, paddingVertical: 2 },
+  subText: { fontSize: 12, color: colors.text.tertiary },
+
+  poiBadge: { marginTop: 8, backgroundColor: '#FFFAE6', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  poiText:  { fontSize: 12, fontWeight: '600', color: '#B8860B' },
+
+  sessionRow:   { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 },
+  sessionName:  { fontSize: 13, color: colors.text.tertiary },
+  sessionRange: { fontSize: 13, color: colors.text.primary, fontWeight: '500' },
+
+  signalBadge: { borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, alignItems: 'center', marginBottom: 4 },
+  signalText:  { fontSize: 14, fontWeight: '700' },
+
+  waitText: { fontSize: 13, color: colors.text.tertiary, lineHeight: 20 },
+});
+
+// ─── 정보 행 ─────────────────────────────────────────────────────────────────
 function InfoRow({
   label, value, valueColor, isLast,
 }: {
@@ -24,20 +214,37 @@ function InfoRow({
     </View>
   );
 }
-
 const row = StyleSheet.create({
-  wrap:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 16 },
-  border: { borderBottomWidth: 1, borderBottomColor: '#F2F2F7' },
-  label:  { fontSize: 14, color: '#8E8E93', fontWeight: '500' },
-  value:  { fontSize: 14, fontWeight: '600', color: '#1C1C1E' },
+  wrap:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14 },
+  border: { borderBottomWidth: 1, borderBottomColor: colors.border.default },
+  label:  { fontSize: 14, color: colors.text.tertiary, fontWeight: '500' },
+  value:  { fontSize: 14, fontWeight: '600', color: colors.text.primary },
 });
 
-// ─── 섹션 구분선 ───────────────────────────────────────────────────────────────
-function SectionDivider() {
-  return <View style={{ height: 8, backgroundColor: '#F2F2F7', marginHorizontal: -20 }} />;
+// ─── 리스크 게이지 ────────────────────────────────────────────────────────────
+function RiskGauge({ level }: { level: 1 | 2 | 3 | 4 | 5 }) {
+  const labels   = ['매우 낮음', '낮음', '중간', '높음', '매우 높음'];
+  const colorsMap = ['#1AC24E', '#1AC24E', '#FF8A00', '#FF4747', '#FF4747'];
+  const color     = colorsMap[level - 1];
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+      <View style={{ flexDirection: 'row', gap: 5, flex: 1, marginRight: 12 }}>
+        {[1, 2, 3, 4, 5].map((i) => (
+          <View
+            key={i}
+            style={{
+              flex: 1, height: 6, borderRadius: 3,
+              backgroundColor: i <= level ? color : colors.bg.elevated,
+            }}
+          />
+        ))}
+      </View>
+      <Text style={{ fontSize: 13, fontWeight: '600', color }}>{labels[level - 1]}</Text>
+    </View>
+  );
 }
 
-// ─── 메인 화면 ─────────────────────────────────────────────────────────────────
+// ─── 메인 화면 ───────────────────────────────────────────────────────────────
 export default function PositionDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data: position, isLoading, error } = useApi(
@@ -45,196 +252,373 @@ export default function PositionDetail() {
     [id],
   );
 
+  // 봇 ICT 분석 조회
+  const [ictAnalysis, setIctAnalysis]     = useState<IctAnalysis | null>(null);
+  const [botSignal,   setBotSignal]       = useState<BotSignal | null>(null);
+  const [signalLoading, setSignalLoading] = useState(false);
+  const { accounts } = useAccounts();
 
-  // ── 컨텐츠 등장 애니메이션 ──────────────────────────────────────────────────
-  const contentOpacity    = useSharedValue(0);
-  const contentTranslateY = useSharedValue(24);
+  // localStorage 캐시 헬퍼
+  const cacheKey = (contract: string) => `ict_analysis_${contract}`;
+  const loadCached = (contract: string): IctAnalysis | BotSignal | null => {
+    if (Platform.OS !== 'web') return null;
+    try {
+      const raw = localStorage.getItem(cacheKey(contract));
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  };
+  const saveCache = (contract: string, data: any) => {
+    if (Platform.OS !== 'web') return;
+    try { localStorage.setItem(cacheKey(contract), JSON.stringify(data)); } catch {}
+  };
+
   useEffect(() => {
-    if (position) {
-      contentOpacity.value    = withTiming(1, { duration: 350, easing: Easing.out(Easing.cubic) });
-      contentTranslateY.value = withSpring(0, { damping: 22, stiffness: 200 });
+    if (!position) return;
+
+    // accountId: 포지션 데이터 → accounts store 순서로 탐색
+    const accountId = (position as any).accountId
+      || (accounts.length === 1 ? accounts[0].id : accounts[0]?.id);
+    const contract = (position.symbol ?? '').replace('/', '_');
+    if (!contract) return;
+
+    // 캐시된 분석이 있으면 즉시 표시
+    const cached = loadCached(contract);
+    if (cached && 'htf' in cached) {
+      setIctAnalysis(cached as IctAnalysis);
+    } else if (cached && 'confluence' in cached) {
+      setBotSignal(cached as BotSignal);
     }
-  }, [!!position]);
-  const contentStyle = useAnimatedStyle(() => ({
-    opacity:   contentOpacity.value,
-    transform: [{ translateY: contentTranslateY.value }],
-  }));
+
+    if (!accountId) return;
+
+    setSignalLoading(true);
+
+    fetch(`/api/bot/analyze?accountId=${encodeURIComponent(accountId)}&contract=${encodeURIComponent(contract)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.error || data?.htf === undefined) {
+          // 구형 BotSignal 폴백 (봇 미실행 메시지도 표시)
+          if (data?.reason) {
+            setBotSignal(data);
+            if (data.confluence?.length > 0) saveCache(contract, data);
+          }
+          return;
+        }
+        setIctAnalysis(data as IctAnalysis);
+        saveCache(contract, data);
+      })
+      .catch(() => {})
+      .finally(() => setSignalLoading(false));
+  }, [position, accounts.length]);
 
   const isProfit  = (position?.profit ?? 0) >= 0;
-  const pnlColor  = isProfit ? '#FF4747' : '#246CF9';
+  const pnlColor  = isProfit ? colors.market.rise : colors.market.fall;
   const direction = position?.direction;
   const p         = position as any;
 
   const fmt$ = (v: number) =>
     `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+  // 포지션 자동 설명 텍스트 생성
+  const positionSummary = position ? (() => {
+    const dir     = direction === 'Long' ? '롱(매수)' : '숏(매도)';
+    const lev     = position.leverage;
+    const profitSign = isProfit ? '수익' : '손실';
+    const pctAbs  = Math.abs(position.profitRate).toFixed(2);
+    const pnlAbs  = Math.abs(position.profit);
+    const since   = p.entryAt ? `${p.entryAt}에 진입한 ` : '';
+    const holding = position.holdingPeriod ? ` ${position.holdingPeriod} 보유 중이며,` : '';
+
+    return `${since}${position.symbol} ${dir} 포지션입니다. ${lev}배 레버리지로${holding} 현재 ${pctAbs}% (${Math.round(pnlAbs / 10000).toLocaleString('ko-KR')}만원) ${profitSign} 중입니다.${p.liqPrice > 0 ? ` 청산가는 $${p.liqPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}입니다.` : ''}`;
+  })() : null;
 
   return (
-    <SafeAreaView style={st.safe} edges={['top']}>
-      <SubPageHeader title="상세 내역" onBack={() => router.navigate('/(main)/positions')} />
+    <ScreenTransition>
+      <SafeAreaView style={st.safe} edges={['top']}>
+        <SubPageHeader title="포지션 상세" onBack={() => router.navigate('/(main)/positions')} />
 
-      {isLoading ? (
-        <View style={st.center}><ActivityIndicator color="#8E8E93" /></View>
-      ) : (error || !position) ? (
-        <View style={st.center}>
-          <Text style={{ color: '#8E8E93', fontSize: 15 }}>포지션을 찾을 수 없어요</Text>
-        </View>
-      ) : (
-        <ScrollView
-          contentContainerStyle={st.content}
-          showsVerticalScrollIndicator={false}
-        >
-          <Animated.View style={contentStyle}>
-
-            {/* ── 상단 헤더: 코인 + 방향 ── */}
-            <View style={st.headerSection}>
-              <View style={st.headerRow}>
-                <View style={[st.coinIcon, {
-                  backgroundColor: direction === 'Long' ? '#EAF6F0' : '#FFF0F0',
-                }]}>
-                  <Text style={[st.coinIconText, {
-                    color: direction === 'Long' ? '#1AC24E' : '#FF4747',
-                  }]}>
-                    {position.coin.slice(0, 2)}
-                  </Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <Text style={st.symbol}>{position.symbol}</Text>
-                    <View style={[st.dirBadge, {
-                      backgroundColor: direction === 'Long' ? '#EAF6F0' : '#FFF0F0',
-                    }]}>
-                      <Text style={[st.dirText, {
-                        color: direction === 'Long' ? '#1AC24E' : '#FF4747',
-                      }]}>
-                        {direction === 'Long' ? '롱' : '숏'}
-                      </Text>
-                    </View>
-                    <View style={st.leverBadge}>
-                      <Text style={st.leverText}>{position.leverage}x</Text>
-                    </View>
+        <ScrollView contentContainerStyle={st.content} showsVerticalScrollIndicator={false}>
+          {isLoading ? (
+            <PositionDetailSkeleton />
+          ) : (error || !position) ? (
+            <GlassCard intensity="low" radius={20} padding={48} style={{ alignItems: 'center' }}>
+              <Text variant="body2" color={colors.text.tertiary}>포지션을 찾을 수 없어요</Text>
+            </GlassCard>
+          ) : (
+            <>
+              {/* ── 코인 헤더 카드 ─────────────────────── */}
+              <GlassCard intensity="medium" radius={24} padding={20} style={st.section}>
+                <View style={st.headerRow}>
+                  {/* 코인 아이콘 */}
+                  <View style={st.coinIcon}>
+                    <Text style={st.coinIconText}>{position.coin.slice(0, 2)}</Text>
                   </View>
-                  <Text style={st.subText}>{p.entryAt ?? '-'} 진입</Text>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                      <Text style={st.symbol}>{position.symbol}</Text>
+                      <View style={[st.dirBadge, {
+                        backgroundColor: direction === 'Long' ? '#EAF6F0' : '#FFF0F0',
+                      }]}>
+                        <Text style={[st.dirText, {
+                          color: direction === 'Long' ? '#1AC24E' : '#FF4747',
+                        }]}>
+                          {direction === 'Long' ? '롱' : '숏'}
+                        </Text>
+                      </View>
+                      <View style={[st.leverBadge]}>
+                        <Text style={st.leverText}>{position.leverage}x</Text>
+                      </View>
+                    </View>
+                    <Text style={st.subText}>{p.entryAt ?? '-'} 진입</Text>
+                    <Text style={st.subText}>보유 {position.holdingPeriod ?? '-'}</Text>
+                  </View>
                 </View>
-              </View>
+              </GlassCard>
 
-              {/* 평가손익 대형 표시 */}
-              <View style={st.pnlSection}>
-                <Text style={st.pnlMeta}>평가손익</Text>
+              {/* ── ICT 분석 ────────────────────────────── */}
+              <GlassCard intensity="low" radius={20} padding={0} style={st.section}>
+                {/* 헤더 */}
+                <View style={ict.header}>
+                  <Text style={ict.headerTitle}>ICT v2 분석</Text>
+                  {signalLoading
+                    ? <Text style={ict.badge}>분석 중...</Text>
+                    : ictAnalysis?.session
+                      ? <View style={[ict.sessionBadge, ictAnalysis.session.active && { backgroundColor: '#E8F5EE' }]}>
+                          <Text style={[ict.sessionText, ictAnalysis.session.active && { color: '#1AC24E' }]}>
+                            {ictAnalysis.session.active ? '✅' : '⏰'} {ictAnalysis.session.name}
+                          </Text>
+                        </View>
+                      : null
+                  }
+                </View>
+
+                {ictAnalysis ? (
+                  <>
+                    {/* 현재가 */}
+                    <View style={ict.priceRow}>
+                      <Text style={ict.priceLabel}>현재가</Text>
+                      <Text style={ict.priceValue}>${ictAnalysis.currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                    </View>
+
+                    {/* HTF */}
+                    <IctSection
+                      title={`HTF (${ictAnalysis.htf.timeframe})`}
+                      direction={ictAnalysis.htf.direction}
+                      structure={ictAnalysis.htf.structure}
+                      swingHigh={ictAnalysis.htf.swingHigh}
+                      swingLow={ictAnalysis.htf.swingLow}
+                      pdh={ictAnalysis.htf.pdh}
+                      pdl={ictAnalysis.htf.pdl}
+                      pdhSweep={ictAnalysis.htf.pdhSweep}
+                      pdlSweep={ictAnalysis.htf.pdlSweep}
+                      ob={ictAnalysis.htf.ob}
+                      fvg={ictAnalysis.htf.fvg}
+                      inPOI={ictAnalysis.htf.inPOI}
+                      poiType={ictAnalysis.htf.poiType}
+                    />
+
+                    {/* MTF */}
+                    <IctSection
+                      title={`MTF (${ictAnalysis.mtf.timeframe})`}
+                      mss={ictAnalysis.mtf.mss}
+                      ob={ictAnalysis.mtf.ob}
+                      fvg={ictAnalysis.mtf.fvg}
+                    />
+
+                    {/* LTF */}
+                    <IctLtfSection ltf={ictAnalysis.ltf} />
+
+                    {/* 세션 레인지 */}
+                    {ictAnalysis.sessions.length > 0 && (
+                      <View style={ict.block}>
+                        <Text style={ict.blockTitle}>Session Range</Text>
+                        {ictAnalysis.sessions.map((s) => (
+                          <View key={s.name} style={ict.sessionRow}>
+                            <Text style={ict.sessionName}>{s.name}</Text>
+                            <Text style={ict.sessionRange}>
+                              {s.low.toFixed(2)} ~ {s.high.toFixed(2)}
+                              {s.sweep ? '  🔄 Sweep!' : ''}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+
+                    {/* 종합 판단 */}
+                    <View style={[ict.block, { borderBottomWidth: 0 }]}>
+                      <Text style={ict.blockTitle}>종합 판단</Text>
+                      {ictAnalysis.summary.signal ? (
+                        <>
+                          <View style={[ict.signalBadge, {
+                            backgroundColor: ictAnalysis.summary.signal === 'long' ? '#E8F5EE' : '#FFF0F0',
+                          }]}>
+                            <Text style={[ict.signalText, {
+                              color: ictAnalysis.summary.signal === 'long' ? '#1AC24E' : '#FF4747',
+                            }]}>
+                              {ictAnalysis.summary.signal === 'long' ? '📈 LONG 신호!' : '📉 SHORT 신호!'}
+                            </Text>
+                          </View>
+                          <View style={{ gap: 3, marginTop: 8 }}>
+                            {[
+                              ['진입', ictAnalysis.summary.entry?.toFixed(2) ?? '-'],
+                              ['SL',   ictAnalysis.summary.sl?.toFixed(2)    ?? '-'],
+                              ['TP',   ictAnalysis.summary.tp?.toFixed(2)    ?? '-'],
+                            ].map(([k, v]) => (
+                              <View key={k} style={ict.kv}>
+                                <Text style={ict.kvKey}>{k}</Text>
+                                <Text style={ict.kvVal}>{v}</Text>
+                              </View>
+                            ))}
+                          </View>
+                        </>
+                      ) : (
+                        <Text style={ict.waitText}>⏸️ {ictAnalysis.summary.reason}</Text>
+                      )}
+                      {ictAnalysis.summary.confluence.length > 0 && (
+                        <View style={{ marginTop: 10, gap: 4 }}>
+                          {ictAnalysis.summary.confluence.map((c, i) => (
+                            <View key={i} style={st.confluenceRow}>
+                              <Text style={st.confluenceDot}>•</Text>
+                              <Text style={st.confluenceText}>{c}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                    </View>
+                  </>
+                ) : botSignal ? (
+                  <View style={{ padding: 16 }}>
+                    <Text style={st.summaryText}>{botSignal.reason}</Text>
+                    {botSignal.confluence?.length > 0 && (
+                      <View style={{ marginTop: 10, gap: 6 }}>
+                        {botSignal.confluence.map((c, i) => (
+                          <View key={i} style={st.confluenceRow}>
+                            <Text style={st.confluenceDot}>•</Text>
+                            <Text style={st.confluenceText}>{c}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                ) : !signalLoading ? (
+                  <View style={{ padding: 16 }}>
+                    <Text style={st.summaryText}>{positionSummary}</Text>
+                  </View>
+                ) : null}
+              </GlassCard>
+
+              {/* ── 손익 히어로 카드 ────────────────────── */}
+              <GlassCard intensity="medium" radius={24} padding={24} style={st.section}>
+                <Text style={st.pnlLabel}>평가손익</Text>
                 <Text style={[st.pnlAmount, { color: pnlColor }]}>
                   {formatKRWSigned(position.profit)}
                 </Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 }}>
-                  <View style={[st.ratePill, {
-                    backgroundColor: isProfit ? '#FFF0F0' : '#EFF4FF',
-                  }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6, marginBottom: 20 }}>
+                  <View style={[st.rateBadge, { backgroundColor: isProfit ? colors.market.riseSubtle : '#FFF0F0' }]}>
                     <Text style={[st.rateText, { color: pnlColor }]}>
                       {formatRate(position.profitRate)}
                     </Text>
                   </View>
-                  <Text style={st.holdingText}>보유 {position.holdingPeriod ?? '-'}</Text>
                 </View>
-              </View>
-
-              {/* 증거금 / 평가금액 */}
-              <View style={st.amountRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={st.amountMeta}>증거금</Text>
-                  <Text style={st.amountValue}>{formatKRW(position.amount)}</Text>
+                {/* 투자금 / 평가금 가로 구분 */}
+                <View style={st.amountRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={st.amountLabel}>증거금</Text>
+                    <Text style={st.amountValue}>{formatKRW(position.amount)}</Text>
+                  </View>
+                  <View style={st.amountDivider} />
+                  <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                    <Text style={st.amountLabel}>평가금액</Text>
+                    <Text style={st.amountValue}>{formatKRW(position.currentValue ?? 0)}</Text>
+                  </View>
                 </View>
-                <View style={st.amountDivider} />
-                <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                  <Text style={st.amountMeta}>평가금액</Text>
-                  <Text style={st.amountValue}>{formatKRW(position.currentValue ?? 0)}</Text>
-                </View>
-              </View>
-            </View>
+              </GlassCard>
 
-            <SectionDivider />
+              {/* ── 가격 현황 ───────────────────────────── */}
+              <GlassCard intensity="medium" radius={24} padding={20} style={st.section}>
+                <Text style={st.sectionTitle}>가격 현황</Text>
+                <InfoRow label="진입가"  value={fmt$(position.entryPrice)} />
+                <InfoRow
+                  label="현재가"
+                  value={fmt$(position.currentPrice ?? position.markPrice)}
+                  valueColor={pnlColor}
+                />
+                {p.liqPrice > 0 && (
+                  <InfoRow label="청산가" value={fmt$(p.liqPrice)} valueColor={colors.negative.text} />
+                )}
+                {position.stopLoss! > 0 && (
+                  <InfoRow label="손절가" value={fmt$(position.stopLoss!)} valueColor={colors.negative.text} />
+                )}
+                {position.targetPrice! > 0 && (
+                  <InfoRow label="목표가" value={fmt$(position.targetPrice!)} valueColor={colors.positive.text} isLast />
+                )}
+                {!position.stopLoss && !position.targetPrice && (
+                  <InfoRow label={`${position.coin} 수량`} value={`${p.quantity ?? p.size ?? '-'} ${position.coin}`} isLast />
+                )}
+              </GlassCard>
 
-            {/* ── 가격 현황 (플랫) ── */}
-            <View style={st.flatSection}>
-              <Text style={st.sectionLabel}>가격 정보</Text>
-              <InfoRow label="진입가"  value={fmt$(position.entryPrice)} />
-              <InfoRow
-                label="현재가"
-                value={fmt$(position.currentPrice ?? position.markPrice)}
-                valueColor={pnlColor}
-              />
-              {p.liqPrice > 0 && (
-                <InfoRow label="청산가" value={fmt$(p.liqPrice)} valueColor="#FF4747" />
-              )}
-              {position.stopLoss! > 0 && (
-                <InfoRow label="손절가" value={fmt$(position.stopLoss!)} valueColor="#FF4747" />
-              )}
-              {position.targetPrice! > 0 ? (
-                <InfoRow label="목표가" value={fmt$(position.targetPrice!)} valueColor="#1AC24E" isLast />
-              ) : (
-                <InfoRow label="계약 수" value={`${p.size ?? 1} 계약`} isLast />
-              )}
-            </View>
+              {/* ── 포지션 정보 ─────────────────────────── */}
+              <GlassCard intensity="medium" radius={24} padding={20} style={st.section}>
+                <Text style={st.sectionTitle}>포지션 정보</Text>
+                <InfoRow label="레버리지" value={`${position.leverage}x`} />
+                <InfoRow label={`${position.coin} 수량`} value={`${p.quantity ?? p.size ?? '-'} ${position.coin}`} />
+                <InfoRow label="보유 기간" value={position.holdingPeriod ?? '-'} isLast={!(position.riskLevel)} />
+                {position.riskLevel != null && (
+                  <View style={st.riskWrap}>
+                    <Text style={[row.label, { marginBottom: 10 }]}>리스크 수준</Text>
+                    <RiskGauge level={(position.riskLevel ?? 3) as 1|2|3|4|5} />
+                  </View>
+                )}
+              </GlassCard>
 
-            <SectionDivider />
-
-            {/* ── 포지션 정보 ── */}
-            <View style={st.flatSection}>
-              <Text style={st.sectionLabel}>포지션 정보</Text>
-              <InfoRow label="방향"     value={direction === 'Long' ? '롱 (매수)' : '숏 (매도)'}
-                valueColor={direction === 'Long' ? '#1AC24E' : '#FF4747'} />
-              <InfoRow label="레버리지" value={`${position.leverage}x`} />
-              <InfoRow label="계약 수"  value={`${p.size ?? 1} 계약`} />
-              <InfoRow label="보유 기간" value={position.holdingPeriod ?? '-'} isLast />
-            </View>
-
-
-            <View style={{ height: 120 }} />
-          </Animated.View>
+              <View style={{ height: 120 }} />
+            </>
+          )}
         </ScrollView>
-      )}
-    </SafeAreaView>
+      </SafeAreaView>
+    </ScreenTransition>
   );
 }
 
 const st = StyleSheet.create({
-  safe:   { flex: 1, backgroundColor: '#FFFFFF' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  content: { /* no horizontal padding — sections handle their own */ },
+  safe:    { flex: 1, backgroundColor: colors.bg.elevated },
+  content: { paddingHorizontal: 20, paddingTop: 8 },
+  section: { marginBottom: 12 },
 
-  // ── 상단 헤더 섹션 ────────────────────────────────────────────────────────────
-  headerSection: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 24 },
-  headerRow:     { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 20 },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 14 },
+  coinIcon:  {
+    width: 52, height: 52, borderRadius: 26,
+    backgroundColor: '#191919',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  coinIconText: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
+  symbol:       { fontSize: 18, fontWeight: '700', color: colors.text.primary },
+  dirBadge:     { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
+  dirText:      { fontSize: 12, fontWeight: '700' },
+  leverBadge:   { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, backgroundColor: colors.bg.elevated },
+  leverText:    { fontSize: 12, fontWeight: '600', color: colors.text.secondary },
+  subText:      { fontSize: 13, color: colors.text.tertiary, marginTop: 3 },
 
-  coinIcon:     { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
-  coinIconText: { fontSize: 14, fontWeight: '700' },
-  symbol:       { fontSize: 17, fontWeight: '700', color: '#1C1C1E' },
-  dirBadge:     { borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3 },
-  dirText:      { fontSize: 11, fontWeight: '700' },
-  leverBadge:   { borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3, backgroundColor: '#F2F2F7' },
-  leverText:    { fontSize: 11, fontWeight: '600', color: '#8E8E93' },
-  subText:      { fontSize: 12, color: '#8E8E93', marginTop: 3 },
+  pnlLabel:  { fontSize: 13, color: colors.text.tertiary, marginBottom: 6 },
+  pnlAmount: { fontSize: 30, fontWeight: '700', letterSpacing: -0.5 },
+  rateBadge: { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },
+  rateText:  { fontSize: 14, fontWeight: '700' },
 
-  pnlSection: { marginBottom: 20 },
-  pnlMeta:    { fontSize: 13, color: '#8E8E93', marginBottom: 6 },
-  pnlAmount:  { fontSize: 32, fontWeight: '700', letterSpacing: -0.5 },
-  ratePill:   { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 },
-  rateText:   { fontSize: 14, fontWeight: '700' },
-  holdingText: { fontSize: 13, color: '#8E8E93' },
+  amountRow:     { flexDirection: 'row', alignItems: 'center', paddingTop: 16, borderTopWidth: 1, borderTopColor: colors.border.default },
+  amountDivider: { width: 1, height: 36, backgroundColor: colors.border.default, marginHorizontal: 16 },
+  amountLabel:   { fontSize: 12, color: colors.text.tertiary, marginBottom: 4 },
+  amountValue:   { fontSize: 15, fontWeight: '700', color: colors.text.primary },
 
-  amountRow:     { flexDirection: 'row', alignItems: 'center', paddingTop: 16,
-                   borderTopWidth: 1, borderTopColor: '#F2F2F7' },
-  amountDivider: { width: 1, height: 36, backgroundColor: '#F2F2F7', marginHorizontal: 20 },
-  amountMeta:    { fontSize: 12, color: '#8E8E93', marginBottom: 4 },
-  amountValue:   { fontSize: 15, fontWeight: '700', color: '#1C1C1E' },
+  sectionTitle: { fontSize: 15, fontWeight: '700', color: colors.text.primary, marginBottom: 12 },
 
-  // ── 플랫 섹션 ─────────────────────────────────────────────────────────────────
-  flatSection: { paddingHorizontal: 20, paddingVertical: 20 },
-  sectionLabel: { fontSize: 12, fontWeight: '700', color: '#8E8E93', letterSpacing: 0.5,
-                  textTransform: 'uppercase', marginBottom: 4 },
+  riskWrap: { paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.border.default },
 
-  analysisText:   { fontSize: 14, color: '#3A3A3C', lineHeight: 22 },
-  confluenceText: { fontSize: 13, color: '#8E8E93', lineHeight: 20, flex: 1 },
+  summaryText:    { fontSize: 14, color: colors.text.secondary, lineHeight: 22 },
+  confluenceRow:  { flexDirection: 'row', gap: 6 },
+  confluenceDot:  { fontSize: 14, color: colors.text.tertiary, lineHeight: 22 },
+  confluenceText: { fontSize: 14, color: colors.text.secondary, lineHeight: 22, flex: 1 },
 
-  reasonBox:   { backgroundColor: '#F2F2F7', borderRadius: 10, padding: 14 },
-  reasonLabel: { fontSize: 12, fontWeight: '600', color: '#8E8E93', marginBottom: 6 },
-  reasonText:  { fontSize: 14, color: '#3A3A3C', lineHeight: 22 },
+  reasonBox:  { backgroundColor: colors.bg.subtle, borderRadius: 12, padding: 14 },
+  reasonLabel: { fontSize: 12, fontWeight: '600', color: colors.text.tertiary, marginBottom: 6 },
+  reasonText:  { fontSize: 14, color: colors.text.secondary, lineHeight: 22 },
 });

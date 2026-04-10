@@ -66,7 +66,8 @@ function fmtDay(key: string) {
   const dt  = new Date(+y, +m - 1, +d);
   return `${String(y).slice(2)}년 ${+m}월 ${+d}일 (${DOW[dt.getDay()]})`;
 }
-function pnlColor(v: number) { return v >= 0 ? C.green : C.red; }
+// 한국 관례: 수익(+) = 빨간색, 손실(-) = 파란색
+function pnlColor(v: number) { return v > 0 ? '#F04452' : v < 0 ? '#246CF9' : C.textGray; }
 
 function fmtPnl(krw: number, showUsd: boolean, rate: number) {
   if (!showUsd) return formatKRWSigned(krw);
@@ -277,7 +278,7 @@ function HeroAmount({ value, hasData, showUsd, rate }: { value: number; hasData:
 }
 const ha = StyleSheet.create({
   wrap  : { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 16 },
-  amount: { fontSize: 38, fontWeight: '700', letterSpacing: -0.5 },
+  amount: { fontSize: 26, fontWeight: '700', letterSpacing: -0.5 },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -290,7 +290,10 @@ const gateClient = {
       logger.warn(`[${contract}] 포지션 mode 확인 실패, single 가정: ${err.message}`);
     }
 
-    const orderType = direction === 'long' ? 'close-long-order' : 'close-short-order';
+    // Dual 모드: close-long-position / close-short-position
+    // Single 모드: close-long-order / close-short-order
+    const suffix = isDual ? 'position' : 'order';
+    const orderType = direction === 'long' ? `close-long-${suffix}` : `close-short-${suffix}`;
     const autoSize = direction === 'long' ? 'close_long' : 'close_short';
     const modeOpts = { isDual, autoSize };
 

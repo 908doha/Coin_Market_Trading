@@ -9,7 +9,9 @@ import React, { createContext, useContext, useEffect, useState, useCallback, use
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import { exchangeService } from '../services/exchange.service';
+import { positionsService } from '../services/positions.service';
 import type { Balance } from '../services/account.service';
+import type { Position } from '../services/positions.service';
 
 export type ExchangeType = 'binance' | 'upbit' | 'bybit' | 'okx' | 'gate' | 'custom';
 
@@ -128,6 +130,7 @@ interface AccountsContextValue {
   totalBalance:    Balance | null;
   balancesLoading: boolean;
   isLoading:       boolean;
+  positions:       Position[];
   addAccount:      (input: Omit<ExchangeAccount, 'id' | 'createdAt'>) => Promise<ExchangeAccount>;
   updateAccount:   (id: string, updates: Partial<Omit<ExchangeAccount, 'id' | 'createdAt'>>) => Promise<void>;
   removeAccount:   (id: string) => Promise<void>;
@@ -161,6 +164,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
   const [balances, setBalances]          = useState<Record<string, Balance | null>>({});
   const [balanceErrors, setBalErrors]    = useState<Record<string, string | null>>({});
   const [balancesLoading, setBalLoading] = useState(false);
+  const [positions, setPositions]        = useState<Position[]>([]);
   const accountsRef        = useRef(accounts);
   const isFirstBalLoad     = useRef(true);
   accountsRef.current = accounts;
@@ -239,16 +243,34 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // 포지션 silent refresh (로딩 표시 없이 갱신)
+  const refreshPositions = useCallback(async () => {
+    const list = accountsRef.current;
+    if (!list.length) return;
+    try {
+      const pos = await positionsService.getAllByAccounts(list);
+      setPositions(pos);
+    } catch (e) {
+      console.error('[positions] refresh error:', e);
+    }
+  }, []);
+
   useEffect(() => {
-    if (!isLoading && accounts.length > 0) refreshBalances();
+    if (!isLoading && accounts.length > 0) {
+      refreshBalances();
+      refreshPositions();
+    }
   }, [isLoading, accounts.length]);
 
-  // 10초마다 잔고 자동 갱신 (실시간 반영)
+  // 5초마다 잔고 + 포지션 자동 갱신
   useEffect(() => {
     if (isLoading || accounts.length === 0) return;
-    const id = setInterval(refreshBalances, 5_000);
+    const id = setInterval(() => {
+      refreshBalances();
+      refreshPositions();
+    }, 5_000);
     return () => clearInterval(id);
-  }, [isLoading, accounts.length, refreshBalances]);
+  }, [isLoading, accounts.length, refreshBalances, refreshPositions]);
 
   const totalBalance = accounts.length
     ? sumBalances(accounts.map((a) => balances[a.id] ?? null))
@@ -293,6 +315,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     <AccountsContext.Provider value={{
       accounts, isLoading,
       balances, balanceErrors, totalBalance, balancesLoading,
+      positions,
       addAccount, updateAccount, removeAccount, refreshBalances,
     }}>
       {children}

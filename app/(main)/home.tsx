@@ -6,7 +6,7 @@ import Svg, { Polyline, Defs, LinearGradient, Stop, Polygon, Path, Rect, Text as
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
 import { Text, GlassCard, PressableScale, FadeTabView, AssetCardSkeleton, PageHeader, CurrencyToggle, AnimatedNumber } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
-import { accountService, positionsService, tradesService } from '@/services';
+import { accountService, tradesService } from '@/services';
 import type { Trade } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeAccount, ExchangeType } from '@/store/accounts';
@@ -741,7 +741,7 @@ function AccountRow({
 export default function Home() {
   const [period, setPeriod] = useState<PeriodKey>('일');
   const [showUsd, setShowUsd] = useState(false);
-  const { accounts, balances, balanceErrors, totalBalance, balancesLoading } = useAccounts();
+  const { accounts, balances, balanceErrors, totalBalance, balancesLoading, positions } = useAccounts();
 
   const { data: singleBalance, isLoading: singleLoading } = useApi(
     () => accounts.length === 0 ? accountService.getBalance() : Promise.resolve(null),
@@ -750,9 +750,6 @@ export default function Home() {
   const { data: allTrades } = useApi(
     () => tradesService.getAllByAccounts(accounts),
     [accounts],
-  );
-  const { data: positions } = useApi(
-    () => positionsService.getAllByAccounts(accounts), [accounts],
   );
   const balance    = accounts.length > 0 ? totalBalance : singleBalance;
   const balLoading = accounts.length > 0 ? balancesLoading : singleLoading;

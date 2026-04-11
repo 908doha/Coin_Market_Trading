@@ -12,10 +12,8 @@ import Animated, {
   useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS,
 } from 'react-native-reanimated';
 import Svg, { Path, Polygon, Rect, Text as SvgText, Circle } from 'react-native-svg';
-import { Text, FadeTabView, PressableScale, BalanceCardsSkeleton } from '@/design-system';
+import { Text, FadeTabView, PressableScale, BalanceCardsSkeleton, AnimatedNumber } from '@/design-system';
 import { colors } from '@/design-system/tokens';
-import { positionsService } from '@/services';
-import { useApi } from '@/hooks/useApi';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType, ExchangeAccount } from '@/store/accounts';
 import type { Balance } from '@/services/account.service';
@@ -250,8 +248,21 @@ function PositionRow({ pos, isLast }: { pos: any; isLast: boolean }) {
         <Text style={pr.sub}>{formatKRW(pos.amount)} 투자</Text>
       </View>
       <View style={{ alignItems: 'flex-end' }}>
-        <Text style={[pr.profit, { color: pnlColor }]}>{formatKRWSigned(pos.profit)}</Text>
-        <Text style={[pr.rate, { color: pnlColor }]}>{formatRate(pos.profitRate)}</Text>
+        <AnimatedNumber
+          value={pos.profit}
+          formatter={formatKRWSigned}
+          fontSize={15}
+          fontWeight="700"
+          color={pnlColor}
+        />
+        <AnimatedNumber
+          value={pos.profitRate}
+          formatter={formatRate}
+          fontSize={13}
+          fontWeight="600"
+          color={pnlColor}
+          style={{ marginTop: 2 }}
+        />
       </View>
     </Pressable>
   );
@@ -274,16 +285,11 @@ export default function Trading() {
   const [showSheet, setShowSheet]           = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [posExpanded, setPosExpanded]       = useState(true);
-  const { accounts, balances, totalBalance, balancesLoading } = useAccounts();
+  const { accounts, balances, totalBalance, balancesLoading, positions: allPositions } = useAccounts();
 
-  const selectedAccounts = selectedAccountId
-    ? accounts.filter((a) => a.id === selectedAccountId)
-    : accounts;
-
-  const { data: positions } = useApi(
-    () => positionsService.getAllByAccounts(selectedAccounts),
-    [selectedAccountId, accounts.length],
-  );
+  const positions = selectedAccountId
+    ? allPositions.filter((p) => p.accountId === selectedAccountId)
+    : allPositions;
 
   const selectedAccount = accounts.find((a) => a.id === selectedAccountId) ?? null;
   const displayBalance  = selectedAccountId

@@ -239,6 +239,77 @@ const score_ = StyleSheet.create({
 });
 
 // ─── 가격 레인지 시각화 ───────────────────────────────────────────────────────
+// ─── 미니 가격 바 (통합 손익 카드 우측) ──────────────────────────────────────
+function MiniPriceBar({
+  entry, current, tp, sl, direction,
+}: {
+  entry: number; current: number;
+  tp?: number | null; sl?: number | null;
+  direction: 'Long' | 'Short';
+}) {
+  const prices = [entry, current, tp ?? 0, sl ?? 0].filter(Boolean) as number[];
+  if (prices.length < 2) return null;
+
+  const high  = Math.max(...prices) * 1.003;
+  const low   = Math.min(...prices) * 0.997;
+  const range = high - low;
+  if (range <= 0) return null;
+
+  const toY = (p: number) => ((high - p) / range) * 100;
+  const entryY   = toY(entry);
+  const currentY = toY(current);
+  const tpY      = (tp && tp > 0) ? toY(tp) : null;
+  const slY      = (sl && sl > 0) ? toY(sl) : null;
+
+  const isLong    = direction === 'Long';
+  const isWinning = isLong ? current >= entry : current <= entry;
+  const dotColor  = isWinning ? '#1AC24E' : '#FF4747';
+
+  return (
+    <View style={mpb.container}>
+      <View style={mpb.bar}>
+        {tpY !== null && (
+          <View style={[mpb.zone, {
+            top: `${Math.min(entryY, tpY)}%` as any,
+            height: `${Math.max(Math.abs(tpY - entryY), 1)}%` as any,
+            backgroundColor: '#1AC24E22',
+          }]} />
+        )}
+        {slY !== null && (
+          <View style={[mpb.zone, {
+            top: `${Math.min(entryY, slY)}%` as any,
+            height: `${Math.max(Math.abs(slY - entryY), 1)}%` as any,
+            backgroundColor: '#FF474722',
+          }]} />
+        )}
+        {tpY !== null && (
+          <View style={[mpb.line, { top: `${tpY}%` as any, backgroundColor: '#1AC24E' }]} />
+        )}
+        {slY !== null && (
+          <View style={[mpb.line, { top: `${slY}%` as any, backgroundColor: '#FF4747' }]} />
+        )}
+        <View style={[mpb.line, { top: `${entryY}%` as any, backgroundColor: colors.text.tertiary }]} />
+        <View style={[mpb.dot, { top: `${currentY}%` as any, marginTop: -5, backgroundColor: dotColor }]} />
+      </View>
+    </View>
+  );
+}
+const mpb = StyleSheet.create({
+  container: {
+    width: 44,
+    alignSelf: 'stretch',
+    backgroundColor: colors.bg.elevated,
+    borderRadius: 14,
+    padding: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bar:  { width: 10, flex: 1, minHeight: 80, position: 'relative', backgroundColor: colors.bg.subtle, borderRadius: 5 },
+  zone: { position: 'absolute', left: 0, right: 0 },
+  line: { position: 'absolute', left: 0, right: 0, height: 1.5 },
+  dot:  { position: 'absolute', left: -5, width: 10, height: 10, borderRadius: 5 },
+});
+
 function PriceRangeBar({
   entry, current, tp, sl, direction,
 }: {
@@ -552,26 +623,38 @@ export default function PositionDetail() {
 
               {/* ── 통합 손익/가격 카드 ─────────────────── */}
               <GlassCard intensity="medium" radius={24} padding={24} style={st.section}>
-                <Text style={st.pnlLabel}>평가손익</Text>
-                <AnimatedNumber
-                  value={position.profit}
-                  formatter={formatKRWSigned}
-                  fontSize={30}
-                  fontWeight="700"
-                  color={pnlColor}
-                  letterSpacing={-0.5}
-                  style={{ marginBottom: 6 }}
-                />
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 0, marginBottom: 16 }}>
-                  <View style={[st.rateBadge, { backgroundColor: isProfit ? colors.market.riseSubtle : '#FFF0F0' }]}>
+                {/* PNL + 미니 가격 바 */}
+                <View style={{ flexDirection: 'row', alignItems: 'stretch', gap: 12, marginBottom: 16 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={st.pnlLabel}>평가손익</Text>
                     <AnimatedNumber
-                      value={position.profitRate}
-                      formatter={formatRate}
-                      fontSize={14}
+                      value={position.profit}
+                      formatter={formatKRWSigned}
+                      fontSize={30}
                       fontWeight="700"
                       color={pnlColor}
+                      letterSpacing={-0.5}
+                      style={{ marginBottom: 6 }}
                     />
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <View style={[st.rateBadge, { backgroundColor: isProfit ? colors.market.riseSubtle : '#FFF0F0' }]}>
+                        <AnimatedNumber
+                          value={position.profitRate}
+                          formatter={formatRate}
+                          fontSize={14}
+                          fontWeight="700"
+                          color={pnlColor}
+                        />
+                      </View>
+                    </View>
                   </View>
+                  <MiniPriceBar
+                    entry={position.entryPrice}
+                    current={position.currentPrice ?? position.markPrice}
+                    tp={position.targetPrice}
+                    sl={position.stopLoss}
+                    direction={direction ?? 'Long'}
+                  />
                 </View>
 
                 {/* Row 1: 수량 | 증거금 */}

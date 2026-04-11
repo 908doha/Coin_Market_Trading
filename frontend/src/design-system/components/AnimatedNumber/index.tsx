@@ -124,7 +124,7 @@ export function AnimatedNumber({
         /\d/.test(char) ? (
           <RollingDigit key={key} digit={char} lineH={lineH} txStyle={txStyle} />
         ) : (
-          <Text key={key} style={txStyle}>{char}</Text>
+          <Text key={key} style={[txStyle, { lineHeight: lineH, height: lineH }]}>{char}</Text>
         ),
       )}
     </View>

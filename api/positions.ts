@@ -68,36 +68,48 @@ async function fetchGatePriceOrders(apiKey: string, apiSecret: string): Promise<
     for (const o of orders) {
       const contract = o.initial?.contract ?? o.contract as string;
       if (!contract) continue;
-      // reduce_only 또는 close 플래그가 있는 주문만 TP/SL
-      if (!o.initial?.reduce_only && !o.initial?.close && !o.initial?.auto_size) continue;
+
+      // Gate.io는 버전/인터페이스마다 close 플래그 이름이 다름
+      // reduce_only | close | is_close | auto_size | order_type에 'close' 포함
+      const orderType = (o.order_type as string ?? '').toLowerCase();
+      const isCloseOrder =
+        o.initial?.reduce_only ||
+        o.initial?.close ||
+        o.initial?.is_close ||
+        o.initial?.auto_size ||
+        orderType.includes('close');
+      if (!isCloseOrder) continue;
+
       const triggerPrice = parseFloat(o.trigger?.price ?? '0');
       if (!triggerPrice) continue;
 
       if (!result.has(contract)) result.set(contract, { tp: null, sl: null });
       const entry = result.get(contract)!;
-      // auto_size: "close_long" → Long포지션 청산 주문; rule 1(>=) → TP, 2(<=) → SL
-      // auto_size: "close_short" → Short포지션 청산 주문; rule 2(<=) → TP, 1(>=) → SL
-      const rule      = o.trigger?.rule as number;  // 1 = >=, 2 = <=
-      const autoSize  = o.initial?.auto_size as string ?? '';
 
-      if (autoSize === 'close_long') {
-        // Long 포지션 청산: rule=1(>=) 이면 위에서 청산 → TP, rule=2(<=) 이면 아래서 청산 → SL
+      const rule      = o.trigger?.rule as number;  // 1 = price>=trigger, 2 = price<=trigger
+      const autoSize  = (o.initial?.auto_size as string ?? '').toLowerCase();
+
+      // 어느 쪽 포지션을 청산하는지 판별
+      // auto_size > order_type > initial.size 부호 순서로 확인
+      let closingLong: boolean | null = null;
+      if (autoSize === 'close_long' || orderType.includes('close-long') || orderType.includes('close_long')) {
+        closingLong = true;
+      } else if (autoSize === 'close_short' || orderType.includes('close-short') || orderType.includes('close_short')) {
+        closingLong = false;
+      } else {
+        const size = Number(o.initial?.size ?? 0);
+        if (size !== 0) closingLong = size < 0; // sell(-) = Long 청산
+      }
+      if (closingLong === null) continue;
+
+      if (closingLong) {
+        // Long 포지션 청산: rule=1(위에서 트리거) → TP, rule=2(아래서 트리거) → SL
         if (rule === 1) { if (!entry.tp || triggerPrice > entry.tp) entry.tp = triggerPrice; }
         else            { if (!entry.sl || triggerPrice > entry.sl) entry.sl = triggerPrice; }
-      } else if (autoSize === 'close_short') {
-        // Short 포지션 청산: rule=2(<=) 이면 아래서 청산 → TP, rule=1(>=) 이면 위에서 청산 → SL
+      } else {
+        // Short 포지션 청산: rule=2(아래서 트리거) → TP, rule=1(위에서 트리거) → SL
         if (rule === 2) { if (!entry.tp || triggerPrice < entry.tp) entry.tp = triggerPrice; }
         else            { if (!entry.sl || triggerPrice < entry.sl) entry.sl = triggerPrice; }
-      } else {
-        // auto_size 없을 때: size 부호로 판별
-        const size = Number(o.initial?.size ?? 0);
-        if (size < 0) {  // sell = Long 청산
-          if (rule === 1) { if (!entry.tp || triggerPrice > entry.tp) entry.tp = triggerPrice; }
-          else            { if (!entry.sl || triggerPrice > entry.sl) entry.sl = triggerPrice; }
-        } else {  // buy = Short 청산
-          if (rule === 2) { if (!entry.tp || triggerPrice < entry.tp) entry.tp = triggerPrice; }
-          else            { if (!entry.sl || triggerPrice < entry.sl) entry.sl = triggerPrice; }
-        }
       }
     }
   } catch { /* TP/SL 조회 실패시 빈 Map 반환 */ }

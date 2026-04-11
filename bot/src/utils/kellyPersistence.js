@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const logger = require('./logger');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
+const DATA_DIR = path.join(__dirname, '..', '..', 'data');
 const FILE = path.join(DATA_DIR, 'kelly-stats.json');
 const BAK = FILE + '.bak';
 const TMP = FILE + '.tmp';

@@ -10,7 +10,7 @@ import {
   View, StyleSheet, ScrollView, Pressable, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import Animated, {
   useSharedValue, useAnimatedStyle, withTiming, withSpring, runOnJS,
 } from 'react-native-reanimated';
@@ -80,7 +80,12 @@ function fmtPnl(krw: number, showUsd: boolean, rate: number) {
 function calcStats(trades: Trade[]) {
   const total       = trades.length;
   const totalPnl    = trades.reduce((s, t) => s + t.profit, 0);
-  const totalAmount = trades.reduce((s, t) => s + (t.amount ?? 0), 0);
+  // amount가 있으면 직접 사용, 없으면 profit/profitRate 역산으로 포지션 크기 추정
+  const totalAmount = trades.reduce((s, t) => {
+    if (t.amount && t.amount > 0) return s + t.amount;
+    if (t.profitRate && t.profitRate !== 0) return s + Math.abs(t.profit / t.profitRate) * 100;
+    return s;
+  }, 0);
   const profitRate  = totalAmount > 0 ? (totalPnl / totalAmount) * 100 : 0;
   const wins        = trades.filter((t) => t.profit > 0);
   const losses      = trades.filter((t) => t.profit < 0);
@@ -441,7 +446,7 @@ function NavRow({
 }) {
   return (
     <View style={nr.row}>
-      <Text style={nr.label}>{label} 실현수익</Text>
+      <Text style={nr.label}>{label}</Text>
       <View style={nr.btns}>
         <Pressable style={nr.btn} onPress={onPrev} hitSlop={10}>
           <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
@@ -518,18 +523,18 @@ function SummaryList({ stats, hasData, showUsd, rate }: {
     {
       label: '수익 거래',
       value: `${stats.wins}건`,
-      color: stats.wins > 0 ? C.green : C.textGray,
+      color: stats.wins > 0 ? C.red : C.textGray,       // 수익(+) = 빨강
     },
     {
       label: '손실 거래',
       value: `${stats.losses}건`,
-      color: stats.losses > 0 ? C.red : C.textGray,
+      color: stats.losses > 0 ? '#246CF9' : C.textGray, // 손실(-) = 파랑
     },
     {
       label: '손익비',
       value: stats.plRatio != null ? stats.plRatio.toFixed(2) : '—',
       color: stats.plRatio != null
-        ? stats.plRatio >= 1 ? C.green : C.red
+        ? stats.plRatio >= 1 ? C.red : '#246CF9'         // 1 이상=긍정=빨강, 미만=부정=파랑
         : C.textGray,
     },
     { label: '수익률', value: hasData ? `${stats.profitRate >= 0 ? '+' : ''}${stats.profitRate.toFixed(1)}%` : '—', color: hasData ? pnlColor(stats.totalPnl) : C.textGray },
@@ -690,9 +695,10 @@ export default function ProfitAnalysis() {
   const [viewMode,   setViewMode]   = useState<ViewMode>('일별');
   const [subTab,     setSubTab]     = useState<SubTab>('실현손익');
   const [result,     setResult]     = useState<ResultFilter>('전체');
+  const { accountId } = useLocalSearchParams<{ accountId?: string }>();
   const [offset,     setOffset]     = useState(0);
   const [showUsd,    setShowUsd]    = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(accountId ?? null);
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const { accounts, totalBalance } = useAccounts();
@@ -810,7 +816,7 @@ export default function ProfitAnalysis() {
         onClose={() => setPickerOpen(false)}
       />
 
-      <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
+      <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }}>
 
         {/* 계좌 선택 드롭다운 */}
         <AccountDropdownRow selectedId={selectedId} onOpen={() => setPickerOpen(true)} />
@@ -828,7 +834,7 @@ export default function ProfitAnalysis() {
           />
         ) : (
           <View style={{ paddingVertical: 14, paddingHorizontal: 20 }}>
-            <Text style={{ fontSize: 15, fontWeight: '700', color: C.text }}>전체 기간 실현수익</Text>
+            <Text style={{ fontSize: 15, fontWeight: '700', color: C.text }}>전체 기간</Text>
           </View>
         )}
 

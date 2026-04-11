@@ -175,6 +175,13 @@ async function fetchGatePositions(apiKey: string, apiSecret: string): Promise<Po
 
       const tpsl = priceOrders.get(contract);
 
+      // 포지션 직접 설정 TP/SL (Gate.io 앱에서 설정 시 position 객체에 포함)
+      const posSl = parseFloat(p.stop_loss_price  || '0') || null;
+      const posTp = parseFloat(p.take_profit_price || '0') || null;
+      // 조건부 주문 TP/SL과 병합 — 포지션 직접 설정 우선
+      const finalSl = posSl ?? tpsl?.sl ?? null;
+      const finalTp = posTp ?? tpsl?.tp ?? null;
+
       return {
         id:           p.contract + '_' + (p.update_time || Date.now()),
         symbol:       contract.replace('_', '/'),
@@ -195,8 +202,8 @@ async function fetchGatePositions(apiKey: string, apiSecret: string): Promise<Po
         liqPrice:     parseFloat(p.liq_price || '0'),
         size:         Math.abs(size),
         usdtKrw,
-        ...(tpsl?.tp ? { targetPrice: tpsl.tp } : {}),
-        ...(tpsl?.sl ? { stopLoss:    tpsl.sl } : {}),
+        ...(finalTp ? { targetPrice: finalTp } : {}),
+        ...(finalSl ? { stopLoss:    finalSl } : {}),
         ...(p.open_time ? { openTime: p.open_time } : {}),
       };
     });

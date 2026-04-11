@@ -639,20 +639,6 @@ export default function PositionDetail() {
                 )}
               </GlassCard>
 
-              {/* ── 포지션 정보 ─────────────────────────── */}
-              <GlassCard intensity="medium" radius={24} padding={20} style={st.section}>
-                <Text style={st.sectionTitle}>포지션 정보</Text>
-                <InfoRow label="레버리지" value={`${position.leverage}x`} />
-                <InfoRow label={`${position.coin} 수량`} value={`${p.quantity ?? p.size ?? '-'} ${position.coin}`} />
-                <InfoRow label="보유 기간" value={position.holdingPeriod ?? '-'} isLast={!(position.riskLevel)} />
-                {position.riskLevel != null && (
-                  <View style={st.riskWrap}>
-                    <Text style={[row.label, { marginBottom: 10 }]}>리스크 수준</Text>
-                    <RiskGauge level={(position.riskLevel ?? 3) as 1|2|3|4|5} />
-                  </View>
-                )}
-              </GlassCard>
-
               {/* ── ICT 분석 ────────────────────────────── */}
               <GlassCard intensity="low" radius={20} padding={0} style={st.section}>
                 {/* 헤더 */}

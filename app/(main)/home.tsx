@@ -49,23 +49,23 @@ function buildChartFromTrades(
   const buckets: Bucket[] = [];
 
   if (period === '시간') {
-    // 24개 시간 버킷 (24시간 전 ~ 현재)
-    for (let i = 23; i >= 0; i--) {
+    // 10개 시간 버킷 (10시간 전 ~ 현재)
+    for (let i = 9; i >= 0; i--) {
       const d = new Date(now.getTime() - i * 3600_000);
       const key   = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}`;
       const label = `${d.getHours()}시`;
       buckets.push({ key, label });
     }
   } else if (period === '일') {
-    // 30개 일별 버킷 (30일 전 ~ 오늘)
-    for (let i = 29; i >= 0; i--) {
+    // 7개 일별 버킷 (7일 전 ~ 오늘)
+    for (let i = 6; i >= 0; i--) {
       const d   = new Date(now.getTime() - i * 86400_000);
       const key = d.toISOString().slice(0, 10);
       buckets.push({ key, label: `${d.getMonth()+1}/${d.getDate()}` });
     }
   } else if (period === '주') {
-    // 12개 주간 버킷 (12주 전 ~ 이번 주, 월요일 기준)
-    for (let i = 11; i >= 0; i--) {
+    // 8개 주간 버킷 (8주 전 ~ 이번 주, 월요일 기준)
+    for (let i = 7; i >= 0; i--) {
       const d   = new Date(now.getTime() - i * 7 * 86400_000);
       const dow = d.getDay();
       const monday = new Date(d.getTime() - ((dow === 0 ? 6 : dow - 1) * 86400_000));
@@ -73,15 +73,15 @@ function buildChartFromTrades(
       buckets.push({ key, label: `${monday.getMonth()+1}/${monday.getDate()}` });
     }
   } else if (period === '월') {
-    // 12개 월별 버킷 (12개월 전 ~ 이번 달)
-    for (let i = 11; i >= 0; i--) {
+    // 6개 월별 버킷 (6개월 전 ~ 이번 달)
+    for (let i = 5; i >= 0; i--) {
       const d   = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
       buckets.push({ key, label: `${String(d.getFullYear()).slice(2)}.${d.getMonth()+1}` });
     }
   } else {
-    // 10개 연도 버킷 (10년 전 ~ 올해)
-    for (let i = 9; i >= 0; i--) {
+    // 6개 연도 버킷 (6년 전 ~ 올해)
+    for (let i = 5; i >= 0; i--) {
       const y = now.getFullYear() - i;
       buckets.push({ key: `${y}`, label: `${y}` });
     }
@@ -152,19 +152,19 @@ function buildPeriodBarsFromTrades(
   const buckets: Bucket[] = [];
 
   if (period === '시간') {
-    for (let i = 23; i >= 0; i--) {
+    for (let i = 9; i >= 0; i--) {
       const d   = new Date(now.getTime() - i * 3600_000);
       const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}`;
       buckets.push({ key, label: `${d.getHours()}시` });
     }
   } else if (period === '일') {
-    for (let i = 29; i >= 0; i--) {
+    for (let i = 6; i >= 0; i--) {
       const d   = new Date(now.getTime() - i * 86400_000);
       const key = d.toISOString().slice(0, 10);
       buckets.push({ key, label: `${d.getMonth()+1}/${d.getDate()}` });
     }
   } else if (period === '주') {
-    for (let i = 11; i >= 0; i--) {
+    for (let i = 7; i >= 0; i--) {
       const d   = new Date(now.getTime() - i * 7 * 86400_000);
       const dow = d.getDay();
       const monday = new Date(d.getTime() - ((dow === 0 ? 6 : dow - 1) * 86400_000));
@@ -172,13 +172,13 @@ function buildPeriodBarsFromTrades(
       buckets.push({ key, label: `${monday.getMonth()+1}/${monday.getDate()}` });
     }
   } else if (period === '월') {
-    for (let i = 11; i >= 0; i--) {
+    for (let i = 5; i >= 0; i--) {
       const d   = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
       buckets.push({ key, label: `${String(d.getFullYear()).slice(2)}.${d.getMonth()+1}` });
     }
   } else {
-    for (let i = 9; i >= 0; i--) {
+    for (let i = 5; i >= 0; i--) {
       const y = now.getFullYear() - i;
       buckets.push({ key: `${y}`, label: `${y}` });
     }

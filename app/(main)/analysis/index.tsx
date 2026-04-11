@@ -621,7 +621,7 @@ const st = StyleSheet.create({
   accountViewAll: { fontSize: 14, color: colors.text.tertiary },
 
   statsGrid:  { flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingVertical: 16 },
-  statCard:   { flex: 1, backgroundColor: '#F5F5F5', borderRadius: 16, paddingVertical: 16, paddingHorizontal: 14, alignItems: 'center' },
+  statCard:   { flex: 1, backgroundColor: '#F5F5F5', borderRadius: 16, paddingVertical: 16, paddingHorizontal: 14 },
   statLabel:  { fontSize: 12, color: colors.text.tertiary, marginBottom: 6 },
   statValue:  { fontSize: 20, fontWeight: '700', color: '#191919' },
 

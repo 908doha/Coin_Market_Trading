@@ -296,302 +296,247 @@ function StatCard({ label, krw, showUsd, rate }: { label: string; krw: number; s
   );
 }
 
-// ── 자산 차트 ──────────────────────────────────────────────────────────────────
-const CHART_H  = 148;
-const CHART_W  = 600; // SVG viewBox width
-const PAD_L    = 0;
-const PAD_T    = 16;
-const PAD_B    = 20;  // X축 라벨 공간
-const DRAW_H   = CHART_H - PAD_T - PAD_B;
+// ── 통합 차트 (선 + 막대) ─────────────────────────────────────────────────────
+const CHART_W  = 600;  // SVG viewBox 너비
+const LINE_H   = 166;  // 선 차트 높이 (px = SVG 좌표, preserveAspectRatio="none")
+const BARS_H   = 104;  // 막대 차트 높이
+const TOT_H    = LINE_H + BARS_H;  // 270
+const C_PAD_T  = 22;   // 선 차트 상단 여백
 
-interface AssetChartProps {
-  data:         { value: number; date?: string }[];
-  positive:     boolean;
-  showUsd:      boolean;
-  rate:         number;
-  periodRate?:  number;  // 현재 기간(마지막 버킷) 수익률 — 없으면 전체 시리즈 변동률 사용
+function fmtYLabel(v: number): string {
+  const a = Math.abs(v);
+  const s = v < 0 ? '-' : '';
+  if (a >= 100_000_000) return `${s}${(a / 100_000_000).toFixed(1)}억`;
+  if (a >= 10_000)      return `${s}${Math.round(a / 10_000)}만`;
+  return `${Math.round(v).toLocaleString()}`;
 }
 
-function AssetChart({ data, positive, showUsd, rate, periodRate }: AssetChartProps) {
-  const [tooltip,    setTooltip]    = useState<{ idx: number; x: number; y: number } | null>(null);
-  const [chartWidth, setChartWidth] = useState(390);
+function yUnit(max: number): string {
+  if (max >= 100_000_000) return '억원';
+  if (max >= 10_000)      return '만원';
+  return '원';
+}
 
-  if (!data?.length || data.length < 2) {
+interface CombinedChartProps {
+  lineData: { value: number; date?: string }[];
+  barsData: { value: number; date: string }[];
+  positive: boolean;
+  balance:  Balance | null;
+  showUsd:  boolean;
+}
+
+function CombinedChart({ lineData, barsData, positive, balance, showUsd }: CombinedChartProps) {
+  const [tipIdx, setTipIdx] = useState<number | null>(null);
+  const [cw, setCw]         = useState(360);
+
+  const n = barsData.length;
+  // '전체' 기간에서 lineData는 bars보다 base point 1개 많음
+  const aligned = lineData.length === n + 1 ? lineData.slice(1) : lineData;
+  const vals    = aligned.map((d) => d.value).filter((v) => Number.isFinite(v));
+
+  if (n < 2 || vals.length < 2) {
     return (
-      <View style={{ height: CHART_H, alignItems: 'center', justifyContent: 'center' }}>
+      <View style={{ height: TOT_H, alignItems: 'center', justifyContent: 'center' }}>
         <Text variant="caption1" color={colors.text.disabled}>데이터 없음</Text>
       </View>
     );
   }
 
-  const values = data
-    .map((d) => (typeof d.value === 'number' && isFinite(d.value) ? d.value : null))
-    .filter((v): v is number => v !== null);
+  const vMin   = Math.min(...vals);
+  const vMax   = Math.max(...vals);
+  const vRange = (vMax - vMin) || Math.abs(vMax) * 0.02 || 1;
+  const lc     = positive ? colors.market.rise : colors.market.fall;
 
-  if (values.length < 2) {
-    return (
-      <View style={{ height: CHART_H, alignItems: 'center', justifyContent: 'center' }}>
-        <Text variant="caption1" color={colors.text.disabled}>데이터 없음</Text>
-      </View>
-    );
-  }
+  const toLineY = (v: number) => C_PAD_T + (1 - (v - vMin) / vRange) * (LINE_H - C_PAD_T - 6);
+  const toLineX = (i: number) => (i / (n - 1)) * CHART_W;
 
-  const min    = Math.min(...values);
-  const max    = Math.max(...values);
-  const range  = max - min || Math.abs(max) * 0.02 || 1;
-  const color  = positive ? colors.market.rise : colors.market.fall;
-  const n      = values.length;
+  const linePts = vals.map((v, i) => `${toLineX(i)},${toLineY(v)}`);
+  const fillPts = [...linePts, `${CHART_W},${LINE_H}`, `0,${LINE_H}`].join(' ');
 
-  // 시작 → 끝 변동률 (기본값) / periodRate 있으면 그걸 사용
-  const startV     = values[0];
-  const endV       = values[n - 1];
-  const changePct  = startV !== 0 ? ((endV - startV) / Math.abs(startV)) * 100 : 0;
-  const pillRate   = periodRate !== undefined ? periodRate : changePct;
-  const pillSign   = pillRate >= 0 ? '+' : '';
-  const pillColor  = pillRate >= 0 ? colors.market.rise : colors.market.fall;
+  const maxBar  = Math.max(...barsData.map((d) => Math.abs(d.value))) || 1;
+  const barMidY = LINE_H + BARS_H / 2;
+  const maxBarH = BARS_H / 2 - 10;
+  const barW    = Math.max((CHART_W / n) * 0.52, 4);
+  const toBarX  = (i: number) => (i / n) * CHART_W + (CHART_W / n - barW) / 2;
 
-  const toY = (v: number) => PAD_T + (1 - (v - min) / range) * DRAW_H;
-  const toX = (i: number) => PAD_L + (i / (n - 1)) * CHART_W;
-
-  const pts = values.map((v, i) => `${toX(i)},${toY(v)}`);
-  const fillPts = [...pts, `${CHART_W},${CHART_H}`, `${PAD_L},${CHART_H}`].join(' ');
-
-  // 수평 기준선 3개 (min, mid, max)
-  const gridValues = [max, (max + min) / 2, min];
-
-  // 마지막 포인트
-  const lastX = toX(n - 1);
-  const lastY = toY(endV);
-
-  // 툴팁 포인트
-  const tipV = tooltip !== null ? values[tooltip.idx] : null;
-  const tipX = tooltip !== null ? tooltip.x : null;
-  const tipY = tooltip !== null ? tooltip.y : null;
+  const tipX = tipIdx !== null ? toLineX(tipIdx) : null;
+  const tipY = tipIdx !== null ? toLineY(vals[tipIdx]) : null;
 
   const handleTouch = (evt: any) => {
     const { locationX } = evt.nativeEvent;
-    const ratio = locationX / chartWidth;
-    const svgX  = ratio * CHART_W;
-    const idx   = Math.max(0, Math.min(n - 1, Math.round((svgX / CHART_W) * (n - 1))));
-    setTooltip({ idx, x: toX(idx), y: toY(values[idx]) });
+    setTipIdx(Math.max(0, Math.min(n - 1, Math.round((locationX / cw) * (n - 1)))));
   };
 
-  const formatTip = (v: number) => {
-    if (showUsd && rate > 0) return `$${(v / rate).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
-    return `${Math.round(v / 10000).toLocaleString('ko-KR')}만원`;
-  };
+  // Y축 그리드 값
+  const lineGrid = [vMax, (vMax + vMin) / 2, vMin];
+  const barGridY = [
+    { top: LINE_H + 2,        label: fmtYLabel(maxBar)  },
+    { top: barMidY - 7,       label: '0'                },
+    { top: LINE_H + BARS_H - 14, label: fmtYLabel(-maxBar) },
+  ];
 
-  const formatYLabel = (v: number): string => {
-    if (showUsd && rate > 0) {
-      const usd = v / rate;
-      return usd >= 1000 ? `$${(usd / 1000).toFixed(1)}k` : `$${usd.toFixed(0)}`;
-    }
-    if (v >= 100_000_000) return `${(v / 100_000_000).toFixed(1)}억`;
-    if (v >= 10_000)      return `${Math.round(v / 10_000)}만`;
-    return `${Math.round(v).toLocaleString()}`;
-  };
+  // X축 라벨 (최대 6개)
+  const step   = Math.max(1, Math.floor((n - 1) / 5));
+  const xTicks = barsData
+    .map((d, i) => ({ label: d.date, cx: ((i + 0.5) / n) * cw }))
+    .filter((_, i) => i % step === 0 || i === n - 1);
+
+  // 요약 값
+  const totalKrw  = balance?.total ?? 0;
+  const profitKrw = balance?.profitTotal ?? 0;
+  const profitRate = balance?.profitRate ?? 0;
+  const hasUsdBal = showUsd && (balance?.totalUsd ?? 0) > 0;
+  const fmtTotal  = hasUsdBal
+    ? `$${(balance!.totalUsd!).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : formatKRW(totalKrw);
+  const fmtProfit = showUsd && (balance?.usdtKrw ?? 0) > 0
+    ? `${profitKrw >= 0 ? '+' : '-'}$${Math.abs(profitKrw / balance!.usdtKrw!).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : formatKRWSigned(profitKrw);
 
   return (
-    <View>
-      {/* 기간 수익률 */}
-      <View style={chartSt.changePill}>
-        <Text style={[chartSt.changePct, { color: pillColor }]}>
-          {pillSign}{pillRate.toFixed(2)}%
-        </Text>
-        <Text style={chartSt.changeLabel}> 기간 수익률</Text>
-      </View>
-
-      {/* SVG 차트 */}
-      <TouchableWithoutFeedback onPress={handleTouch} onPressOut={() => setTooltip(null)}>
-        <View
-          style={{ height: CHART_H }}
-          onLayout={(e) => setChartWidth(e.nativeEvent.layout.width)}
-        >
+    <View style={{ marginTop: 8 }}>
+      {/* ── SVG 차트 ── */}
+      <TouchableWithoutFeedback onPress={handleTouch} onPressOut={() => setTipIdx(null)}>
+        <View style={{ height: TOT_H }} onLayout={(e) => setCw(e.nativeEvent.layout.width)}>
           <Svg
-            width="100%"
-            height={CHART_H}
-            viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+            width="100%" height={TOT_H}
+            viewBox={`0 0 ${CHART_W} ${TOT_H}`}
             preserveAspectRatio="none"
           >
             <Defs>
-              <LinearGradient id="aFill" x1="0" y1="0" x2="0" y2="1">
-                <Stop offset="0%"   stopColor={color} stopOpacity="0.22" />
-                <Stop offset="100%" stopColor={color} stopOpacity="0"    />
+              <LinearGradient id="cbFill" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0%"   stopColor={lc} stopOpacity="0.18" />
+                <Stop offset="100%" stopColor={lc} stopOpacity="0.01" />
               </LinearGradient>
             </Defs>
 
-            {/* 수평 격자선 + Y축 라벨 */}
-            {gridValues.map((gv, gi) => (
-              <React.Fragment key={gi}>
-                <Line
-                  x1={PAD_L} y1={toY(gv)}
-                  x2={CHART_W} y2={toY(gv)}
-                  stroke={colors.border.default}
-                  strokeWidth="0.8"
-                  strokeDasharray="4,4"
-                />
-                <SvgText
-                  x={4}
-                  y={toY(gv) - 3}
-                  fontSize="9"
-                  fill={colors.text.disabled}
-                  textAnchor="start"
-                >
-                  {formatYLabel(gv)}
-                </SvgText>
-              </React.Fragment>
+            {/* 선 차트 격자선 */}
+            {lineGrid.map((gv, gi) => (
+              <Line key={`lg${gi}`}
+                x1="0" y1={toLineY(gv)} x2={CHART_W} y2={toLineY(gv)}
+                stroke={colors.border.default} strokeWidth="0.7" strokeDasharray="3,3"
+              />
             ))}
 
-            {/* 채우기 */}
-            <Polygon points={fillPts} fill="url(#aFill)" />
+            {/* 막대 0 기준선 */}
+            <Line x1="0" y1={barMidY} x2={CHART_W} y2={barMidY}
+              stroke={colors.border.default} strokeWidth="0.8" />
 
-            {/* 라인 */}
-            <Polyline
-              points={pts.join(' ')}
-              fill="none"
-              stroke={color}
-              strokeWidth="2.2"
-              strokeLinejoin="round"
-              strokeLinecap="round"
-            />
+            {/* 선 채우기 */}
+            <Polygon points={fillPts} fill="url(#cbFill)" />
 
-            {/* 마지막 포인트 */}
-            <Circle cx={lastX} cy={lastY} r="4" fill={color} />
-            <Circle cx={lastX} cy={lastY} r="7" fill={color} fillOpacity="0.2" />
+            {/* 선 */}
+            <Polyline points={linePts.join(' ')} fill="none"
+              stroke={lc} strokeWidth="2"
+              strokeLinejoin="round" strokeLinecap="round" />
 
-            {/* X축 시간 라벨 */}
-            {(() => {
-              const step = Math.max(1, Math.floor((n - 1) / 4));
-              return data.map((d, i) => {
-                if (i % step !== 0 && i !== n - 1) return null;
-                const lx = toX(i);
-                return (
-                  <SvgText
-                    key={`xl-${i}`}
-                    x={Math.max(20, Math.min(lx, CHART_W - 20))}
-                    y={CHART_H - 4}
-                    fontSize="9"
-                    fill={colors.text.disabled}
-                    textAnchor="middle"
-                  >
-                    {d.date ?? ''}
-                  </SvgText>
-                );
-              });
-            })()}
+            {/* 빈 원 포인트 */}
+            {vals.map((v, i) => (
+              <Circle key={`lp${i}`}
+                cx={toLineX(i)} cy={toLineY(v)}
+                r="3.5" fill="white" stroke={lc} strokeWidth="1.5" />
+            ))}
 
-            {/* 툴팁 */}
-            {tooltip !== null && tipX !== null && tipY !== null && (
+            {/* 막대 */}
+            {barsData.map((d, i) => {
+              const bh = (Math.abs(d.value) / maxBar) * maxBarH;
+              const bc = d.value >= 0 ? colors.market.rise : colors.market.fall;
+              return (
+                <Rect key={`br${i}`}
+                  x={toBarX(i)}
+                  y={d.value >= 0 ? barMidY - bh : barMidY}
+                  width={barW}
+                  height={Math.max(bh, d.value !== 0 ? 2 : 0)}
+                  rx="2" fill={bc} fillOpacity="0.85" />
+              );
+            })}
+
+            {/* 크로스헤어 */}
+            {tipX !== null && tipY !== null && (
               <>
-                {/* 수직선 */}
-                <Line
-                  x1={tipX} y1={PAD_T}
-                  x2={tipX} y2={CHART_H - PAD_B}
-                  stroke={color} strokeWidth="1.2" strokeDasharray="3,3"
-                />
-                {/* 포인트 */}
-                <Circle cx={tipX} cy={tipY} r="5" fill={color} />
-                <Circle cx={tipX} cy={tipY} r="9" fill={color} fillOpacity="0.15" />
-                {/* 값 라벨 */}
-                <Rect
-                  x={Math.min(tipX - 60, CHART_W - 130)}
-                  y={PAD_T - 2}
-                  width="120"
-                  height="22"
-                  rx="6"
-                  fill={color}
-                />
-                <SvgText
-                  x={Math.min(tipX, CHART_W - 70)}
-                  y={PAD_T + 14}
-                  textAnchor="middle"
-                  fontSize="13"
-                  fontWeight="700"
-                  fill="white"
-                >
-                  {formatTip(tipV!)}
-                </SvgText>
+                <Line x1={tipX} y1={C_PAD_T / 2} x2={tipX} y2={TOT_H - 5}
+                  stroke="#555" strokeWidth="0.8" />
+                <Circle cx={tipX} cy={tipY} r="5" fill={lc} />
+                <Circle cx={tipX} cy={tipY} r="9" fill={lc} fillOpacity="0.15" />
+                <Circle cx={tipX} cy={TOT_H - 6} r="3.5" fill="#555" />
               </>
             )}
           </Svg>
+
+          {/* Y 라벨 — 선 차트 절대 위치 */}
+          {lineGrid.map((gv, gi) => (
+            <View key={`lyv${gi}`} style={{ position: 'absolute', top: toLineY(gv) - 9, left: 2 }}>
+              <Text style={cbSt.yLabel}>{fmtYLabel(gv)}</Text>
+            </View>
+          ))}
+
+          {/* Y 라벨 — 막대 차트 절대 위치 */}
+          {barGridY.map(({ top, label }, gi) => (
+            <View key={`byv${gi}`} style={{ position: 'absolute', top, left: 2 }}>
+              <Text style={cbSt.yLabel}>{label}</Text>
+            </View>
+          ))}
+
+          {/* 단위 라벨 */}
+          <View style={{ position: 'absolute', top: 1, left: 2 }}>
+            <Text style={cbSt.unit}>(단위:{yUnit(vMax)})</Text>
+          </View>
+          <View style={{ position: 'absolute', top: LINE_H + 1, left: 2 }}>
+            <Text style={cbSt.unit}>(단위:{yUnit(maxBar)})</Text>
+          </View>
         </View>
       </TouchableWithoutFeedback>
+
+      {/* X축 날짜 라벨 */}
+      <View style={{ height: 20, position: 'relative' }}>
+        {xTicks.map(({ label, cx }, i) => (
+          <View key={i} style={{ position: 'absolute', left: cx - 18, top: 4, width: 36 }}>
+            <Text style={[cbSt.xLabel, { textAlign: 'center' }]}>{label}</Text>
+          </View>
+        ))}
+      </View>
+
+      {/* 요약 행 */}
+      <View style={cbSt.sumBox}>
+        <View style={cbSt.sumItem}>
+          <Text style={cbSt.sumLabel}>평가금액</Text>
+          <Text style={cbSt.sumValue}>{fmtTotal}</Text>
+        </View>
+        <View style={cbSt.sumDivider} />
+        <View style={cbSt.sumItem}>
+          <Text style={cbSt.sumLabel}>투자수익</Text>
+          <Text style={[cbSt.sumValue, { color: profitKrw >= 0 ? colors.market.rise : colors.market.fall }]}>
+            {fmtProfit}
+          </Text>
+        </View>
+        <View style={cbSt.sumDivider} />
+        <View style={cbSt.sumItem}>
+          <Text style={cbSt.sumLabel}>수익률</Text>
+          <Text style={[cbSt.sumValue, { color: profitRate >= 0 ? colors.market.rise : colors.market.fall }]}>
+            {formatRate(profitRate)}
+          </Text>
+        </View>
+      </View>
     </View>
   );
 }
 
-const chartSt = StyleSheet.create({
-  changePill:  { flexDirection: 'row', alignItems: 'baseline', paddingHorizontal: 16, marginBottom: spacing[2] },
-  changePct:   { fontSize: 14, fontWeight: '700' },
-  changeLabel: { fontSize: 13, color: colors.text.disabled },
-  dateRow: {
-    flexDirection: 'row', justifyContent: 'space-between',
-    marginTop: 4, paddingHorizontal: 2,
+const cbSt = StyleSheet.create({
+  yLabel: { fontSize: 8.5, color: colors.text.disabled, lineHeight: 10 },
+  unit:   { fontSize: 7.5, color: colors.text.disabled },
+  xLabel: { fontSize: 9.5, color: colors.text.disabled },
+  sumBox: {
+    flexDirection: 'row', alignItems: 'center',
+    marginTop: 14, paddingTop: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border.default,
   },
+  sumItem:    { flex: 1, alignItems: 'center' },
+  sumLabel:   { fontSize: 11, color: colors.text.tertiary, marginBottom: 3 },
+  sumValue:   { fontSize: 13, fontWeight: '700', color: colors.text.primary },
+  sumDivider: { width: StyleSheet.hairlineWidth, height: 28, backgroundColor: colors.border.default },
 });
 
-// ── 기간별 수익률 바 차트 ─────────────────────────────────────────────────────
-const BARS_H = 100;
-
-function PeriodPnlBars({ data }: { data: { value: number; rate: number; date: string }[] }) {
-  const hasData = data.some((d) => d.value !== 0);
-
-  if (!hasData) {
-    return (
-      <View style={{ height: BARS_H, alignItems: 'center', justifyContent: 'center' }}>
-        <Text variant="caption1" color={colors.text.disabled}>데이터 없음</Text>
-      </View>
-    );
-  }
-
-  const maxAbs  = Math.max(...data.map((d) => Math.abs(d.value))) || 1;
-  const n       = data.length;
-  const barW    = Math.max((CHART_W / n) * 0.55, 4);
-  const midY    = BARS_H / 2;
-  const maxBarH = midY - 8;
-
-  return (
-    <View>
-      <View style={{ height: BARS_H }}>
-        <Svg
-          width="100%"
-          height={BARS_H}
-          viewBox={`0 0 ${CHART_W} ${BARS_H}`}
-          preserveAspectRatio="none"
-        >
-          <Line
-            x1={0} y1={midY}
-            x2={CHART_W} y2={midY}
-            stroke={colors.border.default}
-            strokeWidth="0.8"
-          />
-          {data.map((d, i) => {
-            const barH = (Math.abs(d.value) / maxAbs) * maxBarH;
-            const x    = PAD_L + (i / n) * CHART_W + ((CHART_W / n) - barW) / 2;
-            const y    = d.value >= 0 ? midY - barH : midY;
-            const c    = d.value >= 0 ? colors.market.rise : colors.market.fall;
-            return (
-              <Rect
-                key={i}
-                x={x}
-                y={y}
-                width={barW}
-                height={Math.max(barH, d.value !== 0 ? 2 : 0)}
-                rx="3"
-                fill={c}
-                fillOpacity="0.85"
-              />
-            );
-          })}
-        </Svg>
-      </View>
-      <View style={chartSt.dateRow}>
-        <Text variant="caption1" color={colors.text.disabled}>{data[0]?.date ?? ''}</Text>
-        <Text variant="caption1" color={colors.text.disabled}>{data[data.length - 1]?.date ?? ''}</Text>
-      </View>
-    </View>
-  );
-}
 
 // ── 거래소 로고 아이콘 ────────────────────────────────────────────────────────
 function ExchangeLogo({ exchange, size = 44 }: { exchange: ExchangeType; size?: number }) {
@@ -780,10 +725,6 @@ export default function Home() {
     () => buildPeriodBarsFromTrades(allTrades ?? [], balance ?? null, period),
     [allTrades, balance, period],
   );
-  // 현재 기간(마지막 버킷) 수익률 → AssetChart "기간 수익률" 표시에 사용
-  const lastBar           = barsData[barsData.length - 1];
-  const currentPeriodRate = lastBar?.rate ?? 0;
-
   return (
     <FadeTabView style={styles.root}>
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
@@ -854,22 +795,16 @@ export default function Home() {
                     paddingV={6}
                     gap={4}
                   />
-                  <AssetChart
-                    data={chartData}
+                  <CombinedChart
+                    lineData={chartData}
+                    barsData={barsData}
                     positive={isProfit}
+                    balance={balance}
                     showUsd={showUsd}
-                    rate={balance?.usdtKrw ?? 1350}
-                    periodRate={currentPeriodRate}
                   />
                 </View>
               </>
             )}
-          </GlassCard>
-
-          {/* ── 기간 수익률 차트 ── */}
-          <GlassCard style={styles.rateCard} intensity="low" radius={20} padding={16}>
-            <Text variant="meta" color={colors.text.tertiary} style={{ marginBottom: 8 }}>기간 수익률</Text>
-            <PeriodPnlBars data={barsData} />
           </GlassCard>
 
           {/* ── 자산 분배 ── */}
@@ -1016,7 +951,6 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: spacing[5] },
 
   heroCard:     { marginBottom: spacing[3] },
-  rateCard:     { marginBottom: spacing[3] },
   heroAmount:   { fontSize: 26, fontWeight: '700', color: colors.text.primary, letterSpacing: -0.5 },
   heroSubRow:   { flexDirection: 'row', alignItems: 'center', gap: spacing[2], marginBottom: spacing[1] },
   heroPnl:      { fontSize: 15, fontWeight: '600' },

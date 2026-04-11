@@ -354,13 +354,23 @@ export default function Trading() {
             <View style={st.balanceGrid}>
               <View style={st.balanceCard}>
                 <Text style={st.balanceCardLabel}>원화</Text>
-                <Text style={st.balanceCardValue}>{formatKRW(krwAvail)}</Text>
+                <AnimatedNumber
+                  value={krwAvail}
+                  formatter={formatKRW}
+                  fontSize={18}
+                  fontWeight="700"
+                  color="#191919"
+                />
               </View>
               <View style={st.balanceCard}>
                 <Text style={st.balanceCardLabel}>달러</Text>
-                <Text style={st.balanceCardValue}>
-                  {`$${usdTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                </Text>
+                <AnimatedNumber
+                  value={usdTotal}
+                  formatter={(v) => `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                  fontSize={18}
+                  fontWeight="700"
+                  color="#191919"
+                />
               </View>
             </View>
           )}

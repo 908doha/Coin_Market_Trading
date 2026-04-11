@@ -548,6 +548,111 @@ export default function PositionDetail() {
                 </View>
               </GlassCard>
 
+              {/* ── 통합 손익/가격 카드 ─────────────────── */}
+              <GlassCard intensity="medium" radius={24} padding={24} style={st.section}>
+                <Text style={st.pnlLabel}>평가손익</Text>
+                <AnimatedNumber
+                  value={position.profit}
+                  formatter={formatKRWSigned}
+                  fontSize={30}
+                  fontWeight="700"
+                  color={pnlColor}
+                  letterSpacing={-0.5}
+                  style={{ marginBottom: 6 }}
+                />
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 0, marginBottom: 16 }}>
+                  <View style={[st.rateBadge, { backgroundColor: isProfit ? colors.market.riseSubtle : '#FFF0F0' }]}>
+                    <AnimatedNumber
+                      value={position.profitRate}
+                      formatter={formatRate}
+                      fontSize={14}
+                      fontWeight="700"
+                      color={pnlColor}
+                    />
+                  </View>
+                </View>
+
+                {/* Row 1: 수량 | 증거금 */}
+                <View style={st.amountRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={st.amountLabel}>수량</Text>
+                    <Text style={st.amountValue}>{p.quantity ?? p.size ?? '-'} {position.coin}</Text>
+                  </View>
+                  <View style={st.amountDivider} />
+                  <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                    <Text style={st.amountLabel}>증거금</Text>
+                    <Text style={st.amountValue}>{formatKRW(position.amount)}</Text>
+                  </View>
+                </View>
+
+                {/* Row 2: 진입가 | 현재가 */}
+                <View style={st.gridRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={st.amountLabel}>진입가</Text>
+                    <Text style={st.amountValue}>{fmt$(position.entryPrice)}</Text>
+                  </View>
+                  <View style={st.amountDivider} />
+                  <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                    <Text style={st.amountLabel}>현재가</Text>
+                    <Text style={[st.amountValue, { color: pnlColor }]}>{fmt$(position.currentPrice ?? position.markPrice)}</Text>
+                  </View>
+                </View>
+
+                {/* Row 3: 청산가 | 평가금액 */}
+                <View style={st.gridRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={st.amountLabel}>청산가</Text>
+                    <Text style={[st.amountValue, p.liqPrice > 0 ? { color: colors.negative.text } : {}]}>
+                      {p.liqPrice > 0 ? fmt$(p.liqPrice) : '-'}
+                    </Text>
+                  </View>
+                  <View style={st.amountDivider} />
+                  <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                    <Text style={st.amountLabel}>평가금액</Text>
+                    <AnimatedNumber
+                      value={position.currentValue ?? 0}
+                      formatter={formatKRW}
+                      fontSize={15}
+                      fontWeight="700"
+                      color={colors.text.primary}
+                    />
+                  </View>
+                </View>
+
+                {/* Row 4 (조건부): 손절가 | 목표가 */}
+                {(position.stopLoss! > 0 || position.targetPrice! > 0) && (
+                  <View style={st.gridRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={st.amountLabel}>손절가</Text>
+                      <Text style={[st.amountValue, position.stopLoss! > 0 ? { color: colors.negative.text } : {}]}>
+                        {position.stopLoss! > 0 ? fmt$(position.stopLoss!) : '-'}
+                      </Text>
+                    </View>
+                    <View style={st.amountDivider} />
+                    <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                      <Text style={st.amountLabel}>목표가</Text>
+                      <Text style={[st.amountValue, position.targetPrice! > 0 ? { color: colors.positive.text } : {}]}>
+                        {position.targetPrice! > 0 ? fmt$(position.targetPrice!) : '-'}
+                      </Text>
+                    </View>
+                  </View>
+                )}
+              </GlassCard>
+
+              {/* ── 포지션 정보 ─────────────────────────── */}
+              <GlassCard intensity="medium" radius={24} padding={20} style={st.section}>
+                <Text style={st.sectionTitle}>포지션 정보</Text>
+                <InfoRow label="레버리지" value={`${position.leverage}x`} />
+                <InfoRow label={`${position.coin} 수량`} value={`${p.quantity ?? p.size ?? '-'} ${position.coin}`} />
+                <InfoRow label="보유 기간" value={position.holdingPeriod ?? '-'} isLast={!(position.riskLevel)} />
+                {position.riskLevel != null && (
+                  <View style={st.riskWrap}>
+                    <Text style={[row.label, { marginBottom: 10 }]}>리스크 수준</Text>
+                    <RiskGauge level={(position.riskLevel ?? 3) as 1|2|3|4|5} />
+                  </View>
+                )}
+              </GlassCard>
+
               {/* ── ICT 분석 ────────────────────────────── */}
               <GlassCard intensity="low" radius={20} padding={0} style={st.section}>
                 {/* 헤더 */}
@@ -696,86 +801,6 @@ export default function PositionDetail() {
                 ) : null}
               </GlassCard>
 
-              {/* ── 손익 히어로 카드 ────────────────────── */}
-              <GlassCard intensity="medium" radius={24} padding={24} style={st.section}>
-                <Text style={st.pnlLabel}>평가손익</Text>
-                <AnimatedNumber
-                  value={position.profit}
-                  formatter={formatKRWSigned}
-                  fontSize={30}
-                  fontWeight="700"
-                  color={pnlColor}
-                  letterSpacing={-0.5}
-                  style={{ marginBottom: 6 }}
-                />
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 0, marginBottom: 20 }}>
-                  <View style={[st.rateBadge, { backgroundColor: isProfit ? colors.market.riseSubtle : '#FFF0F0' }]}>
-                    <AnimatedNumber
-                      value={position.profitRate}
-                      formatter={formatRate}
-                      fontSize={14}
-                      fontWeight="700"
-                      color={pnlColor}
-                    />
-                  </View>
-                </View>
-                {/* 투자금 / 평가금 가로 구분 */}
-                <View style={st.amountRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={st.amountLabel}>증거금</Text>
-                    <Text style={st.amountValue}>{formatKRW(position.amount)}</Text>
-                  </View>
-                  <View style={st.amountDivider} />
-                  <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                    <Text style={st.amountLabel}>평가금액</Text>
-                    <AnimatedNumber
-                      value={position.currentValue ?? 0}
-                      formatter={formatKRW}
-                      fontSize={16}
-                      fontWeight="700"
-                      color={colors.text.primary}
-                    />
-                  </View>
-                </View>
-              </GlassCard>
-
-              {/* ── 가격 현황 ───────────────────────────── */}
-              <GlassCard intensity="medium" radius={24} padding={20} style={st.section}>
-                <Text style={st.sectionTitle}>가격 현황</Text>
-                <InfoRow label="진입가"  value={fmt$(position.entryPrice)} />
-                <InfoRow
-                  label="현재가"
-                  value={fmt$(position.currentPrice ?? position.markPrice)}
-                  valueColor={pnlColor}
-                />
-                {p.liqPrice > 0 && (
-                  <InfoRow label="청산가" value={fmt$(p.liqPrice)} valueColor={colors.negative.text} />
-                )}
-                {position.stopLoss! > 0 && (
-                  <InfoRow label="손절가" value={fmt$(position.stopLoss!)} valueColor={colors.negative.text} />
-                )}
-                {position.targetPrice! > 0 && (
-                  <InfoRow label="목표가" value={fmt$(position.targetPrice!)} valueColor={colors.positive.text} isLast />
-                )}
-                {!position.stopLoss && !position.targetPrice && (
-                  <InfoRow label={`${position.coin} 수량`} value={`${p.quantity ?? p.size ?? '-'} ${position.coin}`} isLast />
-                )}
-              </GlassCard>
-
-              {/* ── 포지션 정보 ─────────────────────────── */}
-              <GlassCard intensity="medium" radius={24} padding={20} style={st.section}>
-                <Text style={st.sectionTitle}>포지션 정보</Text>
-                <InfoRow label="레버리지" value={`${position.leverage}x`} />
-                <InfoRow label={`${position.coin} 수량`} value={`${p.quantity ?? p.size ?? '-'} ${position.coin}`} />
-                <InfoRow label="보유 기간" value={position.holdingPeriod ?? '-'} isLast={!(position.riskLevel)} />
-                {position.riskLevel != null && (
-                  <View style={st.riskWrap}>
-                    <Text style={[row.label, { marginBottom: 10 }]}>리스크 수준</Text>
-                    <RiskGauge level={(position.riskLevel ?? 3) as 1|2|3|4|5} />
-                  </View>
-                )}
-              </GlassCard>
-
               <View style={{ height: 120 }} />
             </>
           )}
@@ -810,6 +835,7 @@ const st = StyleSheet.create({
   rateText:  { fontSize: 14, fontWeight: '700' },
 
   amountRow:     { flexDirection: 'row', alignItems: 'center', paddingTop: 16, borderTopWidth: 1, borderTopColor: colors.border.default },
+  gridRow:       { flexDirection: 'row', alignItems: 'center', paddingTop: 12, marginTop: 12, borderTopWidth: 1, borderTopColor: colors.border.default },
   amountDivider: { width: 1, height: 36, backgroundColor: colors.border.default, marginHorizontal: 16 },
   amountLabel:   { fontSize: 12, color: colors.text.tertiary, marginBottom: 4 },
   amountValue:   { fontSize: 15, fontWeight: '700', color: colors.text.primary },

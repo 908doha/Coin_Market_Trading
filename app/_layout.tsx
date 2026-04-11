@@ -2,7 +2,7 @@ import './global.css';
 import { useEffect } from 'react';
 import { View, Platform, StyleSheet } from 'react-native';
 import { Stack } from 'expo-router';
-import { Head } from 'expo-router/head';
+import Head from 'expo-router/head';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { useFonts } from 'expo-font';

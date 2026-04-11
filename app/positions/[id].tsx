@@ -3,4 +3,6 @@
  * 홈 탭 등 다른 탭에서 포지션 상세로 진입할 때 사용.
  * 탭을 바꾸지 않고 루트 스택 위에 오버레이되므로 뒤로가기 시 이전 탭으로 복귀.
  */
-export { default } from '../(main)/positions/[id]';
+// eslint-disable-next-line import/no-relative-packages
+import Component from '../(main)/positions/[id]';
+export default Component;

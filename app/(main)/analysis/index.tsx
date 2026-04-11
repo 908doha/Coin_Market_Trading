@@ -18,6 +18,8 @@ import { colors } from '@/design-system/tokens';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType, ExchangeAccount } from '@/store/accounts';
 import { tradesService } from '@/services';
 import type { Trade } from '@/services/trades.service';
+import { formatKRW } from '@/utils/format';
+import type { Balance } from '@/services/account.service';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -371,7 +373,7 @@ export default function Analysis() {
   const [search,  setSearch]    = useState('');
   const [ictMap,  setIctMap]    = useState<Map<string, IctResult | 'loading'>>(new Map());
 
-  const { accounts } = useAccounts();
+  const { accounts, balances, totalBalance } = useAccounts();
 
   const selectedAccount = accounts.find((a) => a.id === selectedAccountId) ?? null;
   const selectedLabel   = selectedAccount

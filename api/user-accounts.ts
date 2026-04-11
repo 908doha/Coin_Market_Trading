@@ -4,12 +4,16 @@
  * POST /api/user-accounts  — 계좌 목록 저장 (덮어쓰기)
  *
  * 인증: Authorization: Bearer <jwt> 헤더 (Django JWT)
- * 저장: PostgreSQL (DATABASE_URL)
+ * 저장: Supabase (supabase-js) — REST API 사용으로 직접 PG 연결 불필요
  * 암호화: AES-256-GCM (ACCOUNTS_ENCRYPTION_KEY)
+ *
+ * 필요한 Vercel 환경변수:
+ *   SUPABASE_URL            — https://xxxx.supabase.co
+ *   SUPABASE_SERVICE_ROLE_KEY — service_role 키 (Settings > API)
  */
 
 import crypto from 'crypto';
-import { Client } from 'pg';
+import { createClient } from '@supabase/supabase-js';
 
 // ── JWT payload decode (검증 없이 userId 추출) ────────────────────────────────
 function decodeJwtPayload(token: string): { user_id?: number; id?: number; sub?: string } | null {
@@ -62,102 +66,33 @@ function decrypt(encoded: string): string {
   return decipher.update(enc).toString('utf8') + decipher.final('utf8');
 }
 
-// ── DATABASE_URL → 안전한 연결 문자열 빌드 ────────────────────────────────────
-// new URL()은 비밀번호의 [ ] @ # 등을 허용 안 함 → lastIndexOf('@')로 직접 파싱 후
-// encodeURIComponent로 재인코딩해 pg-connection-string이 안전하게 파싱하도록 함
-function buildSafeConnectionString(url: string, overridePassword?: string): string {
-  const withoutProto = url.replace(/^(?:postgresql|postgres):\/\//, '');
-  const lastAt = withoutProto.lastIndexOf('@');
-  if (lastAt === -1) throw new Error('DATABASE_URL has no @ separator');
-  const creds    = withoutProto.slice(0, lastAt);
-  const hostPart = withoutProto.slice(lastAt + 1);
-  const colonIdx  = creds.indexOf(':');
-  const rawUser   = colonIdx === -1 ? creds : creds.slice(0, colonIdx);
-  const rawPass   = colonIdx === -1 ? ''    : creds.slice(colonIdx + 1);
-  const m = hostPart.match(/^([^:/]+)(?::(\d+))?(?:\/([^?]*))?/);
-  if (!m) throw new Error('DATABASE_URL host parse failed');
-  const [, host, portStr, database] = m;
-  const safeDecode = (s: string) => { try { return decodeURIComponent(s); } catch { return s; } };
-  const user     = safeDecode(rawUser);
-  const password = overridePassword ?? safeDecode(rawPass);
-  const port     = portStr || '5432';
-  const db       = database || 'postgres';
-  // 비밀번호를 encodeURIComponent로 재인코딩 → pg-connection-string이 new URL()로 파싱 가능
-  // sslmode=require를 URL에 넣으면 pg-connection-string이 ssl:true로 파싱해
-  // Client config의 ssl:{rejectUnauthorized:false}를 덮어씌움 → SELF_SIGNED_CERT 오류
-  // 대신 Client 생성 시 ssl 옵션으로 직접 제어
-  const safeUrl = `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${db}`;
-  console.log('[db-config] host=%s port=%s user=%s db=%s', host, port, user, db);
-  return safeUrl;
-}
-
-// ── PostgreSQL (Vercel 서버리스 — 매 요청마다 Client 생성, 재시도 포함) ───────────
-const MAX_RETRIES = 2;
-
-async function withDb<T>(fn: (client: Client) => Promise<T>): Promise<T | null> {
-  const url = process.env.DATABASE_URL;
-  if (!url) return null;
-
-  const safeUrl = buildSafeConnectionString(url, process.env.PGPASSWORD);
-
-  let lastErr: any;
-
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    if (attempt > 0) {
-      const delay = attempt * 1000; // 1s, 2s
-      console.log(`[user-accounts] DB retry attempt ${attempt}`);
-      await new Promise((r) => setTimeout(r, delay));
-    }
-
-    const client = new Client({
-      connectionString: safeUrl,
-      ssl: { rejectUnauthorized: false },
-      connectionTimeoutMillis: 15000,
-    });
-
-    try {
-      await client.connect();
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS exchange_accounts (
-          user_id    TEXT PRIMARY KEY,
-          data       TEXT NOT NULL,
-          updated_at TIMESTAMPTZ DEFAULT NOW()
-        )
-      `);
-      return await fn(client);
-    } catch (err: any) {
-      lastErr = err;
-      await client.end().catch(() => {});
-      const msg = err?.message ?? '';
-      // 재시도 가능한 에러: 연결 종료, 일시적 네트워크 오류
-      const retryable = msg.includes('terminated unexpectedly')
-        || msg.includes('Connection terminated')
-        || msg.includes('ECONNRESET')
-        || msg.includes('timeout');
-      if (!retryable) throw err;
-      console.warn(`[db] retryable error (attempt ${attempt}):`, msg);
-    }
-  }
-
-  throw lastErr;
+// ── Supabase 클라이언트 (service_role — RLS 무시, 서버 전용) ─────────────────
+function getSupabase() {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  return createClient(url, key, { auth: { persistSession: false } });
 }
 
 async function dbGet(userId: string): Promise<string | null> {
-  return withDb(async (c) => {
-    const res = await c.query('SELECT data FROM exchange_accounts WHERE user_id = $1', [userId]);
-    return res.rows[0]?.data ?? null;
-  });
+  const sb = getSupabase();
+  if (!sb) return null;
+  const { data, error } = await sb
+    .from('exchange_accounts')
+    .select('data')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data?.data ?? null;
 }
 
 async function dbUpsert(userId: string, enc: string): Promise<void> {
-  await withDb(async (c) => {
-    await c.query(
-      `INSERT INTO exchange_accounts (user_id, data, updated_at)
-       VALUES ($1, $2, NOW())
-       ON CONFLICT (user_id) DO UPDATE SET data = $2, updated_at = NOW()`,
-      [userId, enc],
-    );
-  });
+  const sb = getSupabase();
+  if (!sb) return;
+  const { error } = await sb
+    .from('exchange_accounts')
+    .upsert({ user_id: userId, data: enc, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+  if (error) throw new Error(error.message);
 }
 
 // ── CORS 헤더 ─────────────────────────────────────────────────────────────────
@@ -175,7 +110,7 @@ export default async function handler(req: any, res: any) {
   const userId = getUserId(req);
   if (!userId) { res.status(401).json({ error: '인증이 필요해요' }); return; }
 
-  if (!process.env.DATABASE_URL) {
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     // DB 미설정 — 클라이언트가 로컬 스토리지만 사용하도록
     res.status(204).end();
     return;

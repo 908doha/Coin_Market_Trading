@@ -65,36 +65,39 @@ function decrypt(encoded: string): string {
 // ── DATABASE_URL 파싱 ─────────────────────────────────────────────────────────
 // new URL()은 비밀번호의 [ ] @ # 등을 허용 안 함 → lastIndexOf('@')로 직접 파싱
 function buildClientConfig(url: string) {
-  try {
-    // 프로토콜 제거
-    const withoutProto = url.replace(/^(?:postgresql|postgres):\/\//, '');
-    // 마지막 @ 기준으로 credentials / host 분리 (비밀번호 안의 @ 처리)
-    const lastAt = withoutProto.lastIndexOf('@');
-    if (lastAt === -1) throw new Error('no @');
-    const creds    = withoutProto.slice(0, lastAt);
-    const hostPart = withoutProto.slice(lastAt + 1);
-    // 첫 번째 : 기준으로 user / password 분리
-    const colonIdx = creds.indexOf(':');
-    const user     = colonIdx === -1 ? creds : creds.slice(0, colonIdx);
-    const password = colonIdx === -1 ? ''    : creds.slice(colonIdx + 1);
-    // host:port/database 파싱
-    const m = hostPart.match(/^([^:/]+)(?::(\d+))?(?:\/(.*))?$/);
-    if (!m) throw new Error('bad host');
-    const [, host, portStr, database] = m;
-    const safeDecode = (s: string) => { try { return decodeURIComponent(s); } catch { return s; } };
-    return {
-      host,
-      port:     parseInt(portStr || '5432', 10),
-      database: database || 'postgres',
-      user:     safeDecode(user),
-      password: safeDecode(password),
-      ssl:      { rejectUnauthorized: false },
-      connectionTimeoutMillis: 5000,
-    };
-  } catch {
-    // 파싱 실패 시 connectionString 사용 (plain URL이라면 동작)
-    return { connectionString: url, ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 5000 };
+  // 프로토콜 제거
+  const withoutProto = url.replace(/^(?:postgresql|postgres):\/\//, '');
+  // 마지막 @ 기준으로 credentials / host 분리 (비밀번호 안의 @ 처리)
+  const lastAt = withoutProto.lastIndexOf('@');
+  if (lastAt === -1) {
+    console.error('[db-config] no @ found in DATABASE_URL');
+    throw new Error('DATABASE_URL has no @ separator');
   }
+  const creds    = withoutProto.slice(0, lastAt);
+  const hostPart = withoutProto.slice(lastAt + 1);
+  // 첫 번째 : 기준으로 user / password 분리
+  const colonIdx = creds.indexOf(':');
+  const user     = colonIdx === -1 ? creds : creds.slice(0, colonIdx);
+  const password = colonIdx === -1 ? ''    : creds.slice(colonIdx + 1);
+  // host:port/database 파싱 (쿼리 파라미터 제거)
+  const m = hostPart.match(/^([^:/]+)(?::(\d+))?(?:\/([^?]*))?/);
+  if (!m) {
+    console.error('[db-config] failed to parse host from:', hostPart);
+    throw new Error('DATABASE_URL host parse failed');
+  }
+  const [, host, portStr, database] = m;
+  const safeDecode = (s: string) => { try { return decodeURIComponent(s); } catch { return s; } };
+  const config = {
+    host,
+    port:     parseInt(portStr || '5432', 10),
+    database: database || 'postgres',
+    user:     safeDecode(user),
+    password: safeDecode(password),
+    ssl:      { rejectUnauthorized: false },
+    connectionTimeoutMillis: 5000,
+  };
+  console.log('[db-config] parsed host=%s port=%d user=%s db=%s', config.host, config.port, config.user, config.database);
+  return config;
 }
 
 // ── PostgreSQL (Vercel 서버리스 — 매 요청마다 Client 생성) ──────────────────────

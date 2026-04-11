@@ -247,7 +247,7 @@ class TelegramService {
         const f = om.calculateKellyFraction(pair);
         const winRate = total > 0 ? ((s.wins / total) * 100).toFixed(0) : '-';
         lines.push(
-          `[${pair}] W:${s.wins}/L:${s.losses} (승률 ${winRate}%) | f*=${(f * 100).toFixed(2)}%`
+          `[${this._displayName(pair)}] W:${s.wins}/L:${s.losses} (승률 ${winRate}%) | f*=${(f * 100).toFixed(2)}%`
         );
       }
 

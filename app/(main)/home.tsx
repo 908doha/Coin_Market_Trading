@@ -690,23 +690,21 @@ function AccountRow({
 }) {
   const label    = EXCHANGE_LABELS[account.exchange];
   const isProfit = (balance?.profitTotal ?? 0) >= 0;
-
   const hasUsd   = (balance?.totalUsd ?? 0) > 0;
-  const amount   = balance
-    ? showUsd && hasUsd
-      ? `$${balance.totalUsd!.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-      : formatKRW(balance.total)
-    : (error ? '조회 실패' : '—');
 
-  const pnlText  = balance
-    ? showUsd && hasUsd && balance.usdtKrw
-      ? (() => {
-          const usd  = balance.profitTotal / balance.usdtKrw;
-          const sign = usd >= 0 ? '+' : '';
-          return `${sign}$${Math.abs(usd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-        })()
-      : formatKRWSigned(balance.profitTotal)
-    : null;
+  const amountValue     = balance ? (showUsd && hasUsd ? balance.totalUsd! : balance.total) : 0;
+  const amountFormatter = (v: number) =>
+    showUsd && hasUsd
+      ? `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      : formatKRW(v);
+
+  const pnlValue     = balance
+    ? (showUsd && hasUsd && balance.usdtKrw ? balance.profitTotal / balance.usdtKrw : balance.profitTotal)
+    : 0;
+  const pnlFormatter = (v: number) =>
+    showUsd && hasUsd && balance?.usdtKrw
+      ? `${v >= 0 ? '+' : '-'}$${Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      : formatKRWSigned(v);
 
   return (
     <PressableScale onPress={() => router.push(`/(main)/account/${account.id}`)} scaleTo={0.99}>
@@ -714,7 +712,18 @@ function AccountRow({
         <ExchangeLogo exchange={account.exchange} size={44} />
 
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={accRow.amount} numberOfLines={1}>{amount}</Text>
+          {balance ? (
+            <AnimatedNumber
+              value={amountValue}
+              formatter={amountFormatter}
+              fontSize={18}
+              fontWeight="700"
+              color={colors.text.primary}
+              letterSpacing={-0.3}
+            />
+          ) : (
+            <Text style={accRow.amount} numberOfLines={1}>{error ? '조회 실패' : '—'}</Text>
+          )}
           <Text style={accRow.name} numberOfLines={1}>
             {account.name || label} · {label}
           </Text>
@@ -723,14 +732,23 @@ function AccountRow({
           )}
         </View>
 
-        {pnlText && (
+        {balance && (
           <View style={accRow.pnlCol}>
-            <Text style={[accRow.pnlText, { color: isProfit ? colors.market.rise : colors.market.fall }]}>
-              {pnlText}
-            </Text>
-            <Text style={[accRow.pnlRate, { color: isProfit ? colors.market.rise : colors.market.fall }]}>
-              {formatRate(balance!.profitRate)}
-            </Text>
+            <AnimatedNumber
+              value={pnlValue}
+              formatter={pnlFormatter}
+              fontSize={14}
+              fontWeight="700"
+              color={isProfit ? colors.market.rise : colors.market.fall}
+            />
+            <AnimatedNumber
+              value={balance.profitRate}
+              formatter={formatRate}
+              fontSize={12}
+              fontWeight="600"
+              color={isProfit ? colors.market.rise : colors.market.fall}
+              style={{ marginTop: 2 }}
+            />
           </View>
         )}
       </View>

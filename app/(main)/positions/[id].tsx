@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, ScrollView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
-import { Text, GlassCard, Badge, SubPageHeader, ScreenTransition, PositionDetailSkeleton } from '@/design-system';
+import { Text, GlassCard, Badge, SubPageHeader, ScreenTransition, PositionDetailSkeleton, AnimatedNumber } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
@@ -247,16 +247,22 @@ function RiskGauge({ level }: { level: 1 | 2 | 3 | 4 | 5 }) {
 // ─── 메인 화면 ───────────────────────────────────────────────────────────────
 export default function PositionDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { data: position, isLoading, error } = useApi(
+  // 초기 로드: 캐시에서 가져옴 (빠른 표시용)
+  const { data: cachedPosition, isLoading, error } = useApi(
     () => positionsService.getById(id),
     [id],
   );
+
+  // 스토어에서 실시간 포지션 (5초마다 갱신)
+  const { accounts, positions: allPositions } = useAccounts();
+  const livePosition = allPositions.find((p) => p.id === id) ?? null;
+  // 라이브 데이터 우선, 없으면 초기 캐시 데이터 사용
+  const position = livePosition ?? cachedPosition;
 
   // 봇 ICT 분석 조회
   const [ictAnalysis, setIctAnalysis]     = useState<IctAnalysis | null>(null);
   const [botSignal,   setBotSignal]       = useState<BotSignal | null>(null);
   const [signalLoading, setSignalLoading] = useState(false);
-  const { accounts } = useAccounts();
 
   // localStorage 캐시 헬퍼
   const cacheKey = (contract: string) => `ict_analysis_${contract}`;
@@ -510,14 +516,24 @@ export default function PositionDetail() {
               {/* ── 손익 히어로 카드 ────────────────────── */}
               <GlassCard intensity="medium" radius={24} padding={24} style={st.section}>
                 <Text style={st.pnlLabel}>평가손익</Text>
-                <Text style={[st.pnlAmount, { color: pnlColor }]}>
-                  {formatKRWSigned(position.profit)}
-                </Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6, marginBottom: 20 }}>
+                <AnimatedNumber
+                  value={position.profit}
+                  formatter={formatKRWSigned}
+                  fontSize={30}
+                  fontWeight="700"
+                  color={pnlColor}
+                  letterSpacing={-0.5}
+                  style={{ marginBottom: 6 }}
+                />
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 0, marginBottom: 20 }}>
                   <View style={[st.rateBadge, { backgroundColor: isProfit ? colors.market.riseSubtle : '#FFF0F0' }]}>
-                    <Text style={[st.rateText, { color: pnlColor }]}>
-                      {formatRate(position.profitRate)}
-                    </Text>
+                    <AnimatedNumber
+                      value={position.profitRate}
+                      formatter={formatRate}
+                      fontSize={14}
+                      fontWeight="700"
+                      color={pnlColor}
+                    />
                   </View>
                 </View>
                 {/* 투자금 / 평가금 가로 구분 */}
@@ -529,7 +545,13 @@ export default function PositionDetail() {
                   <View style={st.amountDivider} />
                   <View style={{ flex: 1, alignItems: 'flex-end' }}>
                     <Text style={st.amountLabel}>평가금액</Text>
-                    <Text style={st.amountValue}>{formatKRW(position.currentValue ?? 0)}</Text>
+                    <AnimatedNumber
+                      value={position.currentValue ?? 0}
+                      formatter={formatKRW}
+                      fontSize={16}
+                      fontWeight="700"
+                      color={colors.text.primary}
+                    />
                   </View>
                 </View>
               </GlassCard>

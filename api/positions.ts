@@ -31,11 +31,12 @@ interface Position {
   riskLevel:     1 | 2 | 3 | 4 | 5;
   liqPrice:      number;   // 청산가
   size:          number;   // 계약 수
-  quantity:      number;   // 실제 코인 수량 (BTC 등)
   usdtKrw:       number;
+  stopLoss?:     number;   // USD — Gate.io 조건부 주문
+  targetPrice?:  number;   // USD — Gate.io 조건부 주문
 }
 
-// ── Gate.io 선물 포지션 조회 ───────────────────────────────────────────────────
+// ── Gate.io API 헬퍼 ─────────────────────────────────────────────────────────
 
 function gateSign(apiSecret: string, method: string, path: string, query: string, ts: string): string {
   const bodyHash = crypto.createHash('sha512').update('').digest('hex');
@@ -44,36 +45,77 @@ function gateSign(apiSecret: string, method: string, path: string, query: string
     .digest('hex');
 }
 
-async function fetchGatePositions(apiKey: string, apiSecret: string): Promise<Position[]> {
+async function gateGet(apiKey: string, apiSecret: string, path: string, query: string): Promise<any[]> {
   const method = 'GET';
-  const path   = '/api/v4/futures/usdt/positions';
-  const ts     = Math.floor(Date.now() / 1000).toString();
-  const sig    = gateSign(apiSecret, method, path, '', ts);
-
-  const res = await fetch(`https://api.gateio.ws${path}`, {
+  const ts  = Math.floor(Date.now() / 1000).toString();
+  const sig = gateSign(apiSecret, method, path, query, ts);
+  const res = await fetch(`https://api.gateio.ws${path}${query ? '?' + query : ''}`, {
     method,
-    headers: {
-      KEY:       apiKey,
-      Timestamp: ts,
-      SIGN:      sig,
-      Accept:    'application/json',
-    },
+    headers: { KEY: apiKey, Timestamp: ts, SIGN: sig, Accept: 'application/json' },
   });
+  if (!res.ok) throw new Error(`Gate.io ${path} error ${res.status}: ${await res.text()}`);
+  return res.json();
+}
 
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Gate.io API error ${res.status}: ${err}`);
-  }
+// ── Gate.io TP/SL 조건부 주문 조회 ───────────────────────────────────────────
+// /api/v4/futures/usdt/price_orders (trigger orders) 에서 reduce-only 주문으로 TP/SL 판별
 
-  const data: any[] = await res.json();
-
-  // USDT/KRW 환율 조회 (Upbit)
-  let usdtKrw = 1350;
+async function fetchGatePriceOrders(apiKey: string, apiSecret: string): Promise<Map<string, { tp: number | null; sl: number | null }>> {
+  const result = new Map<string, { tp: number | null; sl: number | null }>();
   try {
-    const ticker = await fetch('https://api.upbit.com/v1/ticker?markets=KRW-USDT');
-    const [t] = await ticker.json();
-    usdtKrw = t.trade_price;
-  } catch { /* fallback */ }
+    const orders: any[] = await gateGet(apiKey, apiSecret, '/api/v4/futures/usdt/price_orders', 'status=open');
+    for (const o of orders) {
+      const contract = o.initial?.contract ?? o.contract as string;
+      if (!contract) continue;
+      // reduce_only 또는 close 플래그가 있는 주문만 TP/SL
+      if (!o.initial?.reduce_only && !o.initial?.close && !o.initial?.auto_size) continue;
+      const triggerPrice = parseFloat(o.trigger?.price ?? '0');
+      if (!triggerPrice) continue;
+
+      if (!result.has(contract)) result.set(contract, { tp: null, sl: null });
+      const entry = result.get(contract)!;
+      // auto_size: "close_long" → Long포지션 청산 주문; rule 1(>=) → TP, 2(<=) → SL
+      // auto_size: "close_short" → Short포지션 청산 주문; rule 2(<=) → TP, 1(>=) → SL
+      const rule      = o.trigger?.rule as number;  // 1 = >=, 2 = <=
+      const autoSize  = o.initial?.auto_size as string ?? '';
+
+      if (autoSize === 'close_long') {
+        // Long 포지션 청산: rule=1(>=) 이면 위에서 청산 → TP, rule=2(<=) 이면 아래서 청산 → SL
+        if (rule === 1) { if (!entry.tp || triggerPrice > entry.tp) entry.tp = triggerPrice; }
+        else            { if (!entry.sl || triggerPrice > entry.sl) entry.sl = triggerPrice; }
+      } else if (autoSize === 'close_short') {
+        // Short 포지션 청산: rule=2(<=) 이면 아래서 청산 → TP, rule=1(>=) 이면 위에서 청산 → SL
+        if (rule === 2) { if (!entry.tp || triggerPrice < entry.tp) entry.tp = triggerPrice; }
+        else            { if (!entry.sl || triggerPrice < entry.sl) entry.sl = triggerPrice; }
+      } else {
+        // auto_size 없을 때: size 부호로 판별
+        const size = Number(o.initial?.size ?? 0);
+        if (size < 0) {  // sell = Long 청산
+          if (rule === 1) { if (!entry.tp || triggerPrice > entry.tp) entry.tp = triggerPrice; }
+          else            { if (!entry.sl || triggerPrice > entry.sl) entry.sl = triggerPrice; }
+        } else {  // buy = Short 청산
+          if (rule === 2) { if (!entry.tp || triggerPrice < entry.tp) entry.tp = triggerPrice; }
+          else            { if (!entry.sl || triggerPrice < entry.sl) entry.sl = triggerPrice; }
+        }
+      }
+    }
+  } catch { /* TP/SL 조회 실패시 빈 Map 반환 */ }
+  return result;
+}
+
+// ── Gate.io 선물 포지션 조회 ───────────────────────────────────────────────────
+
+async function fetchGatePositions(apiKey: string, apiSecret: string): Promise<Position[]> {
+  // 포지션, TP/SL 주문, USDT 환율 병렬 조회
+  const [data, priceOrders, usdtKrwRaw] = await Promise.all([
+    gateGet(apiKey, apiSecret, '/api/v4/futures/usdt/positions', ''),
+    fetchGatePriceOrders(apiKey, apiSecret),
+    fetch('https://api.upbit.com/v1/ticker?markets=KRW-USDT')
+      .then(r => r.json()).then(([t]: any) => t.trade_price as number)
+      .catch(() => 1350),
+  ]);
+
+  const usdtKrw: number = usdtKrwRaw;
 
   // 포지션 크기 != 0 인 것만 반환
   return data
@@ -119,6 +161,8 @@ async function fetchGatePositions(apiKey: string, apiSecret: string): Promise<Po
         ? `${openTime.getFullYear()}.${String(openTime.getMonth()+1).padStart(2,'0')}.${String(openTime.getDate()).padStart(2,'0')}`
         : '-';
 
+      const tpsl = priceOrders.get(contract);
+
       return {
         id:           p.contract + '_' + (p.update_time || Date.now()),
         symbol:       contract.replace('_', '/'),
@@ -138,8 +182,9 @@ async function fetchGatePositions(apiKey: string, apiSecret: string): Promise<Po
         riskLevel:    riskLevel as 1|2|3|4|5,
         liqPrice:     parseFloat(p.liq_price || '0'),
         size:         Math.abs(size),
-        quantity:     markPrice > 0 ? parseFloat((notionalUsdt / markPrice).toFixed(6)) : 0,
         usdtKrw,
+        ...(tpsl?.tp ? { targetPrice: tpsl.tp } : {}),
+        ...(tpsl?.sl ? { stopLoss:    tpsl.sl } : {}),
       };
     });
 }

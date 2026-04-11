@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, ScrollView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
-import { Text, GlassCard, Badge, SubPageHeader, ScreenTransition, PositionDetailSkeleton } from '@/design-system';
+import { Text, GlassCard, Badge, SubPageHeader, ScreenTransition, PositionDetailSkeleton, AnimatedNumber } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
@@ -39,8 +39,10 @@ interface IctAnalysis {
   summary: {
     signal: string | null; reason: string;
     confluence: string[];
-    entry: number | null; sl: number | null; tp: number | null;
+    entry: number | null; sl: number | null; tp: number | null; rr?: string | null;
   };
+  score?: number;   // 0~100
+  grade?: string;   // S / A / B+ / B / C / D / F
 }
 
 // 구 BotSignal 호환 (폴백용)
@@ -201,6 +203,163 @@ const ict = StyleSheet.create({
   waitText: { fontSize: 13, color: colors.text.tertiary, lineHeight: 20 },
 });
 
+// ─── 점수 카드 ───────────────────────────────────────────────────────────────
+function ScoreCard({ score, grade }: { score: number; grade: string }) {
+  const gradeColors: Record<string, string> = {
+    S: '#8B5CF6', A: '#3B82F6', 'B+': '#10B981', B: '#06B6D4', C: '#F59E0B', D: '#F97316', F: '#EF4444',
+  };
+  const barColor =
+    score >= 75 ? '#10B981' :
+    score >= 55 ? '#F59E0B' : '#EF4444';
+  const gc = gradeColors[grade] ?? '#8B5CF6';
+
+  return (
+    <View style={score_.wrap}>
+      <View style={{ flex: 1, marginRight: 16 }}>
+        <Text style={score_.label}>셋업 점수</Text>
+        <View style={score_.barBg}>
+          <View style={[score_.barFill, { width: `${score}%` as any, backgroundColor: barColor }]} />
+        </View>
+      </View>
+      <View style={[score_.gradeBadge, { backgroundColor: gc + '22', borderColor: gc }]}>
+        <Text style={[score_.gradeText, { color: gc }]}>{grade}</Text>
+        <Text style={[score_.scoreNum, { color: gc }]}>{score}</Text>
+      </View>
+    </View>
+  );
+}
+const score_ = StyleSheet.create({
+  wrap:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border.default },
+  label:      { fontSize: 12, color: colors.text.tertiary, marginBottom: 6, fontWeight: '600' },
+  barBg:      { height: 8, borderRadius: 4, backgroundColor: colors.bg.elevated, overflow: 'hidden' },
+  barFill:    { height: 8, borderRadius: 4 },
+  gradeBadge: { width: 56, height: 56, borderRadius: 14, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  gradeText:  { fontSize: 18, fontWeight: '800', lineHeight: 22 },
+  scoreNum:   { fontSize: 11, fontWeight: '700' },
+});
+
+// ─── 가격 레인지 시각화 ───────────────────────────────────────────────────────
+function PriceRangeBar({
+  entry, current, tp, sl, direction,
+}: {
+  entry: number; current: number; tp: number | null; sl: number | null; direction: 'Long' | 'Short';
+}) {
+  if (!tp && !sl) return null;
+
+  const prices = [entry, current, tp, sl].filter(Boolean) as number[];
+  const high = Math.max(...prices) * 1.002;
+  const low  = Math.min(...prices) * 0.998;
+  const range = high - low;
+  if (range <= 0) return null;
+
+  const toY = (p: number) => ((high - p) / range) * 100; // 0=top 100=bottom
+
+  const fmt = (v: number) => `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const entryY   = toY(entry);
+  const currentY = toY(current);
+  const tpY      = tp ? toY(tp)   : null;
+  const slY      = sl ? toY(sl)   : null;
+
+  // profit zone top and bottom %
+  const profitTop    = tpY    !== null ? Math.min(entryY, tpY)    : entryY;
+  const profitBottom = tpY    !== null ? Math.max(entryY, tpY)    : entryY;
+  const lossTop      = slY    !== null ? Math.min(entryY, slY)    : entryY;
+  const lossBottom   = slY    !== null ? Math.max(entryY, slY)    : entryY;
+
+  const rr = tp && sl
+    ? (Math.abs(tp - entry) / Math.abs(entry - sl)).toFixed(2)
+    : null;
+
+  return (
+    <View style={prv.wrap}>
+      <Text style={prv.title}>가격 레인지</Text>
+      <View style={prv.chartArea}>
+        {/* 바 컨테이너 */}
+        <View style={prv.bar}>
+          {/* 수익 구간 (초록) */}
+          {tpY !== null && (
+            <View style={[prv.zone, {
+              top:    `${profitTop}%` as any,
+              height: `${Math.abs(profitBottom - profitTop)}%` as any,
+              backgroundColor: '#1AC24E22',
+            }]} />
+          )}
+          {/* 손실 구간 (빨강) */}
+          {slY !== null && (
+            <View style={[prv.zone, {
+              top:    `${lossTop}%` as any,
+              height: `${Math.abs(lossBottom - lossTop)}%` as any,
+              backgroundColor: '#FF474722',
+            }]} />
+          )}
+          {/* TP 선 */}
+          {tpY !== null && (
+            <View style={[prv.line, { top: `${tpY}%` as any, backgroundColor: '#1AC24E' }]} />
+          )}
+          {/* SL 선 */}
+          {slY !== null && (
+            <View style={[prv.line, { top: `${slY}%` as any, backgroundColor: '#FF4747' }]} />
+          )}
+          {/* 진입가 선 */}
+          <View style={[prv.line, { top: `${entryY}%` as any, backgroundColor: colors.text.tertiary }]} />
+          {/* 현재가 마커 */}
+          <View style={[prv.dot, { top: `${currentY}%` as any, marginTop: -6,
+            backgroundColor: current >= entry
+              ? (direction === 'Long' ? '#1AC24E' : '#FF4747')
+              : (direction === 'Long' ? '#FF4747' : '#1AC24E'),
+          }]} />
+        </View>
+
+        {/* 라벨 */}
+        <View style={prv.labels}>
+          {tpY !== null && tp && (
+            <View style={[prv.labelRow, { top: `${tpY}%` as any, marginTop: -10 }]}>
+              <Text style={[prv.labelKey, { color: '#1AC24E' }]}>TP</Text>
+              <Text style={[prv.labelVal, { color: '#1AC24E' }]}>{fmt(tp)}</Text>
+            </View>
+          )}
+          <View style={[prv.labelRow, { top: `${currentY}%` as any, marginTop: -10 }]}>
+            <Text style={[prv.labelKey, { color: colors.text.primary, fontWeight: '700' }]}>현재</Text>
+            <Text style={[prv.labelVal, { color: colors.text.primary, fontWeight: '700' }]}>{fmt(current)}</Text>
+          </View>
+          <View style={[prv.labelRow, { top: `${entryY}%` as any, marginTop: -10 }]}>
+            <Text style={prv.labelKey}>진입</Text>
+            <Text style={prv.labelVal}>{fmt(entry)}</Text>
+          </View>
+          {slY !== null && sl && (
+            <View style={[prv.labelRow, { top: `${slY}%` as any, marginTop: -10 }]}>
+              <Text style={[prv.labelKey, { color: '#FF4747' }]}>SL</Text>
+              <Text style={[prv.labelVal, { color: '#FF4747' }]}>{fmt(sl)}</Text>
+            </View>
+          )}
+        </View>
+      </View>
+      {rr && (
+        <View style={prv.rrRow}>
+          <Text style={prv.rrLabel}>R:R</Text>
+          <Text style={prv.rrVal}>1 : {rr}</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+const prv = StyleSheet.create({
+  wrap:      { paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border.default },
+  title:     { fontSize: 13, fontWeight: '700', color: colors.text.tertiary, marginBottom: 12, letterSpacing: 0.3 },
+  chartArea: { flexDirection: 'row', height: 200 },
+  bar:       { width: 16, marginRight: 0, position: 'relative', backgroundColor: colors.bg.elevated, borderRadius: 4 },
+  zone:      { position: 'absolute', left: 0, right: 0 },
+  line:      { position: 'absolute', left: 0, right: 0, height: 1 },
+  dot:       { position: 'absolute', left: -5, width: 12, height: 12, borderRadius: 6 },
+  labels:    { flex: 1, marginLeft: 12, position: 'relative' },
+  labelRow:  { position: 'absolute', left: 0, right: 0, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  labelKey:  { fontSize: 12, color: colors.text.tertiary, fontWeight: '500', width: 32 },
+  labelVal:  { fontSize: 12, color: colors.text.secondary, fontWeight: '500' },
+  rrRow:     { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
+  rrLabel:   { fontSize: 13, color: colors.text.tertiary, fontWeight: '600' },
+  rrVal:     { fontSize: 13, color: colors.text.primary, fontWeight: '700' },
+});
+
 // ─── 정보 행 ─────────────────────────────────────────────────────────────────
 function InfoRow({
   label, value, valueColor, isLast,
@@ -247,16 +406,22 @@ function RiskGauge({ level }: { level: 1 | 2 | 3 | 4 | 5 }) {
 // ─── 메인 화면 ───────────────────────────────────────────────────────────────
 export default function PositionDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { data: position, isLoading, error } = useApi(
+  // 초기 로드: 캐시에서 가져옴 (빠른 표시용)
+  const { data: cachedPosition, isLoading, error } = useApi(
     () => positionsService.getById(id),
     [id],
   );
+
+  // 스토어에서 실시간 포지션 (5초마다 갱신)
+  const { accounts, positions: allPositions } = useAccounts();
+  const livePosition = allPositions.find((p) => p.id === id) ?? null;
+  // 라이브 데이터 우선, 없으면 초기 캐시 데이터 사용
+  const position = livePosition ?? cachedPosition;
 
   // 봇 ICT 분석 조회
   const [ictAnalysis, setIctAnalysis]     = useState<IctAnalysis | null>(null);
   const [botSignal,   setBotSignal]       = useState<BotSignal | null>(null);
   const [signalLoading, setSignalLoading] = useState(false);
-  const { accounts } = useAccounts();
 
   // localStorage 캐시 헬퍼
   const cacheKey = (contract: string) => `ict_analysis_${contract}`;
@@ -293,11 +458,21 @@ export default function PositionDetail() {
 
     setSignalLoading(true);
 
-    fetch(`/api/bot/analyze?accountId=${encodeURIComponent(accountId)}&contract=${encodeURIComponent(contract)}`)
+    // 계좌 정보 조회 (ICT 분석에 apiKey/apiSecret 필요)
+    const account = accounts.find((a) => a.id === accountId) ?? accounts[0];
+    if (!account?.apiKey || !account?.apiSecret) {
+      setSignalLoading(false);
+      return;
+    }
+
+    fetch('/api/ict-analyze', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ apiKey: account.apiKey, apiSecret: account.apiSecret, contract }),
+    })
       .then((r) => r.json())
       .then((data) => {
         if (data?.error || data?.htf === undefined) {
-          // 구형 BotSignal 폴백 (봇 미실행 메시지도 표시)
           if (data?.reason) {
             setBotSignal(data);
             if (data.confluence?.length > 0) saveCache(contract, data);
@@ -394,6 +569,11 @@ export default function PositionDetail() {
 
                 {ictAnalysis ? (
                   <>
+                    {/* 점수 카드 */}
+                    {ictAnalysis.score != null && ictAnalysis.grade && (
+                      <ScoreCard score={ictAnalysis.score} grade={ictAnalysis.grade} />
+                    )}
+
                     {/* 현재가 */}
                     <View style={ict.priceRow}>
                       <Text style={ict.priceLabel}>현재가</Text>
@@ -442,6 +622,17 @@ export default function PositionDetail() {
                           </View>
                         ))}
                       </View>
+                    )}
+
+                    {/* 가격 레인지 시각화 */}
+                    {ictAnalysis.summary.entry != null && (
+                      <PriceRangeBar
+                        entry={ictAnalysis.summary.entry}
+                        current={ictAnalysis.currentPrice}
+                        tp={ictAnalysis.summary.tp}
+                        sl={ictAnalysis.summary.sl}
+                        direction={direction ?? 'Long'}
+                      />
                     )}
 
                     {/* 종합 판단 */}
@@ -510,14 +701,24 @@ export default function PositionDetail() {
               {/* ── 손익 히어로 카드 ────────────────────── */}
               <GlassCard intensity="medium" radius={24} padding={24} style={st.section}>
                 <Text style={st.pnlLabel}>평가손익</Text>
-                <Text style={[st.pnlAmount, { color: pnlColor }]}>
-                  {formatKRWSigned(position.profit)}
-                </Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6, marginBottom: 20 }}>
+                <AnimatedNumber
+                  value={position.profit}
+                  formatter={formatKRWSigned}
+                  fontSize={30}
+                  fontWeight="700"
+                  color={pnlColor}
+                  letterSpacing={-0.5}
+                  style={{ marginBottom: 6 }}
+                />
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 0, marginBottom: 20 }}>
                   <View style={[st.rateBadge, { backgroundColor: isProfit ? colors.market.riseSubtle : '#FFF0F0' }]}>
-                    <Text style={[st.rateText, { color: pnlColor }]}>
-                      {formatRate(position.profitRate)}
-                    </Text>
+                    <AnimatedNumber
+                      value={position.profitRate}
+                      formatter={formatRate}
+                      fontSize={14}
+                      fontWeight="700"
+                      color={pnlColor}
+                    />
                   </View>
                 </View>
                 {/* 투자금 / 평가금 가로 구분 */}
@@ -529,7 +730,13 @@ export default function PositionDetail() {
                   <View style={st.amountDivider} />
                   <View style={{ flex: 1, alignItems: 'flex-end' }}>
                     <Text style={st.amountLabel}>평가금액</Text>
-                    <Text style={st.amountValue}>{formatKRW(position.currentValue ?? 0)}</Text>
+                    <AnimatedNumber
+                      value={position.currentValue ?? 0}
+                      formatter={formatKRW}
+                      fontSize={16}
+                      fontWeight="700"
+                      color={colors.text.primary}
+                    />
                   </View>
                 </View>
               </GlassCard>

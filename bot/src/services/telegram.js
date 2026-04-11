@@ -93,7 +93,7 @@ class TelegramService {
       const lines = [
         `━━━ 봇 상태 ━━━`,
         running,
-        `거래 페어: ${this.tradingBot.validPairs.join(', ')}`,
+        `거래 페어: ${this.tradingBot.validPairs.map((p) => this._displayName(p)).join(', ')}`,
         `레버리지: x${config.leverage}`,
         `타임프레임: ${config.timeframes.htf}/${config.timeframes.mtf}/${config.timeframes.ltf}`,
         `활성 포지션: ${activePositions.size}/${config.maxPositions}`,
@@ -104,7 +104,7 @@ class TelegramService {
           const slTp = pos.sl != null && pos.tp != null
             ? `SL: ${pos.sl} / TP: ${pos.tp}`
             : '(수동 SL/TP 또는 미등록)';
-          lines.push(`  • [${pair}] ${pos.direction.toUpperCase()} ${slTp}`);
+          lines.push(`  • [${this._displayName(pair)}] ${pos.direction.toUpperCase()} ${slTp}`);
         }
       }
 
@@ -117,7 +117,7 @@ class TelegramService {
       const lines = [`━━━ 거래 페어 ━━━`];
       for (const p of this.tradingBot.validPairs) {
         const active = this.tradingBot.activePositions.has(p);
-        lines.push(`${active ? '🟢' : '⚪'} ${p}`);
+        lines.push(`${active ? '🟢' : '⚪'} ${this._displayName(p)}`);
       }
       await this.bot.sendMessage(chatId, lines.join('\n'));
     });
@@ -290,12 +290,12 @@ class TelegramService {
           const result = await this.tradingBot.orderManager.closeAndCleanup(pair);
           if (result) {
             this.tradingBot.activePositions.delete(pair);
-            results.push(`✅ [${pair}] 청산 완료`);
+            results.push(`✅ [${this._displayName(pair)}] 청산 완료`);
           } else {
-            results.push(`📊 [${pair}] 청산할 포지션 없음`);
+            results.push(`📊 [${this._displayName(pair)}] 청산할 포지션 없음`);
           }
         } catch (err) {
-          results.push(`❌ [${pair}] 청산 실패: ${err.message}`);
+          results.push(`❌ [${this._displayName(pair)}] 청산 실패: ${err.message}`);
         }
       }
       await this.bot.sendMessage(chatId, results.join('\n'));
@@ -329,7 +329,7 @@ class TelegramService {
             const summary = await this._analyzePairSummary(pair);
             lines.push(summary);
           } catch (err) {
-            lines.push(`[${pair}] ❌ ${err.message}`);
+            lines.push(`[${this._displayName(pair)}] ❌ ${err.message}`);
           }
         }
         await this.bot.sendMessage(chatId, lines.join('\n'));
@@ -342,7 +342,7 @@ class TelegramService {
         await this.bot.sendMessage(chatId, `❌ 유효하지 않은 페어: ${arg}`);
         return;
       }
-      await this.bot.sendMessage(chatId, `🔍 [${pair}] 분석 중...`);
+      await this.bot.sendMessage(chatId, `🔍 [${this._displayName(pair)}] 분석 중...`);
       try {
         const detail = await this._analyzePairDetail(pair);
         await this.bot.sendMessage(chatId, detail);
@@ -388,9 +388,9 @@ class TelegramService {
       const emoji = signal.signal === 'long' ? '📈' : '📉';
       const ss = signal.setupScore;
       const scoreTag = ss ? ` | ${ss.score}/100 ${ss.label}` : '';
-      return `[${pair}] ${emoji} ${signal.signal.toUpperCase()} @ ${currentPrice.toFixed(2)}${scoreTag}`;
+      return `[${this._displayName(pair)}] ${emoji} ${signal.signal.toUpperCase()} @ ${currentPrice.toFixed(2)}${scoreTag}`;
     }
-    return `[${pair}] ⏸️ ${currentPrice.toFixed(2)} | ${signal.reason}`;
+    return `[${this._displayName(pair)}] ⏸️ ${currentPrice.toFixed(2)} | ${signal.reason}`;
   }
 
   /**
@@ -405,7 +405,7 @@ class TelegramService {
 
     const currentPrice = ltfCandles[ltfCandles.length - 1].close;
     const lines = [];
-    lines.push(`━━━ ICT v2 분석: ${pair} ━━━`);
+    lines.push(`━━━ ICT v2 분석: ${this._displayName(pair)} ━━━`);
     lines.push(`💰 현재가: ${currentPrice.toFixed(2)}`);
 
     const session = indicators.getActiveSession();

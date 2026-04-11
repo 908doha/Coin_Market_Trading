@@ -13,14 +13,29 @@ import Animated, {
   useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS,
 } from 'react-native-reanimated';
 import Svg, { Path, Polygon, Rect, Text as SvgText, Circle } from 'react-native-svg';
-import { Text, FadeTabView, BalanceCardsSkeleton, AnimatedNumber, Skeleton } from '@/design-system';
+import { Text, FadeTabView, AnimatedNumber, Skeleton } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType, ExchangeAccount } from '@/store/accounts';
-import { formatKRW } from '@/utils/format';
-import type { Balance } from '@/services/account.service';
+import { tradesService } from '@/services';
+import type { Trade } from '@/services/trades.service';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+// ─── Kelly 계산 ───────────────────────────────────────────────────────────────
+function computeKelly(trades: Trade[]) {
+  if (!trades.length) return null;
+  const wins   = trades.filter((t) => t.profit > 0);
+  const losses = trades.filter((t) => t.profit <= 0);
+  const total  = trades.length;
+  const p      = wins.length / total;
+  const q      = 1 - p;
+  const avgWin  = wins.length   ? wins.reduce((s, t) => s + t.profit, 0) / wins.length   : 0;
+  const avgLoss = losses.length ? Math.abs(losses.reduce((s, t) => s + t.profit, 0)) / losses.length : 0;
+  const b       = avgLoss > 0 ? avgWin / avgLoss : 0;
+  const kelly   = b > 0 ? Math.max(0, (p * b - q) / b) : 0;
+  return { winRate: p, ratio: b, halfKelly: kelly / 2 };
 }
 
 // ─── 상수 ────────────────────────────────────────────────────────────────────
@@ -356,20 +371,33 @@ export default function Analysis() {
   const [search,  setSearch]    = useState('');
   const [ictMap,  setIctMap]    = useState<Map<string, IctResult | 'loading'>>(new Map());
 
-  const { accounts, balances, totalBalance, balancesLoading } = useAccounts();
+  const { accounts } = useAccounts();
 
-  const selectedAccount  = accounts.find((a) => a.id === selectedAccountId) ?? null;
-  const displayBalance   = selectedAccountId
-    ? (balances[selectedAccountId] ?? null)
-    : totalBalance;
-  const selectedLabel = selectedAccount
+  const selectedAccount = accounts.find((a) => a.id === selectedAccountId) ?? null;
+  const selectedLabel   = selectedAccount
     ? (selectedAccount.name || EXCHANGE_LABELS[selectedAccount.exchange])
     : accounts.length === 1
       ? (accounts[0].name || EXCHANGE_LABELS[accounts[0].exchange])
       : '모든 계좌';
 
-  const krwAvail = displayBalance?.available ?? 0;
-  const usdTotal = displayBalance?.totalUsd  ?? 0;
+  // 거래 내역 + Kelly 통계
+  const [trades,       setTrades]       = useState<Trade[]>([]);
+  const [tradesLoading, setTradesLoading] = useState(true);
+
+  useEffect(() => {
+    const selected = selectedAccountId
+      ? accounts.filter((a) => a.id === selectedAccountId)
+      : accounts;
+    const apiAccounts = selected.filter((a) => a.apiKey && a.apiSecret);
+    if (!apiAccounts.length) { setTradesLoading(false); return; }
+    setTradesLoading(true);
+    tradesService.getAllByAccounts(apiAccounts)
+      .then(setTrades)
+      .catch(() => {})
+      .finally(() => setTradesLoading(false));
+  }, [selectedAccountId, accounts.length]);
+
+  const kelly = useMemo(() => computeKelly(trades), [trades]);
 
   // Gate.io 상위 종목 로드
   useEffect(() => {
@@ -446,27 +474,38 @@ export default function Analysis() {
             </Pressable>
           </Pressable>
 
-          {/* 잔고 카드 2열 */}
-          {balancesLoading ? (
-            <BalanceCardsSkeleton />
-          ) : (
-            <View style={st.balanceGrid}>
-              <View style={st.balanceCard}>
-                <Text style={st.balanceCardLabel}>원화</Text>
-                <AnimatedNumber value={krwAvail} formatter={formatKRW} fontSize={18} fontWeight="700" color="#191919" />
-              </View>
-              <View style={st.balanceCard}>
-                <Text style={st.balanceCardLabel}>달러</Text>
-                <AnimatedNumber
-                  value={usdTotal}
-                  formatter={(v) => `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                  fontSize={18}
-                  fontWeight="700"
-                  color="#191919"
-                />
-              </View>
-            </View>
-          )}
+          {/* 승률 / 손익비 / 방켈리 카드 */}
+          <View style={st.statsGrid}>
+            {tradesLoading ? (
+              [1, 2, 3].map((i) => (
+                <View key={i} style={st.statCard}>
+                  <Skeleton width={36} height={11} radius={4} style={{ marginBottom: 8 }} />
+                  <Skeleton width={52} height={22} radius={6} />
+                </View>
+              ))
+            ) : (
+              <>
+                <View style={st.statCard}>
+                  <Text style={st.statLabel}>승률</Text>
+                  <Text style={st.statValue}>
+                    {kelly ? `${(kelly.winRate * 100).toFixed(1)}%` : '--'}
+                  </Text>
+                </View>
+                <View style={st.statCard}>
+                  <Text style={st.statLabel}>손익비</Text>
+                  <Text style={st.statValue}>
+                    {kelly ? kelly.ratio.toFixed(2) : '--'}
+                  </Text>
+                </View>
+                <View style={st.statCard}>
+                  <Text style={st.statLabel}>방켈리</Text>
+                  <Text style={[st.statValue, { color: kelly && kelly.halfKelly > 0 ? '#246CF9' : colors.text.primary }]}>
+                    {kelly ? `${(kelly.halfKelly * 100).toFixed(1)}%` : '--'}
+                  </Text>
+                </View>
+              </>
+            )}
+          </View>
 
           {/* 메뉴: 거래 내역 + PnL (Kelly 통계) */}
           <View style={st.menuSection}>
@@ -589,9 +628,10 @@ const st = StyleSheet.create({
   accountLabel:   { fontSize: 15, fontWeight: '600', color: '#191919' },
   accountViewAll: { fontSize: 14, color: colors.text.tertiary },
 
-  balanceGrid:      { flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingVertical: 16 },
-  balanceCard:      { flex: 1, backgroundColor: '#F5F5F5', borderRadius: 16, paddingVertical: 18, paddingHorizontal: 16 },
-  balanceCardLabel: { fontSize: 13, color: colors.text.tertiary, marginBottom: 8 },
+  statsGrid:  { flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingVertical: 16 },
+  statCard:   { flex: 1, backgroundColor: '#F5F5F5', borderRadius: 16, paddingVertical: 16, paddingHorizontal: 14, alignItems: 'center' },
+  statLabel:  { fontSize: 12, color: colors.text.tertiary, marginBottom: 6 },
+  statValue:  { fontSize: 20, fontWeight: '700', color: '#191919' },
 
   menuSection: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8 },
   menuRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 20 },

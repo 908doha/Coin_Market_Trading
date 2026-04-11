@@ -13,7 +13,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import Svg, { Path, Polygon, Rect, Text as SvgText, Circle } from 'react-native-svg';
 import {
-  Text, GlassCard, SubPageHeader, ScreenTransition, BalanceCardsSkeleton,
+  Text, GlassCard, SubPageHeader, ScreenTransition,
   AnimatedNumber, Skeleton,
 } from '@/design-system';
 import { colors } from '@/design-system/tokens';
@@ -261,25 +261,18 @@ export default function KellyPage() {
   const [trades,   setTrades]   = useState<Trade[]>([]);
   const [loading,  setLoading]  = useState(true);
 
-  const { accounts, balances, totalBalance, balancesLoading } = useAccounts();
+  const { accounts } = useAccounts();
 
   const selectedAccounts = selectedAccountId
     ? accounts.filter((a) => a.id === selectedAccountId)
     : accounts;
 
-  const selectedAccount  = accounts.find((a) => a.id === selectedAccountId) ?? null;
-  const displayBalance   = selectedAccountId
-    ? (balances[selectedAccountId] ?? null)
-    : totalBalance;
-
-  const selectedLabel = selectedAccount
+  const selectedAccount = accounts.find((a) => a.id === selectedAccountId) ?? null;
+  const selectedLabel   = selectedAccount
     ? (selectedAccount.name || EXCHANGE_LABELS[selectedAccount.exchange])
     : accounts.length === 1
       ? (accounts[0].name || EXCHANGE_LABELS[accounts[0].exchange])
       : '모든 계좌';
-
-  const krwAvail = displayBalance?.available ?? 0;
-  const usdTotal = displayBalance?.totalUsd  ?? 0;
 
   // 선택된 계좌 변경 시 거래 데이터 재조회
   useEffect(() => {
@@ -321,28 +314,6 @@ export default function KellyPage() {
             </Svg>
             <View style={{ flex: 1 }} />
           </Pressable>
-
-          {/* 잔고 카드 */}
-          {balancesLoading ? (
-            <BalanceCardsSkeleton />
-          ) : (
-            <View style={st.balanceGrid}>
-              <View style={st.balanceCard}>
-                <Text style={st.balanceCardLabel}>원화</Text>
-                <AnimatedNumber value={krwAvail} formatter={formatKRW} fontSize={18} fontWeight="700" color="#191919" />
-              </View>
-              <View style={st.balanceCard}>
-                <Text style={st.balanceCardLabel}>달러</Text>
-                <AnimatedNumber
-                  value={usdTotal}
-                  formatter={(v) => `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                  fontSize={18}
-                  fontWeight="700"
-                  color="#191919"
-                />
-              </View>
-            </View>
-          )}
 
           {/* Kelly 통계 */}
           <View style={{ borderTopWidth: 8, borderTopColor: '#F5F5F5', paddingTop: 8 }}>

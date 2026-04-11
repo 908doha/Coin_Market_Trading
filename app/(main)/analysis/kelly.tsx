@@ -13,7 +13,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import Svg, { Path, Polygon, Rect, Text as SvgText, Circle } from 'react-native-svg';
 import {
-  Text, GlassCard, SubPageHeader, ScreenTransition,
+  Text, SubPageHeader, ScreenTransition,
   AnimatedNumber, Skeleton,
 } from '@/design-system';
 import { colors } from '@/design-system/tokens';
@@ -319,11 +319,11 @@ export default function KellyPage() {
           <View style={{ borderTopWidth: 8, borderTopColor: '#F5F5F5', paddingTop: 8 }}>
             {loading ? (
               <View style={{ padding: 20, gap: 12 }}>
-                <GlassCard intensity="medium" radius={20} padding={20}>
+                <View style={ks.section}>
                   <Skeleton width={120} height={16} radius={6} style={{ marginBottom: 16 }} />
                   <View style={{ flexDirection: 'row', paddingBottom: 14, gap: 8 }}>
                     {[1, 2, 3].map((i) => (
-                      <View key={i} style={{ flex: 1, alignItems: 'center', gap: 6 }}>
+                      <View key={i} style={{ flex: 1, gap: 6 }}>
                         <Skeleton width={60} height={24} radius={6} />
                         <Skeleton width={40} height={12} radius={4} />
                       </View>
@@ -336,8 +336,8 @@ export default function KellyPage() {
                     </View>
                   ))}
                   <Skeleton width="100%" height={8} radius={4} style={{ marginTop: 16 }} />
-                </GlassCard>
-                <GlassCard intensity="medium" radius={20} padding={20}>
+                </View>
+                <View style={ks.section}>
                   <Skeleton width={100} height={16} radius={6} style={{ marginBottom: 16 }} />
                   {[1, 2, 3, 4].map((i) => (
                     <View key={i} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, gap: 12 }}>
@@ -351,17 +351,17 @@ export default function KellyPage() {
                       </View>
                     </View>
                   ))}
-                </GlassCard>
+                </View>
               </View>
             ) : !trades.length ? (
               <View style={{ alignItems: 'center', paddingTop: 60 }}>
                 <Text style={{ color: colors.text.tertiary, fontSize: 14 }}>거래 내역이 없어요</Text>
               </View>
             ) : (
-              <View style={{ padding: 20, gap: 12 }}>
+              <View>
                 {/* 전체 요약 */}
                 {overall && (
-                  <GlassCard intensity="medium" radius={20} padding={20}>
+                  <View style={ks.section}>
                     <Text style={ks.cardTitle}>전체 Kelly 통계</Text>
                     <View style={ks.metricRow}>
                       <View style={ks.metric}>
@@ -410,12 +410,12 @@ export default function KellyPage() {
                         전체 자본의 {(overall.halfKelly * 100).toFixed(1)}% 이내로 한 포지션 투자 권장
                       </Text>
                     </View>
-                  </GlassCard>
+                  </View>
                 )}
 
                 {/* 코인별 */}
                 {perCoin.length > 0 && (
-                  <GlassCard intensity="medium" radius={20} padding={20}>
+                  <View style={ks.section}>
                     <Text style={ks.cardTitle}>코인별 통계</Text>
                     {perCoin.map((s, i) => (
                       <View key={s.coin} style={[ks.coinRow, i === perCoin.length - 1 && { borderBottomWidth: 0 }]}>
@@ -439,7 +439,7 @@ export default function KellyPage() {
                         </View>
                       </View>
                     ))}
-                  </GlassCard>
+                  </View>
                 )}
               </View>
             )}
@@ -472,6 +472,7 @@ const st = StyleSheet.create({
 });
 
 const ks = StyleSheet.create({
+  section:      { paddingHorizontal: 20, paddingVertical: 20, borderTopWidth: 1, borderTopColor: colors.border.default },
   cardTitle:    { fontSize: 15, fontWeight: '700', color: colors.text.primary, marginBottom: 16 },
   metricRow:    { flexDirection: 'row', alignItems: 'center', paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: colors.border.default },
   metric:       { flex: 1, alignItems: 'center' },

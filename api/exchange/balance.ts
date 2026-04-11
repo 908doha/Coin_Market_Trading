@@ -107,6 +107,8 @@ async function fetchUpbitBalance(apiKey: string, apiSecret: string): Promise<Bal
     profitRate:      invested > 0 ? parseFloat(((profitTotal / invested) * 100).toFixed(2)) : 0,
     profitToday:     0,
     profitTodayRate: 0,
+    totalUsd:        0,
+    usdtKrw:         0,
   };
 }
 
@@ -178,6 +180,8 @@ async function fetchBinanceBalance(apiKey: string, apiSecret: string): Promise<B
     profitRate:      0,
     profitToday:     0,
     profitTodayRate: 0,
+    totalUsd:        parseFloat(totalUsdt.toFixed(2)),
+    usdtKrw,
   };
 }
 
@@ -217,6 +221,8 @@ async function fetchBybitBalance(apiKey: string, apiSecret: string): Promise<Bal
     profitRate:      0,
     profitToday:     0,
     profitTodayRate: 0,
+    totalUsd:        parseFloat(totalUsd.toFixed(2)),
+    usdtKrw,
   };
 }
 
@@ -257,6 +263,8 @@ async function fetchOkxBalance(apiKey: string, apiSecret: string, passphrase: st
     profitRate:      0,
     profitToday:     0,
     profitTodayRate: 0,
+    totalUsd:        parseFloat(totalUsd.toFixed(2)),
+    usdtKrw,
   };
 }
 

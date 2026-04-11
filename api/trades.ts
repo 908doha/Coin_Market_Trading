@@ -26,6 +26,8 @@ interface Trade {
   holdingDays: number;
   entryAt:     string;
   exitAt:      string;
+  entryPrice?: number;
+  exitPrice?:  number;
 }
 
 // ── Gate.io 포지션 청산 내역 조회 ────────────────────────────────────────────

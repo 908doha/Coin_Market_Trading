@@ -507,18 +507,8 @@ export default function Analysis() {
             )}
           </View>
 
-          {/* 메뉴: 거래 내역 + PnL (Kelly 통계) */}
+          {/* 메뉴: PnL (Kelly 통계) */}
           <View style={st.menuSection}>
-            <Pressable
-              style={({ pressed }) => [st.menuRow, pressed && { backgroundColor: '#F8F8F8' }]}
-              onPress={() => router.push('/history')}
-            >
-              <Text style={st.menuText}>거래 내역</Text>
-              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                <Path d="M9 18l6-6-6-6" stroke="#C4C4C4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </Svg>
-            </Pressable>
-            <View style={st.menuDivider} />
             <Pressable
               style={({ pressed }) => [st.menuRow, pressed && { backgroundColor: '#F8F8F8' }]}
               onPress={() => router.push('/(main)/analysis/kelly')}

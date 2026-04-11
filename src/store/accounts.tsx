@@ -161,7 +161,8 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
   const [balances, setBalances]          = useState<Record<string, Balance | null>>({});
   const [balanceErrors, setBalErrors]    = useState<Record<string, string | null>>({});
   const [balancesLoading, setBalLoading] = useState(false);
-  const accountsRef = useRef(accounts);
+  const accountsRef        = useRef(accounts);
+  const isFirstBalLoad     = useRef(true);
   accountsRef.current = accounts;
 
   // 앱 시작 + 토큰 변경 시: 로컬 → 백엔드 순서로 로드
@@ -202,11 +203,14 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     return () => clearInterval(interval);
   }, [syncFromBackend]);
 
-  // 잔고 자동 fetch
+  // 잔고 자동 fetch — 첫 로드만 로딩 표시, 이후 5초 폴링은 silent
   const refreshBalances = useCallback(async () => {
     const list = accountsRef.current;
     if (!list.length) return;
-    setBalLoading(true);
+
+    const firstLoad = isFirstBalLoad.current;
+    if (firstLoad) setBalLoading(true);
+
     const results = await Promise.all(
       list.map(async (acc) => {
         try {
@@ -228,7 +232,11 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     results.forEach(({ id, bal, err }) => { map[id] = bal; errMap[id] = err; });
     setBalances(map);
     setBalErrors(errMap);
-    setBalLoading(false);
+
+    if (firstLoad) {
+      setBalLoading(false);
+      isFirstBalLoad.current = false;
+    }
   }, []);
 
   useEffect(() => {

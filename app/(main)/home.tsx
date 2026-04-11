@@ -792,7 +792,7 @@ export default function Home() {
 
           {/* ── 총 자산 카드 ── */}
           <GlassCard style={styles.heroCard} intensity="medium" radius={24}>
-            {balLoading ? <AssetCardSkeleton /> : (
+            {balLoading && !balance ? <AssetCardSkeleton /> : (
               <>
                 <Text variant="meta" color={colors.text.tertiary} style={{ marginBottom: 6 }}>총 자산</Text>
                 <AnimatedNumber
@@ -961,12 +961,21 @@ export default function Home() {
                                 <Text variant="meta" color={colors.text.tertiary}>{formatKRW(pos.amount)}</Text>
                               </View>
                               <View style={{ alignItems: 'flex-end' }}>
-                                <Text style={[styles.posProfit, { color: up ? colors.market.rise : colors.market.fall }]}>
-                                  {formatKRWSigned(pos.profit)}
-                                </Text>
-                                <Text style={[styles.posProfitRate, { color: up ? colors.market.rise : colors.market.fall }]}>
-                                  {formatRate(pos.profitRate)}
-                                </Text>
+                                <AnimatedNumber
+                                  value={pos.profit}
+                                  formatter={formatKRWSigned}
+                                  fontSize={15}
+                                  fontWeight="700"
+                                  color={up ? colors.market.rise : colors.market.fall}
+                                />
+                                <AnimatedNumber
+                                  value={pos.profitRate}
+                                  formatter={formatRate}
+                                  fontSize={12}
+                                  fontWeight="600"
+                                  color={up ? colors.market.rise : colors.market.fall}
+                                  style={{ marginTop: 2 }}
+                                />
                               </View>
                             </View>
                           </PressableScale>

@@ -62,82 +62,83 @@ function decrypt(encoded: string): string {
   return decipher.update(enc).toString('utf8') + decipher.final('utf8');
 }
 
-// ── DATABASE_URL 파싱 ─────────────────────────────────────────────────────────
-// new URL()은 비밀번호의 [ ] @ # 등을 허용 안 함 → lastIndexOf('@')로 직접 파싱
-function buildClientConfig(url: string) {
+// ── DATABASE_URL → 안전한 연결 문자열 빌드 ────────────────────────────────────
+// new URL()은 비밀번호의 [ ] @ # 등을 허용 안 함 → lastIndexOf('@')로 직접 파싱 후
+// encodeURIComponent로 재인코딩해 pg-connection-string이 안전하게 파싱하도록 함
+function buildSafeConnectionString(url: string, overridePassword?: string): string {
   // 프로토콜 제거
   const withoutProto = url.replace(/^(?:postgresql|postgres):\/\//, '');
   // 마지막 @ 기준으로 credentials / host 분리 (비밀번호 안의 @ 처리)
   const lastAt = withoutProto.lastIndexOf('@');
-  if (lastAt === -1) {
-    console.error('[db-config] no @ found in DATABASE_URL');
-    throw new Error('DATABASE_URL has no @ separator');
-  }
+  if (lastAt === -1) throw new Error('DATABASE_URL has no @ separator');
   const creds    = withoutProto.slice(0, lastAt);
   const hostPart = withoutProto.slice(lastAt + 1);
   // 첫 번째 : 기준으로 user / password 분리
-  const colonIdx = creds.indexOf(':');
-  const user     = colonIdx === -1 ? creds : creds.slice(0, colonIdx);
-  const password = colonIdx === -1 ? ''    : creds.slice(colonIdx + 1);
+  const colonIdx  = creds.indexOf(':');
+  const rawUser   = colonIdx === -1 ? creds : creds.slice(0, colonIdx);
+  const rawPass   = colonIdx === -1 ? ''    : creds.slice(colonIdx + 1);
   // host:port/database 파싱 (쿼리 파라미터 제거)
   const m = hostPart.match(/^([^:/]+)(?::(\d+))?(?:\/([^?]*))?/);
-  if (!m) {
-    console.error('[db-config] failed to parse host from:', hostPart);
-    throw new Error('DATABASE_URL host parse failed');
-  }
+  if (!m) throw new Error('DATABASE_URL host parse failed');
   const [, host, portStr, database] = m;
+
   const safeDecode = (s: string) => { try { return decodeURIComponent(s); } catch { return s; } };
-  const config = {
-    host,
-    port:     parseInt(portStr || '5432', 10),
-    database: database || 'postgres',
-    user:     safeDecode(user),
-    password: safeDecode(password),
-    ssl:      { rejectUnauthorized: false },
-    connectionTimeoutMillis: 15000,
-  };
-  console.log('[db-config] parsed host=%s port=%d user=%s db=%s', config.host, config.port, config.user, config.database);
-  return config;
+  const user     = safeDecode(rawUser);
+  const password = overridePassword ?? safeDecode(rawPass);
+  const port     = portStr || '5432';
+  const db       = database || 'postgres';
+
+  // 비밀번호를 encodeURIComponent로 재인코딩 → pg-connection-string이 new URL()로 파싱 가능
+  const safeUrl = `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${db}?sslmode=require`;
+  console.log('[db-config] host=%s port=%s user=%s db=%s', host, port, user, db);
+  return safeUrl;
 }
 
-// ── PostgreSQL (Vercel 서버리스 — 매 요청마다 Client 생성) ──────────────────────
+// ── PostgreSQL (Vercel 서버리스 — 매 요청마다 Client 생성, 재시도 포함) ───────────
+const MAX_RETRIES = 2;
+
 async function withDb<T>(fn: (client: Client) => Promise<T>): Promise<T | null> {
   const url = process.env.DATABASE_URL;
   if (!url) return null;
 
-  // Parse host/port/user/db from DATABASE_URL, but take password from PGPASSWORD if set.
-  // This avoids URL-encoding issues with special chars in passwords.
-  const parsed = buildClientConfig(url);
-  const password = process.env.PGPASSWORD ?? parsed.password;
-  const config = { ...parsed, password };
+  const safeUrl = buildSafeConnectionString(url, process.env.PGPASSWORD);
 
-  if (process.env.PGPASSWORD) {
-    console.log('[db-config] using PGPASSWORD env var for password');
-  }
+  let lastErr: any;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      const delay = attempt * 1000;
+      await new Promise((r) => setTimeout(r, delay));
+      console.log(`[user-accounts] DB retry attempt ${attempt}`);
+    }
 
-  // Delete DATABASE_URL before new Client() so pg doesn't try to re-parse it
-  // via pg-connection-string which calls new URL() and fails on special chars.
-  delete process.env.DATABASE_URL;
-  let client: Client;
-  try {
-    client = new Client(config);
-  } finally {
-    process.env.DATABASE_URL = url;
-  }
+    const client = new Client({
+      connectionString: safeUrl,
+      ssl: { rejectUnauthorized: false },
+      connectionTimeoutMillis: 15000,
+    });
 
-  try {
-    await client.connect();
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS exchange_accounts (
-        user_id    TEXT PRIMARY KEY,
-        data       TEXT NOT NULL,
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      )
-    `);
-    return await fn(client);
-  } finally {
-    await client.end().catch(() => {});
+    try {
+      await client.connect();
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS exchange_accounts (
+          user_id    TEXT PRIMARY KEY,
+          data       TEXT NOT NULL,
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `);
+      return await fn(client);
+    } catch (err: any) {
+      lastErr = err;
+      await client.end().catch(() => {});
+      const msg = String(err?.message ?? '');
+      const retryable = msg.includes('terminated unexpectedly')
+        || msg.includes('Connection terminated')
+        || msg.includes('ECONNRESET')
+        || msg.includes('timeout');
+      if (!retryable) throw err;
+    }
   }
+  throw lastErr;
 }
 
 async function dbGet(userId: string): Promise<string | null> {

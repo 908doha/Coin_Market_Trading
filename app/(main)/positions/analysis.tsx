@@ -80,13 +80,13 @@ function fmtPnl(krw: number, showUsd: boolean, rate: number) {
 function calcStats(trades: Trade[]) {
   const total       = trades.length;
   const totalPnl    = trades.reduce((s, t) => s + t.profit, 0);
-  const totalAmount = trades.reduce((s, t) => s + (t.amount ?? 0), 0);
-  // amount 미제공 시 거래별 profitRate 평균으로 대체
-  const profitRate  = totalAmount > 0
-    ? (totalPnl / totalAmount) * 100
-    : total > 0
-      ? trades.reduce((s, t) => s + (t.profitRate ?? 0), 0) / total
-      : 0;
+  // amount가 있으면 직접 사용, 없으면 profit/profitRate 역산으로 포지션 크기 추정
+  const totalAmount = trades.reduce((s, t) => {
+    if (t.amount && t.amount > 0) return s + t.amount;
+    if (t.profitRate && t.profitRate !== 0) return s + Math.abs(t.profit / t.profitRate) * 100;
+    return s;
+  }, 0);
+  const profitRate  = totalAmount > 0 ? (totalPnl / totalAmount) * 100 : 0;
   const wins        = trades.filter((t) => t.profit > 0);
   const losses      = trades.filter((t) => t.profit < 0);
   const avgWin      = wins.length   ? wins.reduce((s,t)   => s + t.profit, 0) / wins.length   : 0;

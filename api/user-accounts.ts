@@ -62,21 +62,37 @@ function decrypt(encoded: string): string {
   return decipher.update(enc).toString('utf8') + decipher.final('utf8');
 }
 
-// ── DATABASE_URL 파싱 (비밀번호 특수문자 URL 디코딩) ──────────────────────────
+// ── DATABASE_URL 파싱 ─────────────────────────────────────────────────────────
+// new URL()은 비밀번호의 [ ] @ # 등을 허용 안 함 → lastIndexOf('@')로 직접 파싱
 function buildClientConfig(url: string) {
   try {
-    const u = new URL(url);
+    // 프로토콜 제거
+    const withoutProto = url.replace(/^(?:postgresql|postgres):\/\//, '');
+    // 마지막 @ 기준으로 credentials / host 분리 (비밀번호 안의 @ 처리)
+    const lastAt = withoutProto.lastIndexOf('@');
+    if (lastAt === -1) throw new Error('no @');
+    const creds    = withoutProto.slice(0, lastAt);
+    const hostPart = withoutProto.slice(lastAt + 1);
+    // 첫 번째 : 기준으로 user / password 분리
+    const colonIdx = creds.indexOf(':');
+    const user     = colonIdx === -1 ? creds : creds.slice(0, colonIdx);
+    const password = colonIdx === -1 ? ''    : creds.slice(colonIdx + 1);
+    // host:port/database 파싱
+    const m = hostPart.match(/^([^:/]+)(?::(\d+))?(?:\/(.*))?$/);
+    if (!m) throw new Error('bad host');
+    const [, host, portStr, database] = m;
+    const safeDecode = (s: string) => { try { return decodeURIComponent(s); } catch { return s; } };
     return {
-      host:     u.hostname,
-      port:     parseInt(u.port || '5432', 10),
-      database: u.pathname.replace(/^\//, '') || 'postgres',
-      user:     decodeURIComponent(u.username),
-      password: decodeURIComponent(u.password),
+      host,
+      port:     parseInt(portStr || '5432', 10),
+      database: database || 'postgres',
+      user:     safeDecode(user),
+      password: safeDecode(password),
       ssl:      { rejectUnauthorized: false },
       connectionTimeoutMillis: 5000,
     };
   } catch {
-    // URL 파싱 실패 시 connectionString 그대로 사용 (fallback)
+    // 파싱 실패 시 connectionString 사용 (plain URL이라면 동작)
     return { connectionString: url, ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 5000 };
   }
 }

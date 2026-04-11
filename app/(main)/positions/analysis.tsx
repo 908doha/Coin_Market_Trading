@@ -81,7 +81,12 @@ function calcStats(trades: Trade[]) {
   const total       = trades.length;
   const totalPnl    = trades.reduce((s, t) => s + t.profit, 0);
   const totalAmount = trades.reduce((s, t) => s + (t.amount ?? 0), 0);
-  const profitRate  = totalAmount > 0 ? (totalPnl / totalAmount) * 100 : 0;
+  // amount 미제공 시 거래별 profitRate 평균으로 대체
+  const profitRate  = totalAmount > 0
+    ? (totalPnl / totalAmount) * 100
+    : total > 0
+      ? trades.reduce((s, t) => s + (t.profitRate ?? 0), 0) / total
+      : 0;
   const wins        = trades.filter((t) => t.profit > 0);
   const losses      = trades.filter((t) => t.profit < 0);
   const avgWin      = wins.length   ? wins.reduce((s,t)   => s + t.profit, 0) / wins.length   : 0;
@@ -810,7 +815,7 @@ export default function ProfitAnalysis() {
         onClose={() => setPickerOpen(false)}
       />
 
-      <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
+      <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }}>
 
         {/* 계좌 선택 드롭다운 */}
         <AccountDropdownRow selectedId={selectedId} onOpen={() => setPickerOpen(true)} />

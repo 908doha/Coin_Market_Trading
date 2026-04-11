@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Svg, { Polyline, Defs, LinearGradient, Stop, Polygon, Path, Rect, Text as SvgText, Line, Circle } from 'react-native-svg';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
-import { Text, GlassCard, PressableScale, FadeTabView, AssetCardSkeleton, PageHeader, CurrencyToggle } from '@/design-system';
+import { Text, GlassCard, PressableScale, FadeTabView, AssetCardSkeleton, PageHeader, CurrencyToggle, AnimatedNumber } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { accountService, positionsService, tradesService } from '@/services';
 import type { Trade } from '@/services';
@@ -795,25 +795,39 @@ export default function Home() {
             {balLoading ? <AssetCardSkeleton /> : (
               <>
                 <Text variant="meta" color={colors.text.tertiary} style={{ marginBottom: 6 }}>총 자산</Text>
-                <Text style={styles.heroAmount}>
-                  {showUsd && (balance?.totalUsd ?? 0) > 0
-                    ? `$${balance!.totalUsd!.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                    : formatKRW(balance?.total ?? 0)}
-                </Text>
+                <AnimatedNumber
+                  value={showUsd && (balance?.totalUsd ?? 0) > 0
+                    ? (balance?.totalUsd ?? 0)
+                    : (balance?.total ?? 0)}
+                  formatter={showUsd && (balance?.totalUsd ?? 0) > 0
+                    ? (v) => `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    : formatKRW}
+                  fontSize={26}
+                  fontWeight="700"
+                  color={colors.text.primary}
+                  letterSpacing={-0.5}
+                  style={{ marginTop: spacing[2], marginBottom: spacing[2] }}
+                />
                 <View style={styles.heroSubRow}>
-                  <Text style={[styles.heroPnl, { color: isProfit ? colors.market.rise : colors.market.fall }]}>
-                    {showUsd && (balance?.usdtKrw ?? 0) > 0
-                      ? (() => {
-                          const usd  = (balance!.profitTotal) / balance!.usdtKrw!;
-                          const sign = usd >= 0 ? '+' : '';
-                          return `${sign}$${Math.abs(usd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                        })()
-                      : formatKRWSigned(balance?.profitTotal ?? 0)}
-                  </Text>
+                  <AnimatedNumber
+                    value={showUsd && (balance?.usdtKrw ?? 0) > 0
+                      ? (balance!.profitTotal / balance!.usdtKrw!)
+                      : (balance?.profitTotal ?? 0)}
+                    formatter={showUsd && (balance?.usdtKrw ?? 0) > 0
+                      ? (v) => { const s = v >= 0 ? '+' : '-'; return `${s}$${Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
+                      : formatKRWSigned}
+                    fontSize={15}
+                    fontWeight="600"
+                    color={isProfit ? colors.market.rise : colors.market.fall}
+                  />
                   <View style={[styles.pnlBadge, { backgroundColor: isProfit ? colors.market.riseSubtle : colors.bg.elevated }]}>
-                    <Text style={[styles.pnlBadgeText, { color: isProfit ? colors.negative.text : colors.market.fall }]}>
-                      {formatRate(balance?.profitRate ?? 0)}
-                    </Text>
+                    <AnimatedNumber
+                      value={balance?.profitRate ?? 0}
+                      formatter={formatRate}
+                      fontSize={13}
+                      fontWeight="600"
+                      color={isProfit ? colors.negative.text : colors.market.fall}
+                    />
                   </View>
                 </View>
                 <View style={styles.chartArea}>
@@ -979,7 +993,7 @@ const styles = StyleSheet.create({
 
   heroCard:     { marginBottom: spacing[3] },
   rateCard:     { marginBottom: spacing[3] },
-  heroAmount:   { fontSize: 26, fontWeight: '700', color: colors.text.primary, letterSpacing: -0.5, marginTop: spacing[2], marginBottom: spacing[2] },
+  heroAmount:   { fontSize: 26, fontWeight: '700', color: colors.text.primary, letterSpacing: -0.5 },
   heroSubRow:   { flexDirection: 'row', alignItems: 'center', gap: spacing[2], marginBottom: spacing[1] },
   heroPnl:      { fontSize: 15, fontWeight: '600' },
   pnlBadge:     { borderRadius: borderRadius.sm, paddingHorizontal: spacing[2], paddingVertical: 3 },

@@ -36,3 +36,5 @@ export type { DividerProps }  from './components/Divider';
 export type { AvatarProps, AvatarSize } from './components/Avatar';
 
 export { ToastProvider, useToast } from './components/Toast';
+export { AnimatedNumber } from './components/AnimatedNumber';
+export type { AnimatedNumberProps } from './components/AnimatedNumber';

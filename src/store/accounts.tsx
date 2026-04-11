@@ -235,6 +235,13 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     if (!isLoading && accounts.length > 0) refreshBalances();
   }, [isLoading, accounts.length]);
 
+  // 10초마다 잔고 자동 갱신 (실시간 반영)
+  useEffect(() => {
+    if (isLoading || accounts.length === 0) return;
+    const id = setInterval(refreshBalances, 10_000);
+    return () => clearInterval(id);
+  }, [isLoading, accounts.length, refreshBalances]);
+
   const totalBalance = accounts.length
     ? sumBalances(accounts.map((a) => balances[a.id] ?? null))
     : null;

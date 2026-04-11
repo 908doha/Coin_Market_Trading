@@ -1,19 +1,20 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
-  View, StyleSheet, SectionList, Pressable,
+  View, StyleSheet, SectionList, Pressable, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Animated, {
   useSharedValue, useAnimatedStyle, withTiming, withSpring, Easing, runOnJS,
 } from 'react-native-reanimated';
-import Svg, { Path } from 'react-native-svg';
+import Svg, { Path, Circle, Rect, Polygon, Text as SvgText } from 'react-native-svg';
 import { Text, CurrencyToggle, TradeHistoryListSkeleton } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
-import { useAccounts } from '@/store/accounts';
-import { formatKRWSigned, formatRate } from '@/utils/format';
+import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS } from '@/store/accounts';
+import type { ExchangeType } from '@/store/accounts';
+import { formatKRWSigned, formatRate, formatKRW } from '@/utils/format';
 import type { Trade } from '@/services';
 
 // ── 유틸 ─────────────────────────────────────────────────────────────────────
@@ -58,6 +59,198 @@ function calcStats(trades: Trade[]) {
   const plRatio    = avgLoss > 0 ? avgWin / avgLoss : null;
   return { total, totalPnl, profitRate, wins: wins.length, losses: losses.length, plRatio };
 }
+
+// ── 거래소 로고 ───────────────────────────────────────────────────────────────
+function ExchangeLogo({ exchange, size = 40 }: { exchange: ExchangeType; size?: number }) {
+  const s = size; const color = EXCHANGE_COLORS[exchange];
+  if (exchange === 'gate') return (
+    <View style={{ width: s, height: s, borderRadius: s/2, backgroundColor: '#2354E6', alignItems: 'center', justifyContent: 'center' }}>
+      <Svg width={s} height={s} viewBox="0 0 48 48"><Path d="M36 22 L24 22 L24 27 L31 27 Q30 33 24 33 Q17 33 17 24 Q17 15 24 15 Q29 15 31 19 L37 17 Q33 9 24 9 Q13 9 13 24 Q13 39 24 39 Q35 39 36 28 Z" fill="white" /></Svg>
+    </View>
+  );
+  if (exchange === 'binance') return (
+    <View style={{ width: s, height: s, borderRadius: s/2, backgroundColor: '#F0B90B', alignItems: 'center', justifyContent: 'center' }}>
+      <Svg width={s} height={s} viewBox="0 0 48 48">
+        <Polygon points="24,18 30,24 24,30 18,24" fill="white" /><Polygon points="24,7 28,11 24,15 20,11" fill="white" />
+        <Polygon points="24,33 28,37 24,41 20,37" fill="white" /><Polygon points="7,24 11,20 15,24 11,28" fill="white" />
+        <Polygon points="41,24 37,20 33,24 37,28" fill="white" />
+      </Svg>
+    </View>
+  );
+  if (exchange === 'upbit') return (
+    <View style={{ width: s, height: s, borderRadius: s/2, backgroundColor: '#0062FF', alignItems: 'center', justifyContent: 'center' }}>
+      <Svg width={s} height={s} viewBox="0 0 48 48"><Path d="M15 12 L15 30 Q15 38 24 38 Q33 38 33 30 L33 12" stroke="white" strokeWidth="5" fill="none" strokeLinecap="round" /></Svg>
+    </View>
+  );
+  return (
+    <View style={{ width: s, height: s, borderRadius: s/2, backgroundColor: color + '25', alignItems: 'center', justifyContent: 'center' }}>
+      <Svg width={s} height={s} viewBox="0 0 48 48">
+        <SvgText x="24" y="30" textAnchor="middle" fontSize="14" fontWeight="800" fill={color}>
+          {EXCHANGE_LABELS[exchange].slice(0, 2).toUpperCase()}
+        </SvgText>
+      </Svg>
+    </View>
+  );
+}
+
+// ── 계좌 선택 행 ──────────────────────────────────────────────────────────────
+function AccountDropdownRow({ selectedId, onOpen }: { selectedId: string | null; onOpen: () => void }) {
+  const { accounts } = useAccounts();
+  const sel = accounts.find((a) => a.id === selectedId) ?? null;
+  const label = sel
+    ? (sel.name || EXCHANGE_LABELS[sel.exchange])
+    : accounts.length === 1 ? (accounts[0].name || EXCHANGE_LABELS[accounts[0].exchange]) : '모든 계좌';
+
+  return (
+    <Pressable style={adr.row} onPress={onOpen}>
+      {sel ? <ExchangeLogo exchange={sel.exchange} size={28} /> : (
+        <View style={adr.allIcon}>
+          <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
+            <Rect x="3" y="6" width="18" height="13" rx="2" stroke="#555" strokeWidth="1.8" />
+            <Path d="M3 10h18" stroke="#555" strokeWidth="1.8" strokeLinecap="round" />
+          </Svg>
+        </View>
+      )}
+      <Text style={adr.label}>{label}</Text>
+      <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
+        <Path d="M7 10l5-5 5 5M7 14l5 5 5-5" stroke="#AEAEB2" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      </Svg>
+      <View style={{ flex: 1 }} />
+      <Pressable onPress={() => router.push('/(main)/account/api-accounts')}>
+        <Text style={adr.viewAll}>계좌 보기</Text>
+      </Pressable>
+    </Pressable>
+  );
+}
+const adr = StyleSheet.create({
+  row    : { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
+  allIcon: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center' },
+  label  : { fontSize: 15, fontWeight: '600', color: '#191919' },
+  viewAll: { fontSize: 14, color: '#AEAEB2' },
+});
+
+// ── 계좌 선택 바텀시트 ────────────────────────────────────────────────────────
+function AccountPickerModal({
+  visible, selectedId, onSelect, onClose,
+}: {
+  visible: boolean; selectedId: string | null;
+  onSelect: (id: string | null) => void; onClose: () => void;
+}) {
+  const { accounts, balances, totalBalance } = useAccounts();
+  const translateY = useSharedValue(600);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    if (visible) {
+      setMounted(true);
+      translateY.value = withSpring(0, { damping: 28, stiffness: 300, mass: 0.9 });
+    } else {
+      translateY.value = withTiming(600, { duration: 260 }, () => runOnJS(setMounted)(false));
+    }
+  }, [visible]);
+
+  const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: translateY.value }] }));
+  if (!mounted) return null;
+
+  const totalKrw = totalBalance?.total ?? 0;
+
+  return (
+    <Modal visible transparent animationType="none" onRequestClose={onClose}>
+      <Pressable style={am.overlay} onPress={onClose}>
+        <Animated.View style={[am.sheet, sheetStyle]}>
+          <Pressable>
+            <View style={am.handle} />
+            <View style={am.header}>
+              <Text style={am.title}>계좌 선택</Text>
+              <Pressable style={am.closeBtn} onPress={onClose} hitSlop={12}>
+                <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+                  <Path d="M18 6L6 18M6 6l12 12" stroke="#AEAEB2" strokeWidth="2.2" strokeLinecap="round" />
+                </Svg>
+              </Pressable>
+            </View>
+            <View style={am.sectionRow}>
+              <Text style={am.sectionLabel}>내 계좌</Text>
+              <Pressable style={am.totalRow} onPress={() => { onClose(); router.push('/(main)/account/api-accounts'); }}>
+                <Text style={am.totalText}>총 자산 {formatKRW(totalKrw)}</Text>
+                <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
+                  <Path d="M9 18l6-6-6-6" stroke="#AEAEB2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </Svg>
+              </Pressable>
+            </View>
+            {/* 모든 계좌 */}
+            <Pressable style={({ pressed }) => [am.accRow, pressed && { backgroundColor: '#F8F8F8' }]} onPress={() => { onSelect(null); onClose(); }}>
+              <View style={am.accIcon}>
+                <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+                  <Rect x="3" y="6" width="18" height="13" rx="2" stroke="#555" strokeWidth="1.8" />
+                  <Path d="M3 10h18" stroke="#555" strokeWidth="1.8" strokeLinecap="round" />
+                </Svg>
+              </View>
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={am.accName}>모든 계좌</Text>
+                <Text style={am.accBalance}>{formatKRW(totalKrw)}</Text>
+              </View>
+              {selectedId === null && (
+                <Svg width={22} height={22} viewBox="0 0 24 24">
+                  <Circle cx="12" cy="12" r="12" fill="#246CF9" />
+                  <Path d="M7 12.5l3.5 3.5 6.5-7" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                </Svg>
+              )}
+            </Pressable>
+            {/* 개별 계좌 */}
+            {accounts.map((acc) => {
+              const bal = balances[acc.id];
+              return (
+                <Pressable key={acc.id} style={({ pressed }) => [am.accRow, pressed && { backgroundColor: '#F8F8F8' }]} onPress={() => { onSelect(acc.id); onClose(); }}>
+                  <ExchangeLogo exchange={acc.exchange} size={40} />
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={am.accName}>{acc.name || EXCHANGE_LABELS[acc.exchange]}</Text>
+                    <Text style={am.accBalance}>{bal ? formatKRW(bal.total) : '—'}</Text>
+                  </View>
+                  {selectedId === acc.id && (
+                    <Svg width={22} height={22} viewBox="0 0 24 24">
+                      <Circle cx="12" cy="12" r="12" fill="#246CF9" />
+                      <Path d="M7 12.5l3.5 3.5 6.5-7" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                    </Svg>
+                  )}
+                </Pressable>
+              );
+            })}
+            <View style={am.divider} />
+            <Pressable style={({ pressed }) => [am.addRow, pressed && { backgroundColor: '#F8F8F8' }]} onPress={() => { onClose(); router.push('/(main)/account/add-api'); }}>
+              <View style={am.addIcon}>
+                <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+                  <Path d="M12 5v14M5 12h14" stroke="#555" strokeWidth="2.2" strokeLinecap="round" />
+                </Svg>
+              </View>
+              <Text style={am.addText}>API 연결하기</Text>
+            </Pressable>
+            <View style={{ height: 32 }} />
+          </Pressable>
+        </Animated.View>
+      </Pressable>
+    </Modal>
+  );
+}
+const am = StyleSheet.create({
+  overlay:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.40)', justifyContent: 'flex-end' },
+  sheet:        { backgroundColor: '#FFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 10 },
+  handle:       { width: 32, height: 4, borderRadius: 2, backgroundColor: '#E5E5EA', alignSelf: 'center', marginBottom: 12 },
+  header:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 20 },
+  title:        { fontSize: 20, fontWeight: '700', color: '#191919' },
+  closeBtn:     { padding: 4 },
+  sectionRow:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 8 },
+  sectionLabel: { fontSize: 13, color: '#AEAEB2', fontWeight: '500' },
+  totalRow:     { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  totalText:    { fontSize: 13, color: '#AEAEB2' },
+  accRow:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14 },
+  accIcon:      { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F5F5F5', alignItems: 'center', justifyContent: 'center' },
+  accName:      { fontSize: 16, fontWeight: '600', color: '#191919', marginBottom: 3 },
+  accBalance:   { fontSize: 13, color: '#AEAEB2' },
+  divider:      { height: 1, backgroundColor: '#F2F2F2', marginVertical: 8, marginHorizontal: 20 },
+  addRow:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, gap: 12 },
+  addIcon:      { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F5F5F5', alignItems: 'center', justifyContent: 'center' },
+  addText:      { fontSize: 16, fontWeight: '500', color: '#555' },
+});
 
 // ── 스태거 페이드인 ───────────────────────────────────────────────────────────
 function AnimatedRow({ index, children }: { index: number; children: React.ReactNode }) {
@@ -368,18 +561,26 @@ const ftab = StyleSheet.create({
 
 // ── 메인 ─────────────────────────────────────────────────────────────────────
 export default function History() {
-  const [filter, setFilter]   = useState<Filter>('전체');
-  const [showUsd, setShowUsd] = useState(false);
-  const [period, setPeriod]   = useState<Period>('월');
-  const [offset, setOffset]   = useState(0);   // 0 = 현재, 1 = 이전, ...
+  const [filter, setFilter]       = useState<Filter>('전체');
+  const [showUsd, setShowUsd]     = useState(false);
+  const [period, setPeriod]       = useState<Period>('월');
+  const [offset, setOffset]       = useState(0);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const { accounts, totalBalance } = useAccounts();
   const listOpacity = useSharedValue(1);
 
   const rate = totalBalance?.usdtKrw ?? 1350;
 
+  // 선택된 계좌만, null = 전체
+  const selectedAccounts = useMemo(
+    () => selectedId ? accounts.filter((a) => a.id === selectedId) : accounts,
+    [selectedId, accounts],
+  );
+
   const { data: trades, isLoading, error, refetch } = useApi(
-    () => tradesService.getAllByAccounts(accounts),
-    [accounts],
+    () => tradesService.getAllByAccounts(selectedAccounts),
+    [selectedId, accounts],
   );
 
   // 기간 레이블
@@ -496,6 +697,13 @@ export default function History() {
         <CurrencyToggle showUsd={showUsd} onToggle={() => setShowUsd((v) => !v)} />
       </View>
 
+      <AccountPickerModal
+        visible={pickerOpen}
+        selectedId={selectedId}
+        onSelect={(id) => fade(() => setSelectedId(id))}
+        onClose={() => setPickerOpen(false)}
+      />
+
       <SectionList
         sections={sections}
         keyExtractor={(item) => item.id}
@@ -503,6 +711,9 @@ export default function History() {
         stickySectionHeadersEnabled={false}
         ListHeaderComponent={(
           <>
+            {/* ── 계좌 선택 ── */}
+            <AccountDropdownRow selectedId={selectedId} onOpen={() => setPickerOpen(true)} />
+
             {/* ── 기간 탭 ── */}
             <SlidingPillTabs
               tabs={['일', '주', '월', '년', '전체']}

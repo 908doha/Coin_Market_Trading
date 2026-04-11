@@ -7,7 +7,7 @@
  * - 자릿수 증가 시 새 자리만 마운트(애니메이션 없이 즉시 표시)
  */
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, TextStyle } from 'react-native';
 import Animated, {
   useSharedValue, useAnimatedStyle, withTiming, Easing,
@@ -83,6 +83,11 @@ export function AnimatedNumber({
   letterSpacing = 0,
   style,
 }: AnimatedNumberProps) {
+  // SSR/정적 생성과 클라이언트 초기 렌더를 동일하게 맞추기 위해
+  // 마운트 전에는 plain Text로 렌더 → 하이드레이션 불일치(#418) 방지
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
   const str   = formatter(value);
   const lineH = Math.round(fontSize * 1.3);
 
@@ -93,6 +98,11 @@ export function AnimatedNumber({
     letterSpacing,
     includeFontPadding: false,
   };
+
+  // 마운트 전: 단순 Text (서버·클라이언트 동일)
+  if (!mounted) {
+    return <Text style={[txStyle, style]}>{str}</Text>;
+  }
 
   const chars = str.split('');
 

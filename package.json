@@ -13,8 +13,8 @@
     "vercel-build": "expo export -p web"
   },
   "dependencies": {
-    "pg": "^8.13.3",
     "@expo/vector-icons": "^14.0.4",
+    "@supabase/supabase-js": "^2.103.0",
     "expo": "~52.0.0",
     "expo-constants": "~17.0.3",
     "expo-font": "~13.0.2",
@@ -26,6 +26,7 @@
     "expo-system-ui": "~4.0.3",
     "expo-web-browser": "~14.0.1",
     "lottie-react-native": "^7.3.6",
+    "pg": "^8.13.3",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-native": "0.76.5",

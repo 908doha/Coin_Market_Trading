@@ -105,7 +105,17 @@ async function withDb<T>(fn: (client: Client) => Promise<T>): Promise<T | null> 
   const url = process.env.DATABASE_URL;
   if (!url) return null;
 
-  const client = new Client(buildClientConfig(url));
+  // pg reads process.env.DATABASE_URL automatically in ConnectionParameters even when
+  // explicit host/port/user/password are provided, passing it to pg-connection-string
+  // which calls new URL() — this fails on passwords with [ ] @ # special chars.
+  // Temporarily remove the env var so pg only uses our manually parsed config.
+  delete process.env.DATABASE_URL;
+  let client: Client;
+  try {
+    client = new Client(buildClientConfig(url));
+  } finally {
+    process.env.DATABASE_URL = url;
+  }
 
   try {
     await client.connect();

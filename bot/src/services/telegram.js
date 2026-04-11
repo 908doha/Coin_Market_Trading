@@ -35,6 +35,18 @@ class TelegramService {
 
     this.bot = new TelegramBot(config.telegramToken, { polling: true });
     this.enabled = true;
+
+    // 폴링 에러 rate-limited 핸들러 (B)
+    // node-telegram-bot-api 가 자동 재시도하므로 로그 스팸만 막음
+    this._lastPollErrorAt = 0;
+    this.bot.on('polling_error', (err) => {
+      const now = Date.now();
+      if (now - this._lastPollErrorAt > 60000) {
+        logger.warn(`텔레그램 폴링 에러 (자동 재시도): ${err.code || err.message}`);
+        this._lastPollErrorAt = now;
+      }
+    });
+
     this._registerCommands();
     logger.info('텔레그램 봇 연결 완료');
     this.send('🟢 ICT Trading Bot 시작됨 (Multi-Pair)');
@@ -550,12 +562,24 @@ class TelegramService {
     return lines.join('\n');
   }
 
+  /**
+   * 메시지 발송 (A: 재시도 로직)
+   *   네트워크 일시 불안정(EFATAL AggregateError) 대응
+   *   최대 3회 재시도, 지수 백오프 (1s → 3s → 종료)
+   */
   async send(message) {
     if (!this.enabled) return;
-    try {
-      await this.bot.sendMessage(config.telegramChatId, message);
-    } catch (err) {
-      logger.error(`텔레그램 전송 실패: ${err.message}`);
+    const delays = [0, 1000, 3000]; // attempt 1: 즉시, 2: 1s, 3: 3s
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        if (delays[attempt] > 0) await new Promise((r) => setTimeout(r, delays[attempt]));
+        await this.bot.sendMessage(config.telegramChatId, message);
+        return; // 성공
+      } catch (err) {
+        if (attempt === 2) {
+          logger.error(`텔레그램 전송 실패 (3회 시도): ${err.message}`);
+        }
+      }
     }
   }
 

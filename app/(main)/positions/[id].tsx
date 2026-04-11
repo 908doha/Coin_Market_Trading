@@ -552,40 +552,42 @@ export default function PositionDetail() {
 
               {/* ── 통합 손익/가격 카드 ─────────────────── */}
               <GlassCard intensity="medium" radius={24} padding={24} style={st.section}>
-                {/* PNL */}
-                <Text style={st.pnlLabel}>평가손익</Text>
-                <AnimatedNumber
-                  value={showUsd ? position.profit / rate : position.profit}
-                  formatter={showUsd
-                    ? (v) => `${v >= 0 ? '+' : ''}$${Math.abs(v).toFixed(2)}`
-                    : formatKRWSigned
-                  }
-                  fontSize={30}
-                  fontWeight="700"
-                  color={pnlColor}
-                  letterSpacing={-0.5}
-                  style={{ marginBottom: 6 }}
-                />
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-                  <View style={[st.rateBadge, { backgroundColor: isProfit ? colors.market.riseSubtle : colors.market.fallSubtle }]}>
+                {/* PNL (좌) + 차트 (우) 가로 배치 */}
+                <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={st.pnlLabel}>평가손익</Text>
                     <AnimatedNumber
-                      value={position.profitRate}
-                      formatter={formatRate}
-                      fontSize={14}
+                      value={showUsd ? position.profit / rate : position.profit}
+                      formatter={showUsd
+                        ? (v) => `${v >= 0 ? '+' : ''}$${Math.abs(v).toFixed(2)}`
+                        : formatKRWSigned
+                      }
+                      fontSize={26}
                       fontWeight="700"
                       color={pnlColor}
+                      letterSpacing={-0.5}
+                      style={{ marginBottom: 8 }}
+                    />
+                    <View style={[st.rateBadge, { alignSelf: 'flex-start', backgroundColor: isProfit ? colors.market.riseSubtle : colors.market.fallSubtle }]}>
+                      <AnimatedNumber
+                        value={position.profitRate}
+                        formatter={formatRate}
+                        fontSize={13}
+                        fontWeight="700"
+                        color={pnlColor}
+                      />
+                    </View>
+                  </View>
+                  <View style={{ width: 140 }}>
+                    <PriceChart
+                      entry={position.entryPrice}
+                      current={position.currentPrice ?? position.markPrice}
+                      tp={position.targetPrice}
+                      sl={position.stopLoss}
+                      direction={direction ?? 'Long'}
                     />
                   </View>
                 </View>
-
-                {/* 가격 차트 */}
-                <PriceChart
-                  entry={position.entryPrice}
-                  current={position.currentPrice ?? position.markPrice}
-                  tp={position.targetPrice}
-                  sl={position.stopLoss}
-                  direction={direction ?? 'Long'}
-                />
 
                 {/* Row 1: 수량 | 증거금 */}
                 <View style={st.amountRow}>
@@ -838,6 +840,7 @@ const st = StyleSheet.create({
   rateText:  { fontSize: 14, fontWeight: '700' },
 
   amountRow:     { flexDirection: 'row', alignItems: 'center', paddingTop: 16, borderTopWidth: 1, borderTopColor: colors.border.default },
+  gridRow:       { flexDirection: 'row', alignItems: 'center', paddingTop: 12, marginTop: 12, borderTopWidth: 1, borderTopColor: colors.border.default },
   amountDivider: { width: 1, height: 36, backgroundColor: colors.border.default, marginHorizontal: 16 },
   amountLabel:   { fontSize: 12, color: colors.text.tertiary, marginBottom: 4 },
   amountValue:   { fontSize: 15, fontWeight: '700', color: colors.text.primary },

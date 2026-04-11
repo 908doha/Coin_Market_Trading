@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, ScrollView, Platform, Dimensions } from 'react-native';
+import { View, StyleSheet, ScrollView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Text, GlassCard, Badge, SubPageHeader, ScreenTransition, PositionDetailSkeleton, AnimatedNumber } from '@/design-system';

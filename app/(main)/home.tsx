@@ -13,6 +13,17 @@ import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeAccount, Exchang
 import type { Balance } from '@/services';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 
+// 로컬 날짜 YYYY-MM-DD 문자열 (UTC 아님)
+function localDateStr(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+// 로컬 기준 해당 주의 월요일 키
+function mondayKey(d: Date): string {
+  const dow    = d.getDay();  // 로컬 요일
+  const offset = dow === 0 ? 6 : dow - 1;
+  return localDateStr(new Date(d.getTime() - offset * 86400_000));
+}
+
 // ── 거래 내역으로 자산 차트 데이터 생성 ───────────────────────────────────────
 function buildChartFromTrades(
   trades: Trade[],
@@ -64,12 +75,12 @@ function buildChartFromTrades(
       buckets.push({ key, label: `${d.getMonth()+1}/${d.getDate()}` });
     }
   } else if (period === '주') {
-    // 8개 주간 버킷 (8주 전 ~ 이번 주, 월요일 기준)
+    // 8개 주간 버킷 (8주 전 ~ 이번 주, 월요일 기준 — 로컬 날짜 키)
     for (let i = 7; i >= 0; i--) {
-      const d   = new Date(now.getTime() - i * 7 * 86400_000);
-      const dow = d.getDay();
-      const monday = new Date(d.getTime() - ((dow === 0 ? 6 : dow - 1) * 86400_000));
-      const key    = monday.toISOString().slice(0, 10);
+      const d      = new Date(now.getTime() - i * 7 * 86400_000);
+      const offset = d.getDay() === 0 ? 6 : d.getDay() - 1;
+      const monday = new Date(d.getTime() - offset * 86400_000);
+      const key    = localDateStr(monday);
       const wom    = Math.ceil(monday.getDate() / 7);
       buckets.push({ key, label: `${monday.getMonth()+1}월${wom}주` });
     }
@@ -88,11 +99,11 @@ function buildChartFromTrades(
     }
   }
 
-  // 버킷 키 함수
+  // 버킷 키 함수 (주 기간은 로컬 기준 월요일 키)
   const getKey = (iso: string): string => {
     const d = new Date(iso);
     if (period === '시간') return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}`;
-    if (period === '주')   { const dow = d.getDay(); const mon = new Date(d.getTime() - ((dow === 0 ? 6 : dow - 1) * 86400_000)); return mon.toISOString().slice(0, 10); }
+    if (period === '주')   return mondayKey(d);
     if (period === '월')   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
     if (period === '년')   return `${d.getFullYear()}`;
     return d.toISOString().slice(0, 10);
@@ -166,11 +177,11 @@ function buildPeriodBarsFromTrades(
     }
   } else if (period === '주') {
     for (let i = 7; i >= 0; i--) {
-      const d   = new Date(now.getTime() - i * 7 * 86400_000);
-      const dow = d.getDay();
-      const monday = new Date(d.getTime() - ((dow === 0 ? 6 : dow - 1) * 86400_000));
-      const key  = monday.toISOString().slice(0, 10);
-      const wom  = Math.ceil(monday.getDate() / 7);
+      const d      = new Date(now.getTime() - i * 7 * 86400_000);
+      const offset = d.getDay() === 0 ? 6 : d.getDay() - 1;
+      const monday = new Date(d.getTime() - offset * 86400_000);
+      const key    = localDateStr(monday);
+      const wom    = Math.ceil(monday.getDate() / 7);
       buckets.push({ key, label: `${monday.getMonth()+1}월${wom}주` });
     }
   } else if (period === '월') {
@@ -189,7 +200,7 @@ function buildPeriodBarsFromTrades(
   const getKey = (iso: string): string => {
     const d = new Date(iso);
     if (period === '시간') return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}`;
-    if (period === '주')   { const dow = d.getDay(); const mon = new Date(d.getTime() - ((dow === 0 ? 6 : dow - 1) * 86400_000)); return mon.toISOString().slice(0, 10); }
+    if (period === '주')   return mondayKey(d);
     if (period === '월')   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
     if (period === '년')   return `${d.getFullYear()}`;
     return d.toISOString().slice(0, 10);

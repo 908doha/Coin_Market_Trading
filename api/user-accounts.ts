@@ -94,7 +94,7 @@ function buildClientConfig(url: string) {
     user:     safeDecode(user),
     password: safeDecode(password),
     ssl:      { rejectUnauthorized: false },
-    connectionTimeoutMillis: 5000,
+    connectionTimeoutMillis: 15000,
   };
   console.log('[db-config] parsed host=%s port=%d user=%s db=%s', config.host, config.port, config.user, config.database);
   return config;

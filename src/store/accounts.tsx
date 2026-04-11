@@ -164,6 +164,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
   const [balances, setBalances]          = useState<Record<string, Balance | null>>({});
   const [balanceErrors, setBalErrors]    = useState<Record<string, string | null>>({});
   const [balancesLoading, setBalLoading] = useState(false);
+  const [positions, setPositions]        = useState<Position[]>([]);
   const accountsRef     = useRef(accounts);
   const firstBalLoad    = useRef(true);   // skeleton은 최초 1회만
   accountsRef.current = accounts;
@@ -235,6 +236,18 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     setBalErrors(errMap);
     setBalLoading(false);
     firstBalLoad.current = false;
+  }, []);
+
+  // 포지션 silent refresh (로딩 표시 없이 갱신)
+  const refreshPositions = useCallback(async () => {
+    const list = accountsRef.current;
+    if (!list.length) return;
+    try {
+      const pos = await positionsService.getAllByAccounts(list);
+      setPositions(pos);
+    } catch (e) {
+      console.error('[positions] refresh error:', e);
+    }
   }, []);
 
   useEffect(() => {

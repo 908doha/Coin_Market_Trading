@@ -348,10 +348,12 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
   const lc     = positive ? colors.market.rise : colors.market.fall;
 
   const toLineY = (v: number) => C_PAD_T + (1 - (v - vMin) / vRange) * (LINE_H - C_PAD_T - 6);
-  const toLineX = (i: number) => (i / (n - 1)) * cw;
+  // 선 포인트와 막대 중심을 같은 X에 정렬: (i + 0.5) / n
+  const toLineX = (i: number) => ((i + 0.5) / n) * cw;
 
   const linePts = vals.map((v, i) => `${toLineX(i)},${toLineY(v)}`);
-  const fillPts = [...linePts, `${cw},${LINE_H}`, `0,${LINE_H}`].join(' ');
+  // fill 폴리곤은 좌우 가장자리까지 확장
+  const fillPts = [`0,${LINE_H}`, ...linePts, `${cw},${LINE_H}`].join(' ');
 
   const maxBar  = Math.max(...barsData.map((d) => Math.abs(d.value))) || 1;
   const barMidY = LINE_H + BARS_H / 2;
@@ -365,7 +367,8 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
   const handleTouch = (e: any) => {
     const x = e.nativeEvent.locationX;
     if (x == null || cw <= 0) return;
-    setTipIdx(Math.max(0, Math.min(n - 1, Math.round((x / cw) * (n - 1)))));
+    // 균등 슬롯 기반 인덱스 (막대 X 기준과 동일)
+    setTipIdx(Math.max(0, Math.min(n - 1, Math.floor((x / cw) * n))));
   };
 
   // Y축 그리드 값

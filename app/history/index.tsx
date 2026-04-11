@@ -47,19 +47,6 @@ function pnlColor(v: number) {
   return v > 0 ? colors.market.rise : v < 0 ? colors.market.fall : colors.text.tertiary;
 }
 
-function calcStats(trades: Trade[]) {
-  const total      = trades.length;
-  const totalPnl   = trades.reduce((s, t) => s + t.profit, 0);
-  const totalAmt   = trades.reduce((s, t) => s + (t.amount ?? 0), 0);
-  const profitRate = totalAmt > 0 ? (totalPnl / totalAmt) * 100 : 0;
-  const wins       = trades.filter((t) => t.profit > 0);
-  const losses     = trades.filter((t) => t.profit < 0);
-  const avgWin     = wins.length   ? wins.reduce((s, t) => s + t.profit, 0) / wins.length : 0;
-  const avgLoss    = losses.length ? Math.abs(losses.reduce((s, t) => s + t.profit, 0) / losses.length) : 0;
-  const plRatio    = avgLoss > 0 ? avgWin / avgLoss : null;
-  return { total, totalPnl, profitRate, wins: wins.length, losses: losses.length, plRatio };
-}
-
 // ── 거래소 로고 ───────────────────────────────────────────────────────────────
 function ExchangeLogo({ exchange, size = 40 }: { exchange: ExchangeType; size?: number }) {
   const s = size; const color = EXCHANGE_COLORS[exchange];
@@ -358,80 +345,6 @@ const nr = StyleSheet.create({
   disabled: { opacity: 0.2 },
 });
 
-// ── 대형 손익 금액 ────────────────────────────────────────────────────────────
-function HeroAmount({ value, hasData, showUsd, rate }: { value: number; hasData: boolean; showUsd: boolean; rate: number }) {
-  const text = hasData ? (showUsd ? fmtUsd(value, rate) : formatKRWSigned(value)) : '—';
-  return (
-    <View style={ha.wrap}>
-      <Text style={[ha.amount, { color: hasData ? pnlColor(value) : '#CCCCCC' }]}>{text}</Text>
-    </View>
-  );
-}
-const ha = StyleSheet.create({
-  wrap  : { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 16 },
-  amount: { fontSize: 26, fontWeight: '700', letterSpacing: -0.5 },
-});
-
-// ── 요약 행 5개 ───────────────────────────────────────────────────────────────
-type SummaryItem = { label: string; value: string; blue?: string; color?: string };
-
-function SummaryRow({ item, isLast }: { item: SummaryItem; isLast?: boolean }) {
-  return (
-    <View style={[sl.row, !isLast && sl.border]}>
-      <Text style={sl.label}>{item.label}</Text>
-      <View style={sl.right}>
-        <Text style={[sl.value, item.color ? { color: item.color } : undefined]}>{item.value}</Text>
-        {item.blue ? <Text style={sl.blue}>{item.blue}</Text> : null}
-      </View>
-    </View>
-  );
-}
-
-function SummaryList({ stats, hasData, showUsd, rate }: {
-  stats: ReturnType<typeof calcStats>; hasData: boolean; showUsd: boolean; rate: number;
-}) {
-  const pnlText = hasData
-    ? (showUsd ? fmtUsd(stats.totalPnl, rate) : formatKRWSigned(stats.totalPnl))
-    : (showUsd ? '$0.00' : '0원');
-
-  const items: SummaryItem[] = [
-    {
-      label: '실현손익',
-      value: pnlText,
-      blue : hasData ? `(${stats.profitRate >= 0 ? '+' : ''}${stats.profitRate.toFixed(1)}%)` : undefined,
-      color: hasData ? pnlColor(stats.totalPnl) : '#999',
-    },
-    { label: '수익 거래', value: `${stats.wins}건`,   color: stats.wins > 0 ? '#25B999' : '#999' },
-    { label: '손실 거래', value: `${stats.losses}건`, color: stats.losses > 0 ? '#F04452' : '#999' },
-    {
-      label: '손익비',
-      value: stats.plRatio != null ? stats.plRatio.toFixed(2) : '—',
-      color: stats.plRatio != null ? (stats.plRatio >= 1 ? '#25B999' : '#F04452') : '#999',
-    },
-    {
-      label: '수익률',
-      value: hasData ? `${stats.profitRate >= 0 ? '+' : ''}${stats.profitRate.toFixed(1)}%` : '—',
-      color: hasData ? pnlColor(stats.totalPnl) : '#999',
-    },
-  ];
-
-  return (
-    <View style={sl.block}>
-      {items.map((item, i) => (
-        <SummaryRow key={item.label} item={item} isLast={i === items.length - 1} />
-      ))}
-    </View>
-  );
-}
-const sl = StyleSheet.create({
-  block : { paddingVertical: 4 },
-  row   : { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 13, paddingHorizontal: 20 },
-  border: { borderBottomWidth: 1, borderBottomColor: '#F2F2F2' },
-  label : { fontSize: 14, color: '#555555' },
-  right : { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  value : { fontSize: 14, color: '#999999' },
-  blue  : { fontSize: 13, color: '#1B74E8' },
-});
 
 // ── 방향·결과 뱃지 ────────────────────────────────────────────────────────────
 function DirectionBadge({ direction }: { direction: 'Long' | 'Short' }) {
@@ -657,8 +570,6 @@ export default function History() {
     return result;
   }, [filtered]);
 
-  const periodStats = useMemo(() => calcStats(byPeriod), [byPeriod]);
-
   // 리스트 페이드
   const listAnimStyle = useAnimatedStyle(() => ({ opacity: listOpacity.value }));
 
@@ -734,25 +645,6 @@ export default function History() {
                 <Text style={{ fontSize: 15, fontWeight: '700', color: '#191919' }}>전체 기간 실현수익</Text>
               </View>
             )}
-
-            {/* ── 대형 손익 금액 ── */}
-            <HeroAmount
-              value={periodStats.totalPnl}
-              hasData={periodStats.total > 0}
-              showUsd={showUsd}
-              rate={rate}
-            />
-
-            {/* ── 요약 5행 ── */}
-            <SummaryList
-              stats={periodStats}
-              hasData={periodStats.total > 0}
-              showUsd={showUsd}
-              rate={rate}
-            />
-
-            {/* ── 섹션 구분선 ── */}
-            <View style={{ height: 10, backgroundColor: '#F4F4F4' }} />
 
             {/* ── 필터 탭 ── */}
             <FilterTabs filter={filter} onChange={(f) => fade(() => setFilter(f))} />

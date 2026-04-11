@@ -4,7 +4,7 @@
  * POST /api/user-accounts  — 계좌 목록 저장 (덮어쓰기)
  *
  * 인증: Authorization: Bearer <jwt> 헤더 (Django JWT)
- * 저장: Railway PostgreSQL (DATABASE_URL)
+ * 저장: PostgreSQL (DATABASE_URL) — Supabase Session Pooler 권장
  * 암호화: AES-256-GCM (ACCOUNTS_ENCRYPTION_KEY)
  */
 
@@ -50,7 +50,9 @@ function encrypt(plain: string): string {
 }
 
 function decrypt(encoded: string): string {
-  const [ivHex, encHex, tagHex] = encoded.split(':');
+  const parts = encoded.split(':');
+  if (parts.length !== 3) throw new Error('Invalid encrypted data format');
+  const [ivHex, encHex, tagHex] = parts;
   const key     = getKey();
   const iv      = Buffer.from(ivHex,  'hex');
   const enc     = Buffer.from(encHex, 'hex');
@@ -60,19 +62,53 @@ function decrypt(encoded: string): string {
   return decipher.update(enc).toString('utf8') + decipher.final('utf8');
 }
 
+// ── DATABASE_URL 파싱 ─────────────────────────────────────────────────────────
+// new URL()은 비밀번호의 [ ] @ # 등을 허용 안 함 → lastIndexOf('@')로 직접 파싱
+function buildClientConfig(url: string) {
+  // 프로토콜 제거
+  const withoutProto = url.replace(/^(?:postgresql|postgres):\/\//, '');
+  // 마지막 @ 기준으로 credentials / host 분리 (비밀번호 안의 @ 처리)
+  const lastAt = withoutProto.lastIndexOf('@');
+  if (lastAt === -1) {
+    console.error('[db-config] no @ found in DATABASE_URL');
+    throw new Error('DATABASE_URL has no @ separator');
+  }
+  const creds    = withoutProto.slice(0, lastAt);
+  const hostPart = withoutProto.slice(lastAt + 1);
+  // 첫 번째 : 기준으로 user / password 분리
+  const colonIdx = creds.indexOf(':');
+  const user     = colonIdx === -1 ? creds : creds.slice(0, colonIdx);
+  const password = colonIdx === -1 ? ''    : creds.slice(colonIdx + 1);
+  // host:port/database 파싱 (쿼리 파라미터 제거)
+  const m = hostPart.match(/^([^:/]+)(?::(\d+))?(?:\/([^?]*))?/);
+  if (!m) {
+    console.error('[db-config] failed to parse host from:', hostPart);
+    throw new Error('DATABASE_URL host parse failed');
+  }
+  const [, host, portStr, database] = m;
+  const safeDecode = (s: string) => { try { return decodeURIComponent(s); } catch { return s; } };
+  const config = {
+    host,
+    port:     parseInt(portStr || '5432', 10),
+    database: database || 'postgres',
+    user:     safeDecode(user),
+    password: safeDecode(password),
+    ssl:      { rejectUnauthorized: false },
+    connectionTimeoutMillis: 5000,
+  };
+  console.log('[db-config] parsed host=%s port=%d user=%s db=%s', config.host, config.port, config.user, config.database);
+  return config;
+}
+
 // ── PostgreSQL (Vercel 서버리스 — 매 요청마다 Client 생성) ──────────────────────
 async function withDb<T>(fn: (client: Client) => Promise<T>): Promise<T | null> {
   const url = process.env.DATABASE_URL;
   if (!url) return null;
 
-  const client = new Client({
-    connectionString: url,
-    ssl: { rejectUnauthorized: false },
-    connectionTimeoutMillis: 5000,
-  });
+  const client = new Client(buildClientConfig(url));
 
-  await client.connect();
   try {
+    await client.connect();
     await client.query(`
       CREATE TABLE IF NOT EXISTS exchange_accounts (
         user_id    TEXT PRIMARY KEY,
@@ -82,7 +118,7 @@ async function withDb<T>(fn: (client: Client) => Promise<T>): Promise<T | null> 
     `);
     return await fn(client);
   } finally {
-    await client.end();
+    await client.end().catch(() => {});
   }
 }
 

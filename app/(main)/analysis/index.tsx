@@ -7,10 +7,6 @@ import {
   View, StyleSheet, ScrollView, Pressable, Modal, LayoutAnimation, Platform, UIManager,
   TextInput, ActivityIndicator,
 } from 'react-native';
-
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Animated, {
@@ -22,6 +18,10 @@ import { colors } from '@/design-system/tokens';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType, ExchangeAccount } from '@/store/accounts';
 import { formatKRW } from '@/utils/format';
 import type { Balance } from '@/services/account.service';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 // ─── 상수 ────────────────────────────────────────────────────────────────────
 

@@ -69,8 +69,9 @@ function buildChartFromTrades(
       const d   = new Date(now.getTime() - i * 7 * 86400_000);
       const dow = d.getDay();
       const monday = new Date(d.getTime() - ((dow === 0 ? 6 : dow - 1) * 86400_000));
-      const key = monday.toISOString().slice(0, 10);
-      buckets.push({ key, label: `${monday.getMonth()+1}/${monday.getDate()}` });
+      const key    = monday.toISOString().slice(0, 10);
+      const wom    = Math.ceil(monday.getDate() / 7);
+      buckets.push({ key, label: `${monday.getMonth()+1}월${wom}주` });
     }
   } else if (period === '월') {
     // 6개 월별 버킷 (6개월 전 ~ 이번 달)
@@ -168,8 +169,9 @@ function buildPeriodBarsFromTrades(
       const d   = new Date(now.getTime() - i * 7 * 86400_000);
       const dow = d.getDay();
       const monday = new Date(d.getTime() - ((dow === 0 ? 6 : dow - 1) * 86400_000));
-      const key = monday.toISOString().slice(0, 10);
-      buckets.push({ key, label: `${monday.getMonth()+1}/${monday.getDate()}` });
+      const key  = monday.toISOString().slice(0, 10);
+      const wom  = Math.ceil(monday.getDate() / 7);
+      buckets.push({ key, label: `${monday.getMonth()+1}월${wom}주` });
     }
   } else if (period === '월') {
     for (let i = 5; i >= 0; i--) {

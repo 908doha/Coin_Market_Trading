@@ -5,7 +5,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   View, StyleSheet, ScrollView, Pressable, Modal, LayoutAnimation, Platform, UIManager,
-  TextInput, ActivityIndicator,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -42,11 +42,6 @@ function computeKelly(trades: Trade[]) {
 
 // ─── 상수 ────────────────────────────────────────────────────────────────────
 
-const GRADE_COLORS: Record<string, string> = {
-  S: '#8B5CF6', A: '#3B82F6', 'B+': '#10B981', B: '#06B6D4',
-  C: '#F59E0B', D: '#F97316', F: '#EF4444',
-};
-
 const API_BASE =
   typeof window !== 'undefined' && (window as any).location?.origin
     ? (window as any).location.origin
@@ -63,13 +58,6 @@ interface Ticker {
   change24h:    number;
   volume24hUsd: number;
   fundingRate:  number;
-}
-
-interface IctResult {
-  score:  number;
-  grade:  string;
-  signal: string | null;
-  reason: string;
 }
 
 // ─── 거래소 로고 ──────────────────────────────────────────────────────────────
@@ -263,18 +251,6 @@ const bs = StyleSheet.create({
   addText:      { fontSize: 16, fontWeight: '500', color: '#555' },
 });
 
-// ─── ICT 배지 ─────────────────────────────────────────────────────────────────
-
-function IctBadge({ score, grade }: { score: number; grade: string }) {
-  const gc = GRADE_COLORS[grade] ?? '#8B5CF6';
-  return (
-    <View style={[ls.ictBadge, { borderColor: gc, backgroundColor: gc + '18' }]}>
-      <Text style={[ls.ictGrade, { color: gc }]}>{grade}</Text>
-      <Text style={[ls.ictScore, { color: gc }]}>{score}</Text>
-    </View>
-  );
-}
-
 function formatVol(usd: number): string {
   if (usd >= 1e9) return `$${(usd / 1e9).toFixed(1)}B`;
   if (usd >= 1e6) return `$${(usd / 1e6).toFixed(0)}M`;
@@ -284,10 +260,9 @@ function formatVol(usd: number): string {
 // ─── 종목 행 (포지션 현황과 동일한 디자인) ─────────────────────────────────────
 
 function TickerRow({
-  ticker, idx, ict, onPress, isLast,
+  ticker, idx, onPress, isLast,
 }: {
   ticker: Ticker; idx: number;
-  ict:    IctResult | 'loading' | undefined;
   onPress: () => void;
   isLast: boolean;
 }) {
@@ -296,9 +271,6 @@ function TickerRow({
     : ticker.change24h < 0
       ? colors.market.fall
       : colors.text.secondary;
-
-  const isLoading = ict === 'loading';
-  const result    = typeof ict === 'object' ? ict : null;
 
   return (
     <Pressable
@@ -327,18 +299,12 @@ function TickerRow({
         </Text>
       </View>
 
-      {/* 우측: 변동률 + ICT */}
+      {/* 우측: 변동률 + 분석 화살표 */}
       <View style={{ alignItems: 'flex-end', gap: 4 }}>
         <Text style={[tr.change, { color: changeColor }]}>
           {ticker.change24h > 0 ? '+' : ''}{ticker.change24h.toFixed(2)}%
         </Text>
-        {isLoading ? (
-          <ActivityIndicator size="small" color={colors.text.secondary} />
-        ) : result ? (
-          <IctBadge score={result.score} grade={result.grade} />
-        ) : (
-          <Text style={tr.analyzeBtn}>분석</Text>
-        )}
+        <Text style={tr.analyzeBtn}>분석 →</Text>
       </View>
     </Pressable>
   );
@@ -358,12 +324,6 @@ const tr = StyleSheet.create({
   analyzeBtn: { fontSize: 12, fontWeight: '600', color: colors.text.secondary, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: colors.bg.elevated },
 });
 
-const ls = StyleSheet.create({
-  ictBadge: { borderRadius: 8, borderWidth: 1.5, paddingHorizontal: 6, paddingVertical: 2, alignItems: 'center', minWidth: 44 },
-  ictGrade: { fontSize: 13, fontWeight: '800', lineHeight: 18 },
-  ictScore: { fontSize: 10, fontWeight: '700' },
-});
-
 // ─── 메인 ─────────────────────────────────────────────────────────────────────
 
 export default function Analysis() {
@@ -375,7 +335,6 @@ export default function Analysis() {
   const [tickers, setTickers]   = useState<Ticker[]>([]);
   const [tickersLoading, setTickersLoading] = useState(true);
   const [search,  setSearch]    = useState('');
-  const [ictMap,  setIctMap]    = useState<Map<string, IctResult | 'loading'>>(new Map());
 
   const { accounts, balances, totalBalance } = useAccounts();
 
@@ -451,32 +410,9 @@ export default function Analysis() {
     );
   }, [tickers, search]);
 
-  const analyze = useCallback(async (contract: string) => {
-    if (ictMap.get(contract) === 'loading') return;
-    const account = accounts.find((a) => a.apiKey && a.apiSecret) ?? accounts[0];
-    if (!account?.apiKey || !account?.apiSecret) return;
-    setIctMap((m) => new Map(m).set(contract, 'loading'));
-    try {
-      const res = await fetch(`${API_BASE}/api/ict-analyze`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ apiKey: account.apiKey, apiSecret: account.apiSecret, contract }),
-      });
-      const data = await res.json();
-      if (data?.score != null && data?.grade) {
-        setIctMap((m) => new Map(m).set(contract, {
-          score:  data.score,
-          grade:  data.grade,
-          signal: data.summary?.signal ?? null,
-          reason: data.summary?.reason ?? '',
-        }));
-      } else {
-        setIctMap((m) => { const nm = new Map(m); nm.delete(contract); return nm; });
-      }
-    } catch {
-      setIctMap((m) => { const nm = new Map(m); nm.delete(contract); return nm; });
-    }
-  }, [accounts, ictMap]);
+  const analyze = useCallback((contract: string) => {
+    router.push(`/(main)/analysis/ict/${encodeURIComponent(contract)}` as any);
+  }, []);
 
   return (
     <FadeTabView style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
@@ -618,7 +554,6 @@ export default function Analysis() {
                       key={ticker.contract}
                       ticker={ticker}
                       idx={idx}
-                      ict={ictMap.get(ticker.contract)}
                       onPress={() => analyze(ticker.contract)}
                       isLast={idx === filtered.length - 1}
                     />

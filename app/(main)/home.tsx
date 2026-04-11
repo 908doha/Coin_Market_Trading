@@ -909,16 +909,16 @@ export default function Home() {
           )}
 
           {/* ── 활성 포지션 ── */}
-          <GlassCard intensity="low" radius={20} padding={20} style={styles.section}>
+          <GlassCard intensity="low" radius={20} padding={0} style={styles.section}>
             <PressableScale onPress={() => router.push('/(main)/positions')} scaleTo={0.98}>
-              <View style={styles.posHeader}>
+              <View style={[styles.posHeader, { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 0 }]}>
                 <Text style={styles.sectionTitle}>활성 포지션</Text>
                 <Text style={styles.posArrow}>›</Text>
               </View>
             </PressableScale>
 
             {!positions?.length ? (
-              <View style={{ paddingTop: 16, alignItems: 'center' }}>
+              <View style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 20, alignItems: 'center' }}>
                 <Text style={styles.emptyText}>현재 활성 포지션이 없어요</Text>
               </View>
             ) : (() => {
@@ -937,7 +937,7 @@ export default function Home() {
                   : [{ accountId: undefined, label: '', items: positions }];
 
               return (
-                <View style={{ marginTop: 8 }}>
+                <View style={{ marginTop: 8, paddingBottom: 8 }}>
                   {groups.map((group) => (
                     <View key={group.accountId ?? 'all'}>
                       {multiAccount && (
@@ -1063,8 +1063,8 @@ const styles = StyleSheet.create({
 
   posHeader:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   posArrow:        { fontSize: 22, color: colors.text.disabled, lineHeight: 26 },
-  posAccountLabel: { fontSize: 12, fontWeight: '600', color: colors.text.tertiary, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 4, letterSpacing: 0.3 },
-  posRow:          { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14 },
+  posAccountLabel: { fontSize: 12, fontWeight: '600', color: colors.text.tertiary, paddingHorizontal: 20, paddingTop: 8, paddingBottom: 2, letterSpacing: 0.3 },
+  posRow:          { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16 },
   posRowBorder:    { borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
   posIcon:         { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
   posIconText:     { fontSize: 13, fontWeight: '700' },

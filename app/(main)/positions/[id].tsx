@@ -8,7 +8,7 @@ import { positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 import { useAccounts } from '@/store/accounts';
-import { CoinHeaderCard, PnlCard } from '@/components/PositionDetailCard';
+import { CoinHeaderCard, PnlCard, PriceChart } from '@/components/PositionDetailCard';
 
 interface FvgInfo { ce: number; fillPct: number; }
 interface IctAnalysis {
@@ -543,13 +543,15 @@ export default function PositionDetail() {
 
                     {/* 가격 레인지 시각화 */}
                     {ictAnalysis.summary.entry != null && (
-                      <PriceRangeBar
-                        entry={ictAnalysis.summary.entry}
-                        current={ictAnalysis.currentPrice}
-                        tp={ictAnalysis.summary.tp}
-                        sl={ictAnalysis.summary.sl}
-                        direction={direction ?? 'Long'}
-                      />
+                      <View style={{ paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border.default }}>
+                        <PriceChart
+                          entry={ictAnalysis.summary.entry}
+                          current={ictAnalysis.currentPrice}
+                          tp={ictAnalysis.summary.tp}
+                          sl={ictAnalysis.summary.sl}
+                          direction={direction ?? 'Long'}
+                        />
+                      </View>
                     )}
 
                     {/* 종합 판단 */}

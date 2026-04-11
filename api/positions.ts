@@ -151,14 +151,18 @@ async function fetchGatePositions(apiKey: string, apiSecret: string): Promise<Po
       // 보유 기간 계산
       const openTime   = p.open_time ? new Date(p.open_time * 1000) : null;
       const holdingMs  = openTime ? Date.now() - openTime.getTime() : 0;
-      const holdingDays = Math.floor(holdingMs / (1000 * 60 * 60 * 24));
+      const holdingDays  = Math.floor(holdingMs / (1000 * 60 * 60 * 24));
       const holdingHours = Math.floor((holdingMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const holdingMins  = Math.floor((holdingMs % (1000 * 60 * 60)) / (1000 * 60));
       const holdingPeriod = holdingDays > 0
-        ? `${holdingDays}일 ${holdingHours}시간`
-        : holdingHours > 0 ? `${holdingHours}시간` : '1시간 미만';
+        ? `${holdingDays}일 ${holdingHours}시간 ${holdingMins}분`
+        : holdingHours > 0
+          ? `${holdingHours}시간 ${holdingMins}분`
+          : holdingMins > 0 ? `${holdingMins}분` : '1분 미만';
 
+      const DOW = ['일', '월', '화', '수', '목', '금', '토'];
       const entryAt = openTime
-        ? `${openTime.getFullYear()}.${String(openTime.getMonth()+1).padStart(2,'0')}.${String(openTime.getDate()).padStart(2,'0')}`
+        ? `${openTime.getFullYear()}.${String(openTime.getMonth()+1).padStart(2,'0')}.${String(openTime.getDate()).padStart(2,'0')} (${DOW[openTime.getDay()]}) ${String(openTime.getHours()).padStart(2,'0')}:${String(openTime.getMinutes()).padStart(2,'0')}`
         : '-';
 
       const tpsl = priceOrders.get(contract);

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, TouchableWithoutFeedback, Pressable, Platform } from 'react-native';
+import { View, StyleSheet, ScrollView, Pressable, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Svg, { Polyline, Defs, LinearGradient, Stop, Polygon, Path, Rect, Text as SvgText, Line, Circle } from 'react-native-svg';
@@ -362,9 +362,10 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
   const tipX = tipIdx !== null ? toLineX(tipIdx) : null;
   const tipY = tipIdx !== null ? toLineY(vals[tipIdx]) : null;
 
-  const handleTouch = (evt: any) => {
-    const { locationX } = evt.nativeEvent;
-    setTipIdx(Math.max(0, Math.min(n - 1, Math.round((locationX / cw) * (n - 1)))));
+  const handleTouch = (e: any) => {
+    const x = e.nativeEvent.locationX;
+    if (x == null || cw <= 0) return;
+    setTipIdx(Math.max(0, Math.min(n - 1, Math.round((x / cw) * (n - 1)))));
   };
 
   // Y축 그리드 값
@@ -402,8 +403,15 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
   return (
     <View style={{ marginTop: 8 }}>
       {/* ── SVG 차트 ── */}
-      <TouchableWithoutFeedback onPress={handleTouch} onPressOut={() => setTipIdx(null)}>
-        <View style={{ height: TOT_H }} onLayout={(e) => setCw(e.nativeEvent.layout.width)}>
+        <View
+          style={{ height: TOT_H }}
+          onLayout={(e) => setCw(e.nativeEvent.layout.width)}
+          onStartShouldSetResponder={() => true}
+          onMoveShouldSetResponder={() => true}
+          onResponderGrant={handleTouch}
+          onResponderMove={handleTouch}
+          onResponderRelease={() => setTipIdx(null)}
+        >
           <Svg width={cw} height={TOT_H} viewBox={`0 0 ${cw} ${TOT_H}`}>
             <Defs>
               <LinearGradient id="cbFill" x1="0" y1="0" x2="0" y2="1">
@@ -487,7 +495,6 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
             <Text style={cbSt.unit}>(단위:{yUnit(maxBar)})</Text>
           </View>
         </View>
-      </TouchableWithoutFeedback>
 
       {/* X축 날짜 라벨 */}
       <View style={{ height: 20, position: 'relative' }}>
@@ -752,7 +759,7 @@ export default function Home() {
           <GlassCard style={styles.heroCard} intensity="medium" radius={24}>
             {balLoading && !balance ? <AssetCardSkeleton /> : (
               <>
-                <Text variant="meta" color={colors.text.tertiary} style={{ marginBottom: 6 }}>평가금액</Text>
+                <Text variant="meta" color={colors.text.tertiary} style={{ marginBottom: 6 }}>총 자산</Text>
                 <AnimatedNumber
                   value={showUsd && (balance?.totalUsd ?? 0) > 0
                     ? (balance?.totalUsd ?? 0)

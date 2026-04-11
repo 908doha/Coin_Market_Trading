@@ -23,6 +23,11 @@ class OrderManager {
     this.tradeStatsByPair = new Map();
     this.openExposureUsdt = new Map();
 
+    // race condition 방지: 포지션 조회 empty 연속 횟수
+    // 1-2회 null은 Gate.io 일시 장애/eventual consistency로 보고 무시,
+    // 3회 연속이면 진짜 청산으로 판단
+    this.emptyReadCount = new Map();
+
     // 영구 저장에서 복원
     this._loadPersistedStats();
   }
@@ -380,7 +385,7 @@ class OrderManager {
   async monitorPosition(contract, sl, tp, direction) {
     const position = await gateClient.getPosition(contract);
 
-    // 포지션 살아 있음
+    // 포지션 살아 있음 → 카운터 초기화
     if (position && position.size !== 0) {
       const currentPrice = position.markPrice;
       this.lastKnownPositions.set(contract, {
@@ -388,15 +393,43 @@ class OrderManager {
         entryPrice: position.entryPrice,
         unrealisedPnl: position.unrealisedPnl,
       });
+      this.emptyReadCount.delete(contract); // 정상 조회 시 카운터 리셋
       logger.debug(
         `[${contract}] [포지션] ${direction} | 현재: ${currentPrice} | PnL: ${position.unrealisedPnl.toFixed(2)} USDT | SL: ${sl} | TP: ${tp}`
       );
       return { action: 'holding', price: currentPrice, pnl: position.unrealisedPnl };
     }
 
-    // 포지션 없음
+    // 포지션 empty — 3회 연속 확인 필요 (race condition 방지)
+    // Gate.io eventual consistency / 일시 네트워크 장애로 getPosition이
+    // 가끔 null을 반환할 수 있음. 즉시 청산 판단하면 SL/TP 주문이 잘못 취소됨.
+    const prevCount = this.emptyReadCount.get(contract) || 0;
+    const count = prevCount + 1;
+    this.emptyReadCount.set(contract, count);
+
+    const EMPTY_THRESHOLD = 3;
+
+    if (count < EMPTY_THRESHOLD) {
+      // 이전에 포지션이 있었던 경우만 holding_check (보호 모드)
+      if (this.lastKnownPositions.has(contract)) {
+        logger.warn(
+          `[${contract}] 포지션 조회 empty ${count}/${EMPTY_THRESHOLD} — 확인 중 (SL/TP 유지, 취소 안 함)`
+        );
+        return { action: 'holding_check', price: 0, pnl: 0 };
+      }
+      // lastKnown 없음: 처음부터 없던 경우 (진입 실패 등)
+      logger.warn(
+        `[${contract}] 포지션 empty ${count}/${EMPTY_THRESHOLD} & 이전 기록 없음`
+      );
+      return { action: 'holding_check', price: 0, pnl: 0 };
+    }
+
+    // 3회 연속 empty → 진짜 청산됨으로 판단
+    this.emptyReadCount.delete(contract);
+
     if (!this.lastKnownPositions.has(contract)) {
-      logger.warn(`[${contract}] 포지션 확인 불가 - 조건부 주문 정리`);
+      // 이전 기록도 없는 경우 → 진입 실패
+      logger.warn(`[${contract}] 포지션 확인 불가 (${EMPTY_THRESHOLD}회 연속 empty) - 조건부 주문 정리`);
       try {
         await gateClient.cancelAllTriggerOrders(contract);
       } catch {}
@@ -406,7 +439,7 @@ class OrderManager {
       return { action: 'failed', reason: '포지션 조회 실패' };
     }
 
-    // 이전에 있었는데 지금 없음 → SL/TP 체결
+    // 이전에 있었는데 3회 연속 없음 → SL/TP 체결 또는 수동 청산으로 판단
     try {
       await gateClient.cancelAllTriggerOrders(contract);
     } catch {}
@@ -414,7 +447,7 @@ class OrderManager {
     const pnl = this.lastKnownPositions.get(contract).unrealisedPnl || 0;
     const action = pnl >= 0 ? 'tp_hit' : 'sl_hit';
     const label = action === 'tp_hit' ? 'TP 익절' : 'SL 손절';
-    logger.info(`[${contract}] [${label}] 지정가 체결 | PnL: ${pnl.toFixed(2)} USDT`);
+    logger.info(`[${contract}] [${label}] 청산 확정 (${EMPTY_THRESHOLD}회 empty) | PnL: ${pnl.toFixed(2)} USDT`);
 
     this.dailyPnl += pnl;
     this.recordTradeResult(contract, pnl);
@@ -440,6 +473,7 @@ class OrderManager {
     this.tpOrderIds.delete(contract);
     this.lastKnownPositions.delete(contract);
     this.openExposureUsdt.delete(contract);
+    this.emptyReadCount.delete(contract);
 
     return result;
   }

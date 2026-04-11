@@ -142,6 +142,9 @@ class TradingBot {
         this.activePositions.delete(pair);
       } else if (result.action === 'holding') {
         return; // 포지션 유지 중 - 새 진입 안 함
+      } else if (result.action === 'holding_check') {
+        // getPosition empty 연속 카운트 중 — 새 진입 금지, 포지션 보호 유지
+        return;
       } else {
         // failed 등
         this.activePositions.delete(pair);

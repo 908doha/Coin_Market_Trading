@@ -500,7 +500,7 @@ export default function PositionDetail() {
     const pctAbs  = Math.abs(position.profitRate).toFixed(2);
     const pnlAbs  = Math.abs(position.profit);
     const since   = p.entryAt ? `${p.entryAt}에 진입한 ` : '';
-    const holding = position.holdingPeriod ? ` ${position.holdingPeriod} 보유 중이며,` : '';
+    const holding = position.holdingPeriod ? ` ${position.holdingPeriod}째 보유 중이며,` : '';
 
     return `${since}${position.symbol} ${dir} 포지션입니다. ${lev}배 레버리지로${holding} 현재 ${pctAbs}% (${Math.round(pnlAbs / 10000).toLocaleString('ko-KR')}만원) ${profitSign} 중입니다.${p.liqPrice > 0 ? ` 청산가는 $${p.liqPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}입니다.` : ''}`;
   })() : null;
@@ -543,7 +543,7 @@ export default function PositionDetail() {
                       </View>
                     </View>
                     <Text style={st.subText}>{p.entryAt ?? '-'} 진입</Text>
-                    <Text style={st.subText}>보유 {position.holdingPeriod ?? '-'}</Text>
+                    <Text style={st.subText}>{position.holdingPeriod ?? '-'}째 보유중</Text>
                   </View>
                 </View>
               </GlassCard>

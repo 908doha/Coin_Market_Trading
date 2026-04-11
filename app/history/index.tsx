@@ -431,46 +431,6 @@ const sec = StyleSheet.create({
   text: { fontSize: 16, fontWeight: '700', color: colors.text.primary },
 });
 
-// ── 필터 탭 (전체/수익/손실) ─────────────────────────────────────────────────
-function FilterTabs({ filter, onChange }: { filter: Filter; onChange: (f: Filter) => void }) {
-  const TABS: Filter[] = ['전체', '수익', '손실'];
-  const [tabWidth, setTabWidth] = useState(0);
-  const translateX = useSharedValue(0);
-
-  useEffect(() => {
-    if (tabWidth === 0) return;
-    translateX.value = withTiming(TABS.indexOf(filter) * tabWidth, { duration: 200, easing: Easing.out(Easing.cubic) });
-  }, [filter, tabWidth]);
-
-  const indicatorStyle = useAnimatedStyle(() => ({ transform: [{ translateX: translateX.value }] }));
-
-  return (
-    <View
-      style={ftab.wrap}
-      onLayout={(e) => {
-        const w = e.nativeEvent.layout.width / 3;
-        setTabWidth(w);
-        translateX.value = TABS.indexOf(filter) * w;
-      }}
-    >
-      {tabWidth > 0 && (
-        <Animated.View style={[ftab.indicator, { width: tabWidth - 32 }, indicatorStyle]} />
-      )}
-      {TABS.map((f) => (
-        <Pressable key={f} style={ftab.item} onPress={() => onChange(f)}>
-          <Text style={[ftab.text, filter === f && ftab.activeText]}>{f}</Text>
-        </Pressable>
-      ))}
-    </View>
-  );
-}
-const ftab = StyleSheet.create({
-  wrap:       { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#F0F0F0', backgroundColor: '#FFFFFF' },
-  item:       { flex: 1, alignItems: 'center', paddingVertical: 13 },
-  text:       { fontSize: 15, fontWeight: '500', color: colors.text.tertiary },
-  activeText: { fontWeight: '700', color: colors.text.primary },
-  indicator:  { position: 'absolute', bottom: 0, left: 16, height: 2, backgroundColor: colors.text.primary, borderRadius: 1 },
-});
 
 // ── 메인 ─────────────────────────────────────────────────────────────────────
 export default function History() {
@@ -647,7 +607,13 @@ export default function History() {
             )}
 
             {/* ── 필터 탭 ── */}
-            <FilterTabs filter={filter} onChange={(f) => fade(() => setFilter(f))} />
+            <View style={{ paddingHorizontal: 16, paddingVertical: 8 }}>
+              <SlidingPillTabs
+                tabs={['전체', '수익', '손실']}
+                active={filter}
+                onChange={(f) => fade(() => setFilter(f as Filter))}
+              />
+            </View>
 
             {/* ── 로딩 / 에러 / 빈 상태 ── */}
             {isLoading ? (

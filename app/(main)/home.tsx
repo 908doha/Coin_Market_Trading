@@ -319,7 +319,7 @@ function yUnit(max: number): string {
 
 interface CombinedChartProps {
   lineData: { value: number; date?: string }[];
-  barsData: { value: number; date: string }[];
+  barsData: { value: number; rate?: number; date: string }[];
   positive: boolean;
   balance:  Balance | null;
   showUsd:  boolean;
@@ -348,16 +348,16 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
   const lc     = positive ? colors.market.rise : colors.market.fall;
 
   const toLineY = (v: number) => C_PAD_T + (1 - (v - vMin) / vRange) * (LINE_H - C_PAD_T - 6);
-  const toLineX = (i: number) => (i / (n - 1)) * CHART_W;
+  const toLineX = (i: number) => (i / (n - 1)) * cw;
 
   const linePts = vals.map((v, i) => `${toLineX(i)},${toLineY(v)}`);
-  const fillPts = [...linePts, `${CHART_W},${LINE_H}`, `0,${LINE_H}`].join(' ');
+  const fillPts = [...linePts, `${cw},${LINE_H}`, `0,${LINE_H}`].join(' ');
 
   const maxBar  = Math.max(...barsData.map((d) => Math.abs(d.value))) || 1;
   const barMidY = LINE_H + BARS_H / 2;
   const maxBarH = BARS_H / 2 - 10;
-  const barW    = Math.max((CHART_W / n) * 0.52, 4);
-  const toBarX  = (i: number) => (i / n) * CHART_W + (CHART_W / n - barW) / 2;
+  const barW    = Math.max((cw / n) * 0.52, 4);
+  const toBarX  = (i: number) => (i / n) * cw + (cw / n - barW) / 2;
 
   const tipX = tipIdx !== null ? toLineX(tipIdx) : null;
   const tipY = tipIdx !== null ? toLineY(vals[tipIdx]) : null;
@@ -370,8 +370,8 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
   // Y축 그리드 값
   const lineGrid = [vMax, (vMax + vMin) / 2, vMin];
   const barGridY = [
-    { top: LINE_H + 2,        label: fmtYLabel(maxBar)  },
-    { top: barMidY - 7,       label: '0'                },
+    { top: LINE_H + 2,           label: fmtYLabel(maxBar)  },
+    { top: barMidY - 7,          label: '0'                },
     { top: LINE_H + BARS_H - 14, label: fmtYLabel(-maxBar) },
   ];
 
@@ -381,28 +381,30 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
     .map((d, i) => ({ label: d.date, cx: ((i + 0.5) / n) * cw }))
     .filter((_, i) => i % step === 0 || i === n - 1);
 
-  // 요약 값
-  const totalKrw  = balance?.total ?? 0;
-  const profitKrw = balance?.profitTotal ?? 0;
-  const profitRate = balance?.profitRate ?? 0;
-  const hasUsdBal = showUsd && (balance?.totalUsd ?? 0) > 0;
-  const fmtTotal  = hasUsdBal
+  // 요약 값 — 터치 시 해당 시점, 아니면 현재 잔고
+  const curTotal   = balance?.total ?? 0;
+  const curProfit  = balance?.profitTotal ?? 0;
+  const curRate    = balance?.profitRate ?? 0;
+  const hasUsdBal  = showUsd && (balance?.totalUsd ?? 0) > 0;
+
+  const tipLineVal = tipIdx !== null ? (aligned[tipIdx]?.value ?? curTotal)  : curTotal;
+  const tipBarVal  = tipIdx !== null ? (barsData[tipIdx]?.value ?? 0)        : curProfit;
+  const tipBarRate = tipIdx !== null ? (barsData[tipIdx]?.rate  ?? 0)        : curRate;
+
+  const fmtTotal  = hasUsdBal && tipIdx === null
     ? `$${(balance!.totalUsd!).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-    : formatKRW(totalKrw);
-  const fmtProfit = showUsd && (balance?.usdtKrw ?? 0) > 0
-    ? `${profitKrw >= 0 ? '+' : '-'}$${Math.abs(profitKrw / balance!.usdtKrw!).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-    : formatKRWSigned(profitKrw);
+    : formatKRW(tipLineVal);
+  const fmtProfit = showUsd && (balance?.usdtKrw ?? 0) > 0 && tipIdx === null
+    ? `${curProfit >= 0 ? '+' : '-'}$${Math.abs(curProfit / balance!.usdtKrw!).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : formatKRWSigned(tipBarVal);
+  const dispRate  = tipBarRate;
 
   return (
     <View style={{ marginTop: 8 }}>
       {/* ── SVG 차트 ── */}
       <TouchableWithoutFeedback onPress={handleTouch} onPressOut={() => setTipIdx(null)}>
         <View style={{ height: TOT_H }} onLayout={(e) => setCw(e.nativeEvent.layout.width)}>
-          <Svg
-            width="100%" height={TOT_H}
-            viewBox={`0 0 ${CHART_W} ${TOT_H}`}
-            preserveAspectRatio="none"
-          >
+          <Svg width={cw} height={TOT_H} viewBox={`0 0 ${cw} ${TOT_H}`}>
             <Defs>
               <LinearGradient id="cbFill" x1="0" y1="0" x2="0" y2="1">
                 <Stop offset="0%"   stopColor={lc} stopOpacity="0.18" />
@@ -413,13 +415,13 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
             {/* 선 차트 격자선 */}
             {lineGrid.map((gv, gi) => (
               <Line key={`lg${gi}`}
-                x1="0" y1={toLineY(gv)} x2={CHART_W} y2={toLineY(gv)}
+                x1="0" y1={toLineY(gv)} x2={cw} y2={toLineY(gv)}
                 stroke={colors.border.default} strokeWidth="0.7" strokeDasharray="3,3"
               />
             ))}
 
             {/* 막대 0 기준선 */}
-            <Line x1="0" y1={barMidY} x2={CHART_W} y2={barMidY}
+            <Line x1="0" y1={barMidY} x2={cw} y2={barMidY}
               stroke={colors.border.default} strokeWidth="0.8" />
 
             {/* 선 채우기 */}
@@ -499,21 +501,21 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
       {/* 요약 행 */}
       <View style={cbSt.sumBox}>
         <View style={cbSt.sumItem}>
-          <Text style={cbSt.sumLabel}>평가금액</Text>
+          <Text style={cbSt.sumLabel}>{tipIdx !== null ? barsData[tipIdx]?.date : '평가금액'}</Text>
           <Text style={cbSt.sumValue}>{fmtTotal}</Text>
         </View>
         <View style={cbSt.sumDivider} />
         <View style={cbSt.sumItem}>
           <Text style={cbSt.sumLabel}>투자수익</Text>
-          <Text style={[cbSt.sumValue, { color: profitKrw >= 0 ? colors.market.rise : colors.market.fall }]}>
+          <Text style={[cbSt.sumValue, { color: tipBarVal >= 0 ? colors.market.rise : colors.market.fall }]}>
             {fmtProfit}
           </Text>
         </View>
         <View style={cbSt.sumDivider} />
         <View style={cbSt.sumItem}>
           <Text style={cbSt.sumLabel}>수익률</Text>
-          <Text style={[cbSt.sumValue, { color: profitRate >= 0 ? colors.market.rise : colors.market.fall }]}>
-            {formatRate(profitRate)}
+          <Text style={[cbSt.sumValue, { color: dispRate >= 0 ? colors.market.rise : colors.market.fall }]}>
+            {formatRate(dispRate)}
           </Text>
         </View>
       </View>
@@ -750,7 +752,7 @@ export default function Home() {
           <GlassCard style={styles.heroCard} intensity="medium" radius={24}>
             {balLoading && !balance ? <AssetCardSkeleton /> : (
               <>
-                <Text variant="meta" color={colors.text.tertiary} style={{ marginBottom: 6 }}>총 자산</Text>
+                <Text variant="meta" color={colors.text.tertiary} style={{ marginBottom: 6 }}>평가금액</Text>
                 <AnimatedNumber
                   value={showUsd && (balance?.totalUsd ?? 0) > 0
                     ? (balance?.totalUsd ?? 0)

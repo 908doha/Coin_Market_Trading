@@ -238,7 +238,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
   // 10초마다 잔고 자동 갱신 (실시간 반영)
   useEffect(() => {
     if (isLoading || accounts.length === 0) return;
-    const id = setInterval(refreshBalances, 10_000);
+    const id = setInterval(refreshBalances, 5_000);
     return () => clearInterval(id);
   }, [isLoading, accounts.length, refreshBalances]);
 

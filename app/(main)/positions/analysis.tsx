@@ -523,18 +523,18 @@ function SummaryList({ stats, hasData, showUsd, rate }: {
     {
       label: '수익 거래',
       value: `${stats.wins}건`,
-      color: stats.wins > 0 ? C.green : C.textGray,
+      color: stats.wins > 0 ? C.red : C.textGray,       // 수익(+) = 빨강
     },
     {
       label: '손실 거래',
       value: `${stats.losses}건`,
-      color: stats.losses > 0 ? C.red : C.textGray,
+      color: stats.losses > 0 ? '#246CF9' : C.textGray, // 손실(-) = 파랑
     },
     {
       label: '손익비',
       value: stats.plRatio != null ? stats.plRatio.toFixed(2) : '—',
       color: stats.plRatio != null
-        ? stats.plRatio >= 1 ? C.green : C.red
+        ? stats.plRatio >= 1 ? C.red : '#246CF9'         // 1 이상=긍정=빨강, 미만=부정=파랑
         : C.textGray,
     },
     { label: '수익률', value: hasData ? `${stats.profitRate >= 0 ? '+' : ''}${stats.profitRate.toFixed(1)}%` : '—', color: hasData ? pnlColor(stats.totalPnl) : C.textGray },

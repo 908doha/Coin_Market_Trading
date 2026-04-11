@@ -412,11 +412,9 @@ export default function PositionDetail() {
     [id],
   );
 
-  // 스토어에서 실시간 포지션 (5초마다 갱신)
-  const { accounts, positions: allPositions } = useAccounts();
-  const livePosition = allPositions.find((p) => p.id === id) ?? null;
+  const { accounts } = useAccounts();
   // 라이브 데이터 우선, 없으면 초기 캐시 데이터 사용
-  const position = livePosition ?? cachedPosition;
+  const position = cachedPosition;
 
   // 봇 ICT 분석 조회
   const [ictAnalysis, setIctAnalysis]     = useState<IctAnalysis | null>(null);

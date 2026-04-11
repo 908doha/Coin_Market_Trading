@@ -261,7 +261,7 @@ export default function KellyPage() {
   const [trades,   setTrades]   = useState<Trade[]>([]);
   const [loading,  setLoading]  = useState(true);
 
-  const { accounts } = useAccounts();
+  const { accounts, balances, totalBalance } = useAccounts();
 
   const selectedAccounts = selectedAccountId
     ? accounts.filter((a) => a.id === selectedAccountId)

@@ -476,7 +476,7 @@ export default function Analysis() {
             </Pressable>
           </Pressable>
 
-          {/* 승률 / 손익비 / 방켈리 카드 */}
+          {/* 승률 / 손익비 / 반 Kelly 카드 */}
           <View style={st.statsGrid}>
             {tradesLoading ? (
               [1, 2, 3].map((i) => (
@@ -500,7 +500,7 @@ export default function Analysis() {
                   </Text>
                 </View>
                 <View style={st.statCard}>
-                  <Text style={st.statLabel}>방켈리</Text>
+                  <Text style={st.statLabel}>반 Kelly</Text>
                   <Text style={[st.statValue, { color: kelly && kelly.halfKelly > 0 ? '#246CF9' : colors.text.primary }]}>
                     {kelly ? `${(kelly.halfKelly * 100).toFixed(1)}%` : '--'}
                   </Text>

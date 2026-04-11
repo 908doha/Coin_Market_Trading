@@ -1,13 +1,13 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
-  View, StyleSheet, SectionList, Pressable, Modal, ScrollView,
+  View, StyleSheet, SectionList, Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Animated, {
   useSharedValue, useAnimatedStyle, withTiming, withSpring, Easing, runOnJS,
 } from 'react-native-reanimated';
-import Svg, { Path, Circle } from 'react-native-svg';
+import Svg, { Path } from 'react-native-svg';
 import { Text, CurrencyToggle, TradeHistoryListSkeleton } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { tradesService } from '@/services';
@@ -18,6 +18,7 @@ import type { Trade } from '@/services';
 
 // ── 유틸 ─────────────────────────────────────────────────────────────────────
 type Filter = '전체' | '수익' | '손실';
+type Period = '일' | '주' | '월' | '년' | '전체';
 
 function fmtDate(iso: string): string {
   try {
@@ -26,22 +27,36 @@ function fmtDate(iso: string): string {
   } catch { return '-'; }
 }
 
-function monthKey(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  } catch { return ''; }
+function getWeekOfMonth(d: Date) {
+  return Math.ceil(d.getDate() / 7);
 }
 
-function monthLabel(key: string): string {
-  const [y, m] = key.split('-');
-  return `${y}년 ${parseInt(m, 10)}월`;
+function getDay(iso: string) {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 function fmtUsd(krw: number, rate: number): string {
   const usd  = krw / rate;
   const sign = usd >= 0 ? '+' : '';
   return `${sign}$${Math.abs(usd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function pnlColor(v: number) {
+  return v > 0 ? colors.market.rise : v < 0 ? colors.market.fall : colors.text.tertiary;
+}
+
+function calcStats(trades: Trade[]) {
+  const total      = trades.length;
+  const totalPnl   = trades.reduce((s, t) => s + t.profit, 0);
+  const totalAmt   = trades.reduce((s, t) => s + (t.amount ?? 0), 0);
+  const profitRate = totalAmt > 0 ? (totalPnl / totalAmt) * 100 : 0;
+  const wins       = trades.filter((t) => t.profit > 0);
+  const losses     = trades.filter((t) => t.profit < 0);
+  const avgWin     = wins.length   ? wins.reduce((s, t) => s + t.profit, 0) / wins.length : 0;
+  const avgLoss    = losses.length ? Math.abs(losses.reduce((s, t) => s + t.profit, 0) / losses.length) : 0;
+  const plRatio    = avgLoss > 0 ? avgWin / avgLoss : null;
+  return { total, totalPnl, profitRate, wins: wins.length, losses: losses.length, plRatio };
 }
 
 // ── 스태거 페이드인 ───────────────────────────────────────────────────────────
@@ -65,102 +80,164 @@ function AnimatedRow({ index, children }: { index: number; children: React.React
   return <Animated.View style={style}>{children}</Animated.View>;
 }
 
-// ── 월 선택 드롭다운 ──────────────────────────────────────────────────────────
-function MonthDropdown({
-  months, selected, onSelect,
+// ── 기간 탭 (슬라이딩 필) ────────────────────────────────────────────────────
+function SlidingPillTabs({
+  tabs, active, onChange,
 }: {
-  months:   string[];
-  selected: string | null;
-  onSelect: (m: string | null) => void;
+  tabs: string[]; active: string; onChange: (t: string) => void;
 }) {
-  const [open, setOpen]    = useState(false);
-  const translateY = useSharedValue(300);
-  const [mounted, setMounted] = React.useState(false);
+  const [layouts, setLayouts] = useState<{ x: number; width: number }[]>([]);
+  const pillX     = useSharedValue(-999);
+  const pillWidth = useSharedValue(0);
 
-  React.useEffect(() => {
-    if (open) {
-      setMounted(true);
-      translateY.value = withSpring(0, { damping: 26, stiffness: 280, mass: 0.8 });
+  useEffect(() => {
+    const idx = tabs.indexOf(active);
+    const lo  = layouts[idx];
+    if (!lo) return;
+    if (pillX.value === -999) {
+      pillX.value     = lo.x;
+      pillWidth.value = lo.width;
     } else {
-      translateY.value = withTiming(300, { duration: 220 }, () => runOnJS(setMounted)(false));
+      pillX.value     = withSpring(lo.x,     { damping: 22, stiffness: 320, mass: 0.8 });
+      pillWidth.value = withSpring(lo.width, { damping: 22, stiffness: 320, mass: 0.8 });
     }
-  }, [open]);
+  }, [active, layouts.length]);
 
-  const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: translateY.value }] }));
-  const label = selected ? monthLabel(selected) : '전체 기간';
+  const pillStyle = useAnimatedStyle(() => ({
+    position: 'absolute', left: pillX.value, width: pillWidth.value,
+    height: 32, borderRadius: 8, backgroundColor: '#EFEFEF',
+  }));
 
   return (
-    <>
-      <Pressable
-        style={({ pressed }) => [md.btn, pressed && { backgroundColor: '#F0F0F0' }]}
-        onPress={() => setOpen(true)}
-      >
-        <Text style={md.btnText}>{label}</Text>
-        <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
-          <Path d="M7 10l5 5 5-5" stroke="#555" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        </Svg>
-      </Pressable>
-
-      {mounted && (
-        <Modal visible transparent animationType="none" onRequestClose={() => setOpen(false)}>
-          <Pressable style={md.overlay} onPress={() => setOpen(false)}>
-            <Animated.View style={[md.sheet, sheetStyle]}>
-              <Pressable>
-                <View style={md.handle} />
-                <View style={md.sheetHeader}>
-                  <Text style={md.sheetTitle}>기간 선택</Text>
-                </View>
-
-                {/* 전체 */}
-                <Pressable
-                  style={({ pressed }) => [md.row, pressed && { backgroundColor: '#F8F8F8' }]}
-                  onPress={() => { onSelect(null); setOpen(false); }}
-                >
-                  <Text style={[md.rowText, selected === null && md.rowTextActive]}>전체 기간</Text>
-                  {selected === null && (
-                    <Svg width={20} height={20} viewBox="0 0 24 24">
-                      <Circle cx="12" cy="12" r="12" fill="#191919" />
-                      <Path d="M7 12.5l3.5 3.5 6.5-7" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                    </Svg>
-                  )}
-                </Pressable>
-
-                {months.map((m) => (
-                  <Pressable
-                    key={m}
-                    style={({ pressed }) => [md.row, pressed && { backgroundColor: '#F8F8F8' }]}
-                    onPress={() => { onSelect(m); setOpen(false); }}
-                  >
-                    <Text style={[md.rowText, selected === m && md.rowTextActive]}>{monthLabel(m)}</Text>
-                    {selected === m && (
-                      <Svg width={20} height={20} viewBox="0 0 24 24">
-                        <Circle cx="12" cy="12" r="12" fill="#191919" />
-                        <Path d="M7 12.5l3.5 3.5 6.5-7" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                      </Svg>
-                    )}
-                  </Pressable>
-                ))}
-
-                <View style={{ height: 34 }} />
-              </Pressable>
-            </Animated.View>
-          </Pressable>
-        </Modal>
-      )}
-    </>
+    <View style={{ flexDirection: 'row', paddingHorizontal: 20, paddingVertical: 10, gap: 6 }}>
+      <Animated.View style={pillStyle} />
+      {tabs.map((t, i) => (
+        <Pressable
+          key={t}
+          onPress={() => onChange(t)}
+          onLayout={(e) => {
+            const { x, width } = e.nativeEvent.layout;
+            setLayouts((prev) => { const next = [...prev]; next[i] = { x, width }; return next; });
+          }}
+        >
+          <View style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8 }}>
+            <Text style={[spt.text, active === t && spt.textOn]}>{t}</Text>
+          </View>
+        </Pressable>
+      ))}
+    </View>
   );
 }
-const md = StyleSheet.create({
-  btn:     { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
-  btnText: { fontSize: 15, fontWeight: '600', color: '#191919', flex: 1 },
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-end' },
-  sheet:   { backgroundColor: '#FFF', borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingTop: 10 },
-  handle:  { width: 32, height: 4, borderRadius: 2, backgroundColor: '#E5E5EA', alignSelf: 'center', marginBottom: 8 },
-  sheetHeader: { paddingHorizontal: 20, paddingBottom: 12, paddingTop: 4 },
-  sheetTitle:  { fontSize: 18, fontWeight: '700', color: '#191919' },
-  row:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 17, paddingHorizontal: 20 },
-  rowText:     { fontSize: 16, fontWeight: '400', color: '#191919' },
-  rowTextActive: { fontWeight: '700' },
+const spt = StyleSheet.create({
+  text  : { fontSize: 15, color: '#AAAAAA', fontWeight: '500', lineHeight: 20 },
+  textOn: { color: '#191919', fontWeight: '700', lineHeight: 20 },
+});
+
+// ── 기간 내비게이션 행 ────────────────────────────────────────────────────────
+function NavRow({
+  label, canNext, onPrev, onNext,
+}: {
+  label: string; canNext: boolean; onPrev: () => void; onNext: () => void;
+}) {
+  return (
+    <View style={nr.row}>
+      <Text style={nr.label}>{label} 실현수익</Text>
+      <View style={nr.btns}>
+        <Pressable style={nr.btn} onPress={onPrev} hitSlop={10}>
+          <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+            <Path d="M15 18l-6-6 6-6" stroke="#444" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+          </Svg>
+        </Pressable>
+        <Pressable style={[nr.btn, !canNext && nr.disabled]} onPress={onNext} disabled={!canNext} hitSlop={10}>
+          <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+            <Path d="M9 18l6-6-6-6" stroke="#444" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+          </Svg>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+const nr = StyleSheet.create({
+  row     : { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, paddingHorizontal: 20 },
+  label   : { fontSize: 15, fontWeight: '700', color: '#191919' },
+  btns    : { flexDirection: 'row', gap: 4 },
+  btn     : { padding: 6 },
+  disabled: { opacity: 0.2 },
+});
+
+// ── 대형 손익 금액 ────────────────────────────────────────────────────────────
+function HeroAmount({ value, hasData, showUsd, rate }: { value: number; hasData: boolean; showUsd: boolean; rate: number }) {
+  const text = hasData ? (showUsd ? fmtUsd(value, rate) : formatKRWSigned(value)) : '—';
+  return (
+    <View style={ha.wrap}>
+      <Text style={[ha.amount, { color: hasData ? pnlColor(value) : '#CCCCCC' }]}>{text}</Text>
+    </View>
+  );
+}
+const ha = StyleSheet.create({
+  wrap  : { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 16 },
+  amount: { fontSize: 26, fontWeight: '700', letterSpacing: -0.5 },
+});
+
+// ── 요약 행 5개 ───────────────────────────────────────────────────────────────
+type SummaryItem = { label: string; value: string; blue?: string; color?: string };
+
+function SummaryRow({ item, isLast }: { item: SummaryItem; isLast?: boolean }) {
+  return (
+    <View style={[sl.row, !isLast && sl.border]}>
+      <Text style={sl.label}>{item.label}</Text>
+      <View style={sl.right}>
+        <Text style={[sl.value, item.color ? { color: item.color } : undefined]}>{item.value}</Text>
+        {item.blue ? <Text style={sl.blue}>{item.blue}</Text> : null}
+      </View>
+    </View>
+  );
+}
+
+function SummaryList({ stats, hasData, showUsd, rate }: {
+  stats: ReturnType<typeof calcStats>; hasData: boolean; showUsd: boolean; rate: number;
+}) {
+  const pnlText = hasData
+    ? (showUsd ? fmtUsd(stats.totalPnl, rate) : formatKRWSigned(stats.totalPnl))
+    : (showUsd ? '$0.00' : '0원');
+
+  const items: SummaryItem[] = [
+    {
+      label: '실현손익',
+      value: pnlText,
+      blue : hasData ? `(${stats.profitRate >= 0 ? '+' : ''}${stats.profitRate.toFixed(1)}%)` : undefined,
+      color: hasData ? pnlColor(stats.totalPnl) : '#999',
+    },
+    { label: '수익 거래', value: `${stats.wins}건`,   color: stats.wins > 0 ? '#25B999' : '#999' },
+    { label: '손실 거래', value: `${stats.losses}건`, color: stats.losses > 0 ? '#F04452' : '#999' },
+    {
+      label: '손익비',
+      value: stats.plRatio != null ? stats.plRatio.toFixed(2) : '—',
+      color: stats.plRatio != null ? (stats.plRatio >= 1 ? '#25B999' : '#F04452') : '#999',
+    },
+    {
+      label: '수익률',
+      value: hasData ? `${stats.profitRate >= 0 ? '+' : ''}${stats.profitRate.toFixed(1)}%` : '—',
+      color: hasData ? pnlColor(stats.totalPnl) : '#999',
+    },
+  ];
+
+  return (
+    <View style={sl.block}>
+      {items.map((item, i) => (
+        <SummaryRow key={item.label} item={item} isLast={i === items.length - 1} />
+      ))}
+    </View>
+  );
+}
+const sl = StyleSheet.create({
+  block : { paddingVertical: 4 },
+  row   : { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 13, paddingHorizontal: 20 },
+  border: { borderBottomWidth: 1, borderBottomColor: '#F2F2F2' },
+  label : { fontSize: 14, color: '#555555' },
+  right : { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  value : { fontSize: 14, color: '#999999' },
+  blue  : { fontSize: 13, color: '#1B74E8' },
 });
 
 // ── 방향·결과 뱃지 ────────────────────────────────────────────────────────────
@@ -175,25 +252,9 @@ function DirectionBadge({ direction }: { direction: 'Long' | 'Short' }) {
   );
 }
 function ResultBadge({ isProfit, isLoss }: { isProfit: boolean; isLoss: boolean }) {
-  if (isProfit) {
-    return (
-      <View style={[bdg.base, { backgroundColor: '#FFF0F1' }]}>
-        <Text style={[bdg.text, { color: colors.market.rise }]}>익절</Text>
-      </View>
-    );
-  }
-  if (isLoss) {
-    return (
-      <View style={[bdg.base, { backgroundColor: '#EEF4FF' }]}>
-        <Text style={[bdg.text, { color: colors.market.fall }]}>손절</Text>
-      </View>
-    );
-  }
-  return (
-    <View style={[bdg.base, { backgroundColor: '#F5F5F5' }]}>
-      <Text style={[bdg.text, { color: colors.text.tertiary }]}>청산</Text>
-    </View>
-  );
+  if (isProfit) return <View style={[bdg.base, { backgroundColor: '#FFF0F1' }]}><Text style={[bdg.text, { color: colors.market.rise }]}>익절</Text></View>;
+  if (isLoss)   return <View style={[bdg.base, { backgroundColor: '#EEF4FF' }]}><Text style={[bdg.text, { color: colors.market.fall }]}>손절</Text></View>;
+  return <View style={[bdg.base, { backgroundColor: '#F5F5F5' }]}><Text style={[bdg.text, { color: colors.text.tertiary }]}>청산</Text></View>;
 }
 const bdg = StyleSheet.create({
   base:    { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6 },
@@ -206,16 +267,11 @@ const bdg = StyleSheet.create({
 function TradeRow({
   trade, showDate, isLast, showUsd, rate, globalIndex,
 }: {
-  trade:       Trade;
-  showDate:    boolean;
-  isLast:      boolean;
-  showUsd:     boolean;
-  rate:        number;
-  globalIndex: number;
+  trade: Trade; showDate: boolean; isLast: boolean; showUsd: boolean; rate: number; globalIndex: number;
 }) {
   const isProfit  = trade.profit > 0;
   const isLoss    = trade.profit < 0;
-  const pnlColor  = isProfit ? colors.market.rise : isLoss ? colors.market.fall : colors.text.tertiary;
+  const color     = isProfit ? colors.market.rise : isLoss ? colors.market.fall : colors.text.tertiary;
   const amountText = showUsd ? fmtUsd(trade.profit, rate) : formatKRWSigned(trade.profit);
 
   return (
@@ -231,16 +287,14 @@ function TradeRow({
             <DirectionBadge direction={trade.direction} />
             <ResultBadge isProfit={isProfit} isLoss={isLoss} />
             {!!trade.leverage && trade.leverage > 1 && (
-              <View style={bdg.lev}>
-                <Text style={bdg.levText}>{trade.leverage}x</Text>
-              </View>
+              <View style={bdg.lev}><Text style={bdg.levText}>{trade.leverage}x</Text></View>
             )}
           </View>
         </View>
         {trade.profit !== 0 && (
           <View style={{ alignItems: 'flex-end' }}>
-            <Text style={[tr.amount, { color: pnlColor }]}>{amountText}</Text>
-            <Text style={[tr.rate, { color: pnlColor }]}>{formatRate(trade.profitRate)}</Text>
+            <Text style={[tr.amount, { color }]}>{amountText}</Text>
+            <Text style={[tr.rate, { color }]}>{formatRate(trade.profitRate)}</Text>
           </View>
         )}
       </Pressable>
@@ -271,52 +325,7 @@ const sec = StyleSheet.create({
   text: { fontSize: 16, fontWeight: '700', color: colors.text.primary },
 });
 
-// ── 통계 바 ───────────────────────────────────────────────────────────────────
-function StatsBar({ trades, showUsd, rate }: { trades: Trade[]; showUsd: boolean; rate: number }) {
-  const total    = trades.length;
-  const totalPnl = trades.reduce((s, t) => s + t.profit, 0);
-  const pnlColor = totalPnl >= 0 ? colors.market.rise : colors.market.fall;
-  const pnlText  = showUsd ? fmtUsd(totalPnl, rate) : formatKRWSigned(totalPnl);
-
-  // 손익비 = 평균 수익 / 평균 손실 (절댓값)
-  const winTrades  = trades.filter((t) => t.profit > 0);
-  const lossTrades = trades.filter((t) => t.profit < 0);
-  const avgWin     = winTrades.length  ? winTrades.reduce((s, t) => s + t.profit, 0) / winTrades.length : 0;
-  const avgLoss    = lossTrades.length ? Math.abs(lossTrades.reduce((s, t) => s + t.profit, 0) / lossTrades.length) : 0;
-  const plRatio    = avgLoss > 0 ? (avgWin / avgLoss).toFixed(2) : null;
-
-  return (
-    <View style={sb.wrap}>
-      <View style={sb.item}>
-        <Text style={sb.label}>총 거래</Text>
-        <Text style={sb.value}>{total}건</Text>
-      </View>
-      <View style={sb.divider} />
-      <View style={sb.item}>
-        <Text style={sb.label}>손익비</Text>
-        <Text style={[sb.value, {
-          color: plRatio && parseFloat(plRatio) >= 1 ? colors.market.rise : plRatio ? colors.market.fall : colors.text.primary,
-        }]}>
-          {plRatio ? `${plRatio}` : '—'}
-        </Text>
-      </View>
-      <View style={sb.divider} />
-      <View style={sb.item}>
-        <Text style={sb.label}>총 손익</Text>
-        <Text style={[sb.value, { color: pnlColor }]}>{total ? pnlText : '—'}</Text>
-      </View>
-    </View>
-  );
-}
-const sb = StyleSheet.create({
-  wrap:    { flexDirection: 'row', backgroundColor: '#FAFAFA', borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
-  item:    { flex: 1, alignItems: 'center', paddingVertical: 14 },
-  divider: { width: 1, backgroundColor: '#F0F0F0', marginVertical: 10 },
-  label:   { fontSize: 12, color: colors.text.tertiary, marginBottom: 4 },
-  value:   { fontSize: 15, fontWeight: '700', color: colors.text.primary },
-});
-
-// ── 필터 탭 ───────────────────────────────────────────────────────────────────
+// ── 필터 탭 (전체/수익/손실) ─────────────────────────────────────────────────
 function FilterTabs({ filter, onChange }: { filter: Filter; onChange: (f: Filter) => void }) {
   const TABS: Filter[] = ['전체', '수익', '손실'];
   const [tabWidth, setTabWidth] = useState(0);
@@ -324,37 +333,32 @@ function FilterTabs({ filter, onChange }: { filter: Filter; onChange: (f: Filter
 
   useEffect(() => {
     if (tabWidth === 0) return;
-    translateX.value = withTiming(
-      TABS.indexOf(filter) * tabWidth,
-      { duration: 200, easing: Easing.out(Easing.cubic) },
-    );
+    translateX.value = withTiming(TABS.indexOf(filter) * tabWidth, { duration: 200, easing: Easing.out(Easing.cubic) });
   }, [filter, tabWidth]);
 
-  const indicatorStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: translateX.value }],
-  }));
+  const indicatorStyle = useAnimatedStyle(() => ({ transform: [{ translateX: translateX.value }] }));
 
   return (
     <View
-      style={tab.wrap}
+      style={ftab.wrap}
       onLayout={(e) => {
         const w = e.nativeEvent.layout.width / 3;
         setTabWidth(w);
-        translateX.value = TABS.indexOf(filter) * w; // 초기 위치 즉시 설정
+        translateX.value = TABS.indexOf(filter) * w;
       }}
     >
       {tabWidth > 0 && (
-        <Animated.View style={[tab.indicator, { width: tabWidth - 32 }, indicatorStyle]} />
+        <Animated.View style={[ftab.indicator, { width: tabWidth - 32 }, indicatorStyle]} />
       )}
       {TABS.map((f) => (
-        <Pressable key={f} style={tab.item} onPress={() => onChange(f)}>
-          <Text style={[tab.text, filter === f && tab.activeText]}>{f}</Text>
+        <Pressable key={f} style={ftab.item} onPress={() => onChange(f)}>
+          <Text style={[ftab.text, filter === f && ftab.activeText]}>{f}</Text>
         </Pressable>
       ))}
     </View>
   );
 }
-const tab = StyleSheet.create({
+const ftab = StyleSheet.create({
   wrap:       { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#F0F0F0', backgroundColor: '#FFFFFF' },
   item:       { flex: 1, alignItems: 'center', paddingVertical: 13 },
   text:       { fontSize: 15, fontWeight: '500', color: colors.text.tertiary },
@@ -364,10 +368,11 @@ const tab = StyleSheet.create({
 
 // ── 메인 ─────────────────────────────────────────────────────────────────────
 export default function History() {
-  const [filter, setFilter]               = useState<Filter>('전체');
-  const [showUsd, setShowUsd]             = useState(false);
-  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
-  const { accounts, totalBalance }        = useAccounts();
+  const [filter, setFilter]   = useState<Filter>('전체');
+  const [showUsd, setShowUsd] = useState(false);
+  const [period, setPeriod]   = useState<Period>('월');
+  const [offset, setOffset]   = useState(0);   // 0 = 현재, 1 = 이전, ...
+  const { accounts, totalBalance } = useAccounts();
   const listOpacity = useSharedValue(1);
 
   const rate = totalBalance?.usdtKrw ?? 1350;
@@ -377,37 +382,69 @@ export default function History() {
     [accounts],
   );
 
-  // 존재하는 월 목록 (최신순)
-  const availableMonths = useMemo(() => {
-    if (!trades) return [];
-    const set = new Set<string>();
-    for (const t of trades) {
-      const k = monthKey(t.exitAt);
-      if (k) set.add(k);
+  // 기간 레이블
+  const periodLabel = useMemo(() => {
+    const now = new Date();
+    if (period === '전체') return '전체 기간';
+    if (period === '년')   return `${now.getFullYear() - offset}년`;
+    if (period === '월') {
+      const d = new Date(now.getFullYear(), now.getMonth() - offset, 1);
+      return `${String(d.getFullYear()).slice(2)}년 ${d.getMonth() + 1}월`;
     }
-    return Array.from(set).sort((a, b) => b.localeCompare(a));
-  }, [trades]);
+    if (period === '주') {
+      const d = new Date(now);
+      d.setDate(d.getDate() - offset * 7);
+      return `${String(d.getFullYear()).slice(2)}년 ${d.getMonth() + 1}월 ${getWeekOfMonth(d)}주`;
+    }
+    // 일
+    const d = new Date(now);
+    d.setDate(d.getDate() - offset);
+    return `${String(d.getFullYear()).slice(2)}년 ${d.getMonth() + 1}월 ${d.getDate()}일`;
+  }, [period, offset]);
 
-  // 월 + 수익/손실 필터 적용
-  const filtered = useMemo(() => {
+  // 기간 필터
+  const byPeriod = useMemo(() => {
     if (!trades) return [];
-    let result = trades;
-    if (selectedMonth) result = result.filter((t) => monthKey(t.exitAt) === selectedMonth);
+    if (period === '전체') return trades;
+    const now = new Date();
+    return trades.filter((t) => {
+      const d = new Date(t.exitAt);
+      if (period === '년') return d.getFullYear() === now.getFullYear() - offset;
+      if (period === '월') {
+        const ref = new Date(now.getFullYear(), now.getMonth() - offset, 1);
+        return d.getFullYear() === ref.getFullYear() && d.getMonth() === ref.getMonth();
+      }
+      if (period === '주') {
+        const ref = new Date(now);
+        ref.setDate(ref.getDate() - offset * 7);
+        return d.getFullYear() === ref.getFullYear()
+          && d.getMonth() === ref.getMonth()
+          && getWeekOfMonth(d) === getWeekOfMonth(ref);
+      }
+      const ref = new Date(now);
+      ref.setDate(ref.getDate() - offset);
+      return getDay(t.exitAt) === getDay(ref.toISOString());
+    });
+  }, [trades, period, offset]);
+
+  // 수익/손실 필터
+  const filtered = useMemo(() => {
+    let result = byPeriod;
     if (filter === '수익') result = result.filter((t) => t.profit > 0);
     if (filter === '손실') result = result.filter((t) => t.profit < 0);
     return result;
-  }, [trades, filter, selectedMonth]);
+  }, [byPeriod, filter]);
 
-  // 월별 섹션 (월 선택 시 섹션 헤더 숨겨도 되지만 일관성 유지)
+  // 섹션 그룹
   const sections = useMemo(() => {
     const map = new Map<string, Trade[]>();
     for (const t of filtered) {
-      const key = selectedMonth ? fmtDate(t.exitAt) : monthLabel(monthKey(t.exitAt));
+      const key = period === '일' ? fmtDate(t.exitAt) : fmtDate(t.exitAt);
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(t);
     }
     return Array.from(map.entries()).map(([title, data]) => ({ title, data }));
-  }, [filtered, selectedMonth]);
+  }, [filtered, period]);
 
   const dateFirstSet = useMemo(() => {
     const seen = new Set<string>();
@@ -419,18 +456,21 @@ export default function History() {
     return result;
   }, [filtered]);
 
-  // 필터/월 변경 시 리스트 페이드
+  const periodStats = useMemo(() => calcStats(byPeriod), [byPeriod]);
+
+  // 리스트 페이드
   const listAnimStyle = useAnimatedStyle(() => ({ opacity: listOpacity.value }));
 
-  function switchFilter(fn: () => void) {
-    listOpacity.value = withTiming(0, { duration: 120 }, () => {
-      runOnJS(fn)();
+  function fade(fn: () => void) {
+    listOpacity.value = withTiming(0, { duration: 80 }, () => {
+      listOpacity.value = withTiming(1, { duration: 160 });
     });
+    fn();
   }
 
   useEffect(() => {
     listOpacity.value = withTiming(1, { duration: 200, easing: Easing.out(Easing.cubic) });
-  }, [filter, selectedMonth]);
+  }, [filter, period, offset]);
 
   // 스태거용 글로벌 인덱스
   const globalIndexMap = useMemo(() => {
@@ -456,62 +496,90 @@ export default function History() {
         <CurrencyToggle showUsd={showUsd} onToggle={() => setShowUsd((v) => !v)} />
       </View>
 
-      {/* ── 월 선택 ── */}
-      {(availableMonths.length > 0 || !isLoading) && (
-        <MonthDropdown
-          months={availableMonths}
-          selected={selectedMonth}
-          onSelect={(m) => switchFilter(() => setSelectedMonth(m))}
-        />
-      )}
+      <SectionList
+        sections={sections}
+        keyExtractor={(item) => item.id}
+        showsVerticalScrollIndicator={false}
+        stickySectionHeadersEnabled={false}
+        ListHeaderComponent={(
+          <>
+            {/* ── 기간 탭 ── */}
+            <SlidingPillTabs
+              tabs={['일', '주', '월', '년', '전체']}
+              active={period}
+              onChange={(p) => fade(() => { setPeriod(p as Period); setOffset(0); })}
+            />
 
-      {/* ── 필터 탭 ── */}
-      <FilterTabs filter={filter} onChange={(f) => switchFilter(() => setFilter(f))} />
+            {/* ── 기간 내비게이션 ── */}
+            {period !== '전체' ? (
+              <NavRow
+                label={periodLabel}
+                canNext={offset > 0}
+                onPrev={() => fade(() => setOffset((v) => v + 1))}
+                onNext={() => fade(() => setOffset((v) => Math.max(0, v - 1)))}
+              />
+            ) : (
+              <View style={{ paddingVertical: 14, paddingHorizontal: 20 }}>
+                <Text style={{ fontSize: 15, fontWeight: '700', color: '#191919' }}>전체 기간 실현수익</Text>
+              </View>
+            )}
 
-      {/* ── 통계 바 ── */}
-      {filtered.length > 0 && (
-        <StatsBar trades={filtered} showUsd={showUsd} rate={rate} />
-      )}
-
-      {isLoading ? (
-        <TradeHistoryListSkeleton />
-      ) : error ? (
-        <View style={st.center}>
-          <Text style={st.emptyText}>{error}</Text>
-          <Pressable onPress={refetch} style={st.retryBtn}>
-            <Text style={st.retryText}>다시 시도</Text>
-          </Pressable>
-        </View>
-      ) : !filtered.length ? (
-        <View style={st.center}>
-          <Text style={st.emptyText}>
-            {selectedMonth
-              ? `${monthLabel(selectedMonth)} 거래 내역이 없어요`
-              : filter === '전체' ? '거래 내역이 없어요' : '해당하는 거래가 없어요'}
-          </Text>
-        </View>
-      ) : (
-        <SectionList
-          sections={sections}
-          keyExtractor={(item) => item.id}
-          showsVerticalScrollIndicator={false}
-          stickySectionHeadersEnabled={false}
-          renderSectionHeader={({ section }) => (
-            <SectionHeader title={section.title} />
-          )}
-          renderItem={({ item, index, section }) => (
-            <TradeRow
-              trade={item}
-              showDate={dateFirstSet.has(item.id)}
-              isLast={index === section.data.length - 1}
+            {/* ── 대형 손익 금액 ── */}
+            <HeroAmount
+              value={periodStats.totalPnl}
+              hasData={periodStats.total > 0}
               showUsd={showUsd}
               rate={rate}
-              globalIndex={globalIndexMap.get(item.id) ?? 0}
             />
-          )}
-          ListFooterComponent={<View style={{ height: 120 }} />}
-        />
-      )}
+
+            {/* ── 요약 5행 ── */}
+            <SummaryList
+              stats={periodStats}
+              hasData={periodStats.total > 0}
+              showUsd={showUsd}
+              rate={rate}
+            />
+
+            {/* ── 섹션 구분선 ── */}
+            <View style={{ height: 10, backgroundColor: '#F4F4F4' }} />
+
+            {/* ── 필터 탭 ── */}
+            <FilterTabs filter={filter} onChange={(f) => fade(() => setFilter(f))} />
+
+            {/* ── 로딩 / 에러 / 빈 상태 ── */}
+            {isLoading ? (
+              <TradeHistoryListSkeleton />
+            ) : error ? (
+              <View style={st.center}>
+                <Text style={st.emptyText}>{error}</Text>
+                <Pressable onPress={refetch} style={st.retryBtn}>
+                  <Text style={st.retryText}>다시 시도</Text>
+                </Pressable>
+              </View>
+            ) : filtered.length === 0 ? (
+              <View style={st.center}>
+                <Text style={st.emptyText}>
+                  {filter !== '전체' ? '해당하는 거래가 없어요' : `${periodLabel} 거래 내역이 없어요`}
+                </Text>
+              </View>
+            ) : null}
+          </>
+        )}
+        renderSectionHeader={({ section }) => (
+          <SectionHeader title={section.title} />
+        )}
+        renderItem={({ item, index, section }) => (
+          <TradeRow
+            trade={item}
+            showDate={dateFirstSet.has(item.id)}
+            isLast={index === section.data.length - 1}
+            showUsd={showUsd}
+            rate={rate}
+            globalIndex={globalIndexMap.get(item.id) ?? 0}
+          />
+        )}
+        ListFooterComponent={<View style={{ height: 120 }} />}
+      />
     </SafeAreaView>
   );
 }
@@ -526,8 +594,8 @@ const st = StyleSheet.create({
   backBtn:     { padding: 4, marginRight: 4 },
   headerTitle: { flex: 1, fontSize: 18, fontWeight: '700', color: '#191919' },
 
-  center:    { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
+  center:    { paddingTop: 60, alignItems: 'center', gap: 8 },
   emptyText: { fontSize: 15, color: colors.text.tertiary },
-  retryBtn:    { marginTop: 8, paddingHorizontal: 20, paddingVertical: 10, backgroundColor: '#F5F5F5', borderRadius: 10 },
-  retryText:   { fontSize: 14, fontWeight: '600', color: colors.text.primary },
+  retryBtn:  { marginTop: 8, paddingHorizontal: 20, paddingVertical: 10, backgroundColor: '#F5F5F5', borderRadius: 10 },
+  retryText: { fontSize: 14, fontWeight: '600', color: colors.text.primary },
 });

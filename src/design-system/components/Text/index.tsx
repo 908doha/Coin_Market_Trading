@@ -18,6 +18,7 @@ export function Text({
 }: TextProps) {
   return (
     <RNText
+      selectable={false}
       style={[
         styles.base,
         textStyles[variant] as any,

@@ -3,4 +3,6 @@
 * {
   font-family: 'PretendardVariable', 'Pretendard', -apple-system, BlinkMacSystemFont,
     'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
 }

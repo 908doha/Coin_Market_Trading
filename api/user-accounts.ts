@@ -4,7 +4,7 @@
  * POST /api/user-accounts  — 계좌 목록 저장 (덮어쓰기)
  *
  * 인증: Authorization: Bearer <jwt> 헤더 (Django JWT)
- * 저장: Railway PostgreSQL (DATABASE_URL)
+ * 저장: PostgreSQL (DATABASE_URL)
  * 암호화: AES-256-GCM (ACCOUNTS_ENCRYPTION_KEY)
  */
 
@@ -50,7 +50,9 @@ function encrypt(plain: string): string {
 }
 
 function decrypt(encoded: string): string {
-  const [ivHex, encHex, tagHex] = encoded.split(':');
+  const parts = encoded.split(':');
+  if (parts.length !== 3) throw new Error('Invalid encrypted data format');
+  const [ivHex, encHex, tagHex] = parts;
   const key     = getKey();
   const iv      = Buffer.from(ivHex,  'hex');
   const enc     = Buffer.from(encHex, 'hex');
@@ -60,19 +62,34 @@ function decrypt(encoded: string): string {
   return decipher.update(enc).toString('utf8') + decipher.final('utf8');
 }
 
+// ── DATABASE_URL 파싱 (비밀번호 특수문자 URL 디코딩) ──────────────────────────
+function buildClientConfig(url: string) {
+  try {
+    const u = new URL(url);
+    return {
+      host:     u.hostname,
+      port:     parseInt(u.port || '5432', 10),
+      database: u.pathname.replace(/^\//, '') || 'postgres',
+      user:     decodeURIComponent(u.username),
+      password: decodeURIComponent(u.password),
+      ssl:      { rejectUnauthorized: false },
+      connectionTimeoutMillis: 5000,
+    };
+  } catch {
+    // URL 파싱 실패 시 connectionString 그대로 사용 (fallback)
+    return { connectionString: url, ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 5000 };
+  }
+}
+
 // ── PostgreSQL (Vercel 서버리스 — 매 요청마다 Client 생성) ──────────────────────
 async function withDb<T>(fn: (client: Client) => Promise<T>): Promise<T | null> {
   const url = process.env.DATABASE_URL;
   if (!url) return null;
 
-  const client = new Client({
-    connectionString: url,
-    ssl: { rejectUnauthorized: false },
-    connectionTimeoutMillis: 5000,
-  });
+  const client = new Client(buildClientConfig(url));
 
-  await client.connect();
   try {
+    await client.connect();
     await client.query(`
       CREATE TABLE IF NOT EXISTS exchange_accounts (
         user_id    TEXT PRIMARY KEY,
@@ -82,7 +99,7 @@ async function withDb<T>(fn: (client: Client) => Promise<T>): Promise<T | null> 
     `);
     return await fn(client);
   } finally {
-    await client.end();
+    await client.end().catch(() => {});
   }
 }
 

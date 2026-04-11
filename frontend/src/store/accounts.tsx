@@ -164,28 +164,41 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
   const accountsRef = useRef(accounts);
   accountsRef.current = accounts;
 
-  // 앱 시작: 로컬 → 백엔드 순서로 로드
-  useEffect(() => {
-    (async () => {
-      // ① 로컬 즉시 로드 (빠름)
-      const local = await localLoad();
-      setAccounts(local);
-      setIsLoading(false);
+  // 앱 시작 + 로그인 후: 로컬 → 백엔드 순서로 로드
+  const syncFromBackend = useCallback(async () => {
+    const local = await localLoad();
+    setAccounts(local);
+    setIsLoading(false);
 
-      // ② 백엔드에서 최신 데이터 가져오기 (기기 간 동기화)
-      const remote = await backendLoad();
-      if (remote && remote.length > 0) {
-        // 원격 데이터를 로컬보다 우선시 (서버가 source-of-truth)
-        setAccounts(remote);
-        await localSave(remote);
-        console.log(`[accounts] synced ${remote.length} accounts from backend`);
-      } else if (local.length > 0 && remote !== null) {
-        // 서버에 없고 로컬에 있을 때 → 서버로 업로드
-        await backendSave(local);
-        console.log('[accounts] uploaded local accounts to backend');
-      }
-    })();
+    const remote = await backendLoad();
+    if (remote && remote.length > 0) {
+      setAccounts(remote);
+      await localSave(remote);
+      console.log(`[accounts] synced ${remote.length} accounts from backend`);
+    } else if (local.length > 0 && remote !== null) {
+      await backendSave(local);
+      console.log('[accounts] uploaded local accounts to backend');
+    }
   }, []);
+
+  useEffect(() => {
+    syncFromBackend();
+  }, []);
+
+  // 로그인 후 토큰이 생기면 재동기화 (새 컴퓨터 로그인 대응)
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    let lastToken = localStorage.getItem(TOKEN_KEY);
+    const interval = setInterval(() => {
+      const current = localStorage.getItem(TOKEN_KEY);
+      if (current && current !== lastToken) {
+        lastToken = current;
+        console.log('[accounts] 토큰 감지 → 백엔드 재동기화');
+        syncFromBackend();
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [syncFromBackend]);
 
   // 잔고 자동 fetch
   const refreshBalances = useCallback(async () => {

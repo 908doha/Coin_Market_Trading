@@ -1,15 +1,12 @@
-import React, { useState, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { View, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
-import Svg, { Path, Polygon, Rect, Text as SvgText } from 'react-native-svg';
-import { Text, SubPageHeader, ScreenTransition, TradingListSkeleton } from '@/design-system';
+import Svg, { Path, Polygon, Text as SvgText } from 'react-native-svg';
+import { Text, SubPageHeader, ScreenTransition } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType } from '@/store/accounts';
-import { tradesService } from '@/services';
-import { useApi } from '@/hooks/useApi';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
-import type { Trade } from '@/services/trades.service';
 
 // ── 거래소 로고 ───────────────────────────────────────────────────────────────
 function ExchangeLogo({ exchange, size = 52 }: { exchange: ExchangeType; size?: number }) {
@@ -48,7 +45,6 @@ function ExchangeLogo({ exchange, size = 52 }: { exchange: ExchangeType; size?: 
     );
   }
 
-  // 기타 거래소 — 이니셜
   return (
     <View style={{ width: s, height: s, borderRadius: s / 2, backgroundColor: color + '25', alignItems: 'center', justifyContent: 'center' }}>
       <Svg width={s} height={s} viewBox="0 0 48 48">
@@ -60,118 +56,35 @@ function ExchangeLogo({ exchange, size = 52 }: { exchange: ExchangeType; size?: 
   );
 }
 
-// ── 필터 칩 ───────────────────────────────────────────────────────────────────
-type Filter = 'all' | 'profit' | 'loss';
-function FilterChip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+// ── 네비게이션 버튼 ───────────────────────────────────────────────────────────
+function NavButton({ label, icon, onPress }: { label: string; icon: React.ReactNode; onPress: () => void }) {
   return (
     <Pressable
-      style={[chip.wrap, active && chip.active]}
+      style={({ pressed }) => [nb.wrap, pressed && { backgroundColor: '#F2F2F2' }]}
       onPress={onPress}
     >
-      <Text style={[chip.text, active && chip.activeText]}>{label}</Text>
+      <View style={nb.iconWrap}>{icon}</View>
+      <Text style={nb.label}>{label}</Text>
+      <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+        <Path d="M9 18l6-6-6-6" stroke={colors.text.tertiary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </Svg>
     </Pressable>
   );
 }
-const chip = StyleSheet.create({
-  wrap:       { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, backgroundColor: colors.bg.elevated },
-  active:     { backgroundColor: '#191919' },
-  text:       { fontSize: 13, fontWeight: '600', color: colors.text.tertiary },
-  activeText: { color: '#FFFFFF' },
-});
-
-// ── 거래 행 (history/index.tsx 와 동일한 스타일) ──────────────────────────────
-function TradeRow({ trade, isLast }: { trade: Trade; isLast: boolean }) {
-  const isProfit = trade.profit > 0;
-  const isLoss   = trade.profit < 0;
-  const pnlColor = isProfit ? colors.market.rise : isLoss ? colors.market.fall : colors.text.tertiary;
-
-  const date = (() => {
-    try {
-      const d = new Date(trade.exitAt);
-      return `${d.getMonth() + 1}.${String(d.getDate()).padStart(2, '0')}`;
-    } catch { return '-'; }
-  })();
-
-  const statusText =
-    trade.direction === 'Long'
-      ? isProfit ? '롱 익절 완료' : isLoss ? '롱 손절' : '롱 수동 청산'
-      : isProfit ? '숏 익절 완료' : isLoss ? '숏 손절' : '숏 수동 청산';
-
-  const statusColor = isProfit
-    ? colors.informative.text
-    : isLoss ? colors.negative.text : colors.text.tertiary;
-
-  return (
-    <Pressable
-      style={({ pressed }) => [row.wrap, !isLast && row.border, pressed && { backgroundColor: '#F8F8F8' }]}
-      onPress={() => router.push(`/history/${trade.id}`)}
-    >
-      <Text style={row.date}>{date}</Text>
-      <View style={{ flex: 1, paddingRight: 12 }}>
-        <Text style={row.symbol} numberOfLines={1}>{trade.symbol}</Text>
-        <Text style={[row.status, { color: statusColor }]} numberOfLines={1}>{statusText}</Text>
-      </View>
-      {trade.profit !== 0 && (
-        <View style={{ alignItems: 'flex-end' }}>
-          <Text style={[row.profit, { color: pnlColor }]}>{formatKRWSigned(trade.profit)}</Text>
-          <Text style={[row.rate, { color: pnlColor }]}>{formatRate(trade.profitRate)}</Text>
-        </View>
-      )}
-    </Pressable>
-  );
-}
-const row = StyleSheet.create({
-  wrap:   { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 20, backgroundColor: '#FFFFFF' },
-  border: { borderBottomWidth: 1, borderBottomColor: '#F2F2F2' },
-  date:   { width: 34, fontSize: 13, color: colors.text.tertiary, lineHeight: 18 },
-  symbol: { fontSize: 15, fontWeight: '700', color: colors.text.primary, lineHeight: 20 },
-  status: { fontSize: 13, fontWeight: '500', marginTop: 2, lineHeight: 18 },
-  profit: { fontSize: 15, fontWeight: '700' },
-  rate:   { fontSize: 12, fontWeight: '600', marginTop: 2 },
+const nb = StyleSheet.create({
+  wrap:    { flexDirection: 'row', alignItems: 'center', paddingVertical: 17, paddingHorizontal: 20, backgroundColor: '#FFFFFF' },
+  iconWrap:{ width: 36, height: 36, borderRadius: 10, backgroundColor: colors.bg.elevated, alignItems: 'center', justifyContent: 'center', marginRight: 14 },
+  label:   { flex: 1, fontSize: 15, fontWeight: '600', color: colors.text.primary },
 });
 
 // ── 메인 ──────────────────────────────────────────────────────────────────────
 export default function AccountDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { accounts, balances, balanceErrors } = useAccounts();
-  const [filter, setFilter] = useState<Filter>('all');
 
   const account = useMemo(() => accounts.find((a) => a.id === id), [accounts, id]);
   const balance = account ? (balances[account.id] ?? null) : null;
   const balErr  = account ? (balanceErrors[account.id] ?? null) : null;
-
-  const { data: trades, isLoading: tradesLoading } = useApi(
-    () => account
-      ? tradesService.getByAccount({
-          exchange:  account.exchange,
-          apiKey:    account.apiKey,
-          apiSecret: account.apiSecret,
-        })
-      : Promise.resolve([] as Trade[]),
-    [account?.id],
-  );
-
-  const filtered = useMemo(() => {
-    if (!trades) return [];
-    if (filter === 'profit') return trades.filter((t) => t.profit > 0);
-    if (filter === 'loss')   return trades.filter((t) => t.profit < 0);
-    return trades;
-  }, [trades, filter]);
-
-  // 통계
-  const totalProfit = useMemo(
-    () => (trades ?? []).reduce((s, t) => s + t.profit, 0),
-    [trades],
-  );
-  // 손익비 = 평균 수익 / 평균 손실 (절댓값)
-  const plRatio = useMemo(() => {
-    if (!trades?.length) return null;
-    const wins   = trades.filter((t) => t.profit > 0);
-    const losses = trades.filter((t) => t.profit < 0);
-    const avgWin  = wins.length   ? wins.reduce((s, t) => s + t.profit, 0) / wins.length : 0;
-    const avgLoss = losses.length ? Math.abs(losses.reduce((s, t) => s + t.profit, 0) / losses.length) : 0;
-    return avgLoss > 0 ? (avgWin / avgLoss).toFixed(2) : null;
-  }, [trades]);
 
   if (!account) {
     return (
@@ -186,11 +99,11 @@ export default function AccountDetail() {
     );
   }
 
-  const isProfit    = (balance?.profitTotal ?? totalProfit) >= 0;
-  const pnlColor    = isProfit ? colors.market.rise : colors.market.fall;
-  const exchLabel   = EXCHANGE_LABELS[account.exchange];
-  const exchColor   = EXCHANGE_COLORS[account.exchange];
-  const maskedKey   = account.apiKey.length > 8
+  const isProfit  = (balance?.profitTotal ?? 0) >= 0;
+  const pnlColor  = isProfit ? colors.market.rise : colors.market.fall;
+  const exchLabel = EXCHANGE_LABELS[account.exchange];
+  const exchColor = EXCHANGE_COLORS[account.exchange];
+  const maskedKey = account.apiKey.length > 8
     ? account.apiKey.slice(0, 4) + '••••' + account.apiKey.slice(-4)
     : '••••••••';
 
@@ -269,46 +182,34 @@ export default function AccountDetail() {
                   <Text style={st.statLabel}>투자 중</Text>
                   <Text style={st.statValue}>{formatKRW(balance.invested)}</Text>
                 </View>
-                <View style={st.statDivider} />
-                <View style={st.statItem}>
-                  <Text style={st.statLabel}>손익비</Text>
-                  <Text style={[st.statValue, {
-                    color: plRatio && parseFloat(plRatio) >= 1 ? colors.market.rise : plRatio ? colors.market.fall : colors.text.primary,
-                  }]}>
-                    {plRatio ?? '—'}
-                  </Text>
-                </View>
               </View>
             )}
           </View>
 
           <View style={st.divider} />
 
-          {/* ── 거래 내역 ── */}
-          <View style={st.sectionHeader}>
-            <Text style={st.sectionTitle}>거래 내역</Text>
-            <View style={st.chips}>
-              <FilterChip label="전체" active={filter === 'all'}    onPress={() => setFilter('all')} />
-              <FilterChip label="수익" active={filter === 'profit'} onPress={() => setFilter('profit')} />
-              <FilterChip label="손실" active={filter === 'loss'}   onPress={() => setFilter('loss')} />
-            </View>
-          </View>
-
-          {tradesLoading ? (
-            <TradingListSkeleton />
-          ) : !filtered.length ? (
-            <View style={st.emptyTrades}>
-              <Text style={{ fontSize: 14, color: colors.text.disabled }}>
-                {filter === 'all' ? '거래 내역이 없어요' : '해당하는 거래가 없어요'}
-              </Text>
-            </View>
-          ) : (
-            <>
-              {filtered.map((trade, i) => (
-                <TradeRow key={trade.id} trade={trade} isLast={i === filtered.length - 1} />
-              ))}
-            </>
-          )}
+          {/* ── 바로가기 버튼 ── */}
+          <NavButton
+            label="거래 내역"
+            onPress={() => router.push({ pathname: '/history', params: { accountId: account.id } })}
+            icon={
+              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                <Path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" stroke={colors.text.secondary} strokeWidth="1.8" strokeLinecap="round" />
+                <Path d="M9 5a2 2 0 002 2h2a2 2 0 002-2 2 2 0 00-2-2h-2a2 2 0 00-2 2z" stroke={colors.text.secondary} strokeWidth="1.8" strokeLinecap="round" />
+                <Path d="M9 12h6M9 16h4" stroke={colors.text.secondary} strokeWidth="1.8" strokeLinecap="round" />
+              </Svg>
+            }
+          />
+          <View style={st.rowDivider} />
+          <NavButton
+            label="수익분석"
+            onPress={() => router.push({ pathname: '/(main)/positions/analysis', params: { accountId: account.id } })}
+            icon={
+              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                <Path d="M18 20V10M12 20V4M6 20v-6" stroke={colors.text.secondary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              </Svg>
+            }
+          />
 
           <View style={{ height: 120 }} />
         </ScrollView>
@@ -319,12 +220,9 @@ export default function AccountDetail() {
 
 const st = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#FFFFFF' },
-
   settingsBtn: { padding: 4 },
 
-  // 헤더 섹션
-  header: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 24 },
-
+  header:    { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 24 },
   headerTop: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
   exchName:  { fontSize: 16, fontWeight: '700', color: colors.text.primary },
   exchBadge: { borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 },
@@ -345,17 +243,8 @@ const st = StyleSheet.create({
   statLabel:   { fontSize: 12, color: colors.text.tertiary, marginBottom: 5 },
   statValue:   { fontSize: 15, fontWeight: '700', color: colors.text.primary },
 
-  divider: { height: 8, backgroundColor: colors.bg.elevated },
-
-  // 거래 내역 섹션
-  sectionHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingVertical: 14,
-  },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: colors.text.primary },
-  chips:        { flexDirection: 'row', gap: 6 },
-
-  emptyTrades: { alignItems: 'center', paddingVertical: 48 },
+  divider:    { height: 8, backgroundColor: colors.bg.elevated },
+  rowDivider: { height: 1, backgroundColor: colors.bg.elevated, marginHorizontal: 20 },
 
   emptyCenter: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 });

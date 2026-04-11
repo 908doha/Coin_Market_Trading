@@ -10,7 +10,7 @@ import {
   View, StyleSheet, ScrollView, Pressable, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import Animated, {
   useSharedValue, useAnimatedStyle, withTiming, withSpring, runOnJS,
 } from 'react-native-reanimated';
@@ -695,9 +695,10 @@ export default function ProfitAnalysis() {
   const [viewMode,   setViewMode]   = useState<ViewMode>('일별');
   const [subTab,     setSubTab]     = useState<SubTab>('실현손익');
   const [result,     setResult]     = useState<ResultFilter>('전체');
+  const { accountId } = useLocalSearchParams<{ accountId?: string }>();
   const [offset,     setOffset]     = useState(0);
   const [showUsd,    setShowUsd]    = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(accountId ?? null);
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const { accounts, totalBalance } = useAccounts();

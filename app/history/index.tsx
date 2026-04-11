@@ -3,7 +3,7 @@ import {
   View, StyleSheet, SectionList, Pressable, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import Animated, {
   useSharedValue, useAnimatedStyle, withTiming, withSpring, Easing, runOnJS,
 } from 'react-native-reanimated';
@@ -435,10 +435,11 @@ const sec = StyleSheet.create({
 // ── 메인 ─────────────────────────────────────────────────────────────────────
 export default function History() {
   const [filter, setFilter]       = useState<Filter>('전체');
+  const { accountId } = useLocalSearchParams<{ accountId?: string }>();
   const [showUsd, setShowUsd]     = useState(false);
   const [period, setPeriod]       = useState<Period>('월');
   const [offset, setOffset]       = useState(0);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(accountId ?? null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const { accounts, totalBalance } = useAccounts();
   const listOpacity = useSharedValue(1);

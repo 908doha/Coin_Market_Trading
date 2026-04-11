@@ -421,18 +421,19 @@ export default function PositionDetail() {
   const [botSignal,   setBotSignal]       = useState<BotSignal | null>(null);
   const [signalLoading, setSignalLoading] = useState(false);
 
-  // localStorage 캐시 헬퍼
-  const cacheKey = (contract: string) => `ict_analysis_${contract}`;
-  const loadCached = (contract: string): IctAnalysis | BotSignal | null => {
+  // localStorage 캐시 헬퍼 — contract + 진입시각으로 키 구성 (포지션마다 고유)
+  const cacheKey = (contract: string, openTime?: number) =>
+    openTime ? `ict_analysis_${contract}_${openTime}` : `ict_analysis_${contract}`;
+  const loadCached = (contract: string, openTime?: number): IctAnalysis | BotSignal | null => {
     if (Platform.OS !== 'web') return null;
     try {
-      const raw = localStorage.getItem(cacheKey(contract));
+      const raw = localStorage.getItem(cacheKey(contract, openTime));
       return raw ? JSON.parse(raw) : null;
     } catch { return null; }
   };
-  const saveCache = (contract: string, data: any) => {
+  const saveCache = (contract: string, data: any, openTime?: number) => {
     if (Platform.OS !== 'web') return;
-    try { localStorage.setItem(cacheKey(contract), JSON.stringify(data)); } catch {}
+    try { localStorage.setItem(cacheKey(contract, openTime), JSON.stringify(data)); } catch {}
   };
 
   useEffect(() => {
@@ -442,10 +443,11 @@ export default function PositionDetail() {
     const accountId = (position as any).accountId
       || (accounts.length === 1 ? accounts[0].id : accounts[0]?.id);
     const contract = (position.symbol ?? '').replace('/', '_');
+    const openTime = (position as any).openTime as number | undefined;
     if (!contract) return;
 
-    // 캐시된 분석이 있으면 즉시 표시
-    const cached = loadCached(contract);
+    // 캐시된 분석이 있으면 즉시 표시 (진입 시각 포함 키로 조회)
+    const cached = loadCached(contract, openTime);
     if (cached && 'htf' in cached) {
       setIctAnalysis(cached as IctAnalysis);
     } else if (cached && 'confluence' in cached) {
@@ -466,19 +468,19 @@ export default function PositionDetail() {
     fetch('/api/ict-analyze', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ apiKey: account.apiKey, apiSecret: account.apiSecret, contract, entryTime: (position as any).openTime }),
+      body:    JSON.stringify({ apiKey: account.apiKey, apiSecret: account.apiSecret, contract, entryTime: openTime }),
     })
       .then((r) => r.json())
       .then((data) => {
         if (data?.error || data?.htf === undefined) {
           if (data?.reason) {
             setBotSignal(data);
-            if (data.confluence?.length > 0) saveCache(contract, data);
+            if (data.confluence?.length > 0) saveCache(contract, data, openTime);
           }
           return;
         }
         setIctAnalysis(data as IctAnalysis);
-        saveCache(contract, data);
+        saveCache(contract, data, openTime);
       })
       .catch(() => {})
       .finally(() => setSignalLoading(false));

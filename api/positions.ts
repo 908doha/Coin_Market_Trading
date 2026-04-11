@@ -34,6 +34,7 @@ interface Position {
   usdtKrw:       number;
   stopLoss?:     number;   // USD — Gate.io 조건부 주문
   targetPrice?:  number;   // USD — Gate.io 조건부 주문
+  openTime?:     number;   // Unix timestamp (seconds) — 진입 시각
 }
 
 // ── Gate.io API 헬퍼 ─────────────────────────────────────────────────────────
@@ -185,6 +186,7 @@ async function fetchGatePositions(apiKey: string, apiSecret: string): Promise<Po
         usdtKrw,
         ...(tpsl?.tp ? { targetPrice: tpsl.tp } : {}),
         ...(tpsl?.sl ? { stopLoss:    tpsl.sl } : {}),
+        ...(p.open_time ? { openTime: p.open_time } : {}),
       };
     });
 }

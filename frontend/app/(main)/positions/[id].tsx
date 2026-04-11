@@ -466,7 +466,7 @@ export default function PositionDetail() {
     fetch('/api/ict-analyze', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ apiKey: account.apiKey, apiSecret: account.apiSecret, contract }),
+      body:    JSON.stringify({ apiKey: account.apiKey, apiSecret: account.apiSecret, contract, entryTime: (position as any).openTime }),
     })
       .then((r) => r.json())
       .then((data) => {

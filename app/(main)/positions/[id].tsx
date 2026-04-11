@@ -407,7 +407,9 @@ export default function PositionDetail() {
   );
 
   const [showUsd, setShowUsd] = useState(false);
-  const { accounts, totalBalance } = useAccounts();
+  // 스토어에서 실시간 포지션 (5초마다 갱신)
+  const { accounts, positions: allPositions, totalBalance } = useAccounts();
+  const livePosition = allPositions.find((p) => p.id === id) ?? null;
   const rate = totalBalance?.usdtKrw ?? 1350;
   // 라이브 데이터 우선, 없으면 초기 캐시 데이터 사용
   const position = livePosition ?? cachedPosition;

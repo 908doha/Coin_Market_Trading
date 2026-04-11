@@ -89,7 +89,10 @@ function buildSafeConnectionString(url: string, overridePassword?: string): stri
   const db       = database || 'postgres';
 
   // 비밀번호를 encodeURIComponent로 재인코딩 → pg-connection-string이 new URL()로 파싱 가능
-  const safeUrl = `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${db}?sslmode=require`;
+  // sslmode=require를 URL에 넣으면 pg-connection-string이 ssl:true로 파싱해
+  // Client config의 ssl:{rejectUnauthorized:false}를 덮어씌움 → SELF_SIGNED_CERT 오류
+  // 대신 Client 생성 시 ssl 옵션으로 직접 제어
+  const safeUrl = `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${db}`;
   console.log('[db-config] host=%s port=%s user=%s db=%s', host, port, user, db);
   return safeUrl;
 }

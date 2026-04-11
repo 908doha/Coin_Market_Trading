@@ -324,11 +324,6 @@ function fmtYLabel(v: number): string {
   return `${Math.round(v).toLocaleString()}`;
 }
 
-function yUnit(max: number): string {
-  if (max >= 100_000_000) return '억원';
-  if (max >= 10_000)      return '만원';
-  return '원';
-}
 
 interface CombinedChartProps {
   lineData: { value: number; date?: string }[];
@@ -407,9 +402,6 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
     }
     return fmtYLabel(v);
   };
-  const lineUnit = useUsd ? '$' : yUnit(vMax);
-  const barUnit  = useUsd ? '$' : yUnit(maxBar);
-
   const lineGrid = [vMax, (vMax + vMin) / 2, vMin];
   const barGridY = [
     { top: LINE_H + 2,           label: fmtBarLabel(maxBar)  },
@@ -527,13 +519,6 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
             </View>
           ))}
 
-          {/* 단위 라벨 */}
-          <View style={{ position: 'absolute', top: 1, left: 2 }}>
-            <Text style={cbSt.unit}>(단위:{lineUnit})</Text>
-          </View>
-          <View style={{ position: 'absolute', top: LINE_H + 1, left: 2 }}>
-            <Text style={cbSt.unit}>(단위:{barUnit})</Text>
-          </View>
         </View>
 
       {/* X축 날짜 라벨 */}
@@ -572,7 +557,6 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
 
 const cbSt = StyleSheet.create({
   yLabel: { fontSize: 8.5, color: colors.text.disabled, lineHeight: 10 },
-  unit:   { fontSize: 7.5, color: colors.text.disabled },
   xLabel: { fontSize: 9.5, color: colors.text.disabled },
   sumBox: {
     flexDirection: 'row', alignItems: 'center',

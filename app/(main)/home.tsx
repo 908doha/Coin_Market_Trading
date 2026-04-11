@@ -385,11 +385,36 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
   };
 
   // Y축 그리드 값
+  const usdtKrw = balance?.usdtKrw ?? 1350;
+  const useUsd  = showUsd && usdtKrw > 0 && (balance?.totalUsd ?? 0) > 0;
+
+  const fmtLineLabel = (v: number) => {
+    if (useUsd) {
+      const u = v / usdtKrw;
+      if (Math.abs(u) >= 1_000_000) return `$${(u / 1_000_000).toFixed(1)}M`;
+      if (Math.abs(u) >= 1_000)     return `$${(u / 1_000).toFixed(1)}K`;
+      return `$${u.toFixed(0)}`;
+    }
+    return fmtYLabel(v);
+  };
+  const fmtBarLabel = (v: number) => {
+    if (useUsd) {
+      const u = v / usdtKrw;
+      const s = u < 0 ? '-' : '';
+      const a = Math.abs(u);
+      if (a >= 1_000) return `${s}$${(a / 1_000).toFixed(1)}K`;
+      return `${s}$${a.toFixed(1)}`;
+    }
+    return fmtYLabel(v);
+  };
+  const lineUnit = useUsd ? '$' : yUnit(vMax);
+  const barUnit  = useUsd ? '$' : yUnit(maxBar);
+
   const lineGrid = [vMax, (vMax + vMin) / 2, vMin];
   const barGridY = [
-    { top: LINE_H + 2,           label: fmtYLabel(maxBar)  },
-    { top: barMidY - 7,          label: '0'                },
-    { top: LINE_H + BARS_H - 14, label: fmtYLabel(-maxBar) },
+    { top: LINE_H + 2,           label: fmtBarLabel(maxBar)  },
+    { top: barMidY - 7,          label: '0'                  },
+    { top: LINE_H + BARS_H - 14, label: fmtBarLabel(-maxBar) },
   ];
 
   // X축 라벨 (최대 6개)
@@ -402,18 +427,17 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
   const curTotal   = balance?.total ?? 0;
   const curProfit  = balance?.profitTotal ?? 0;
   const curRate    = balance?.profitRate ?? 0;
-  const hasUsdBal  = showUsd && (balance?.totalUsd ?? 0) > 0;
-
   const tipLineVal = tipIdx !== null ? (aligned[tipIdx]?.value ?? curTotal)  : curTotal;
   const tipBarVal  = tipIdx !== null ? (barsData[tipIdx]?.value ?? 0)        : curProfit;
   const tipBarRate = tipIdx !== null ? (barsData[tipIdx]?.rate  ?? 0)        : curRate;
 
-  const fmtTotal  = hasUsdBal && tipIdx === null
-    ? `$${(balance!.totalUsd!).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-    : formatKRW(tipLineVal);
-  const fmtProfit = showUsd && (balance?.usdtKrw ?? 0) > 0 && tipIdx === null
-    ? `${curProfit >= 0 ? '+' : '-'}$${Math.abs(curProfit / balance!.usdtKrw!).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-    : formatKRWSigned(tipBarVal);
+  const fmtUsd = (krw: number) =>
+    `$${(krw / usdtKrw).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const fmtUsdSigned = (krw: number) =>
+    `${krw >= 0 ? '+' : '-'}$${Math.abs(krw / usdtKrw).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  const fmtTotal  = useUsd ? fmtUsd(tipLineVal)        : formatKRW(tipLineVal);
+  const fmtProfit = useUsd ? fmtUsdSigned(tipBarVal)   : formatKRWSigned(tipBarVal);
   const dispRate  = tipBarRate;
 
   return (
@@ -492,7 +516,7 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
           {/* Y 라벨 — 선 차트 절대 위치 */}
           {lineGrid.map((gv, gi) => (
             <View key={`lyv${gi}`} style={{ position: 'absolute', top: toLineY(gv) - 9, left: 2 }}>
-              <Text style={cbSt.yLabel}>{fmtYLabel(gv)}</Text>
+              <Text style={cbSt.yLabel}>{fmtLineLabel(gv)}</Text>
             </View>
           ))}
 
@@ -505,10 +529,10 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
 
           {/* 단위 라벨 */}
           <View style={{ position: 'absolute', top: 1, left: 2 }}>
-            <Text style={cbSt.unit}>(단위:{yUnit(vMax)})</Text>
+            <Text style={cbSt.unit}>(단위:{lineUnit})</Text>
           </View>
           <View style={{ position: 'absolute', top: LINE_H + 1, left: 2 }}>
-            <Text style={cbSt.unit}>(단위:{yUnit(maxBar)})</Text>
+            <Text style={cbSt.unit}>(단위:{barUnit})</Text>
           </View>
         </View>
 

@@ -115,29 +115,51 @@ async function withDb<T>(fn: (client: Client) => Promise<T>): Promise<T | null> 
     console.log('[db-config] using PGPASSWORD env var for password');
   }
 
-  // Delete DATABASE_URL before new Client() so pg doesn't try to re-parse it
-  // via pg-connection-string which calls new URL() and fails on special chars.
-  delete process.env.DATABASE_URL;
-  let client: Client;
-  try {
-    client = new Client(config);
-  } finally {
-    process.env.DATABASE_URL = url;
+  const MAX_RETRIES = 2;
+  let lastErr: any;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      const delay = attempt * 1000; // 1s, 2s
+      console.log(`[db] retry attempt ${attempt} after ${delay}ms`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+
+    // Delete DATABASE_URL before new Client() so pg doesn't try to re-parse it
+    // via pg-connection-string which calls new URL() and fails on special chars.
+    delete process.env.DATABASE_URL;
+    let client: Client;
+    try {
+      client = new Client(config);
+    } finally {
+      process.env.DATABASE_URL = url;
+    }
+
+    try {
+      await client.connect();
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS exchange_accounts (
+          user_id    TEXT PRIMARY KEY,
+          data       TEXT NOT NULL,
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `);
+      return await fn(client);
+    } catch (err: any) {
+      lastErr = err;
+      await client!.end().catch(() => {});
+      const msg = err?.message ?? '';
+      // 재시도 가능한 에러: 연결 종료, 일시적 네트워크 오류
+      const retryable = msg.includes('terminated unexpectedly')
+        || msg.includes('Connection terminated')
+        || msg.includes('ECONNRESET')
+        || msg.includes('timeout');
+      if (!retryable) throw err;
+      console.warn(`[db] retryable error (attempt ${attempt}):`, msg);
+    }
   }
 
-  try {
-    await client.connect();
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS exchange_accounts (
-        user_id    TEXT PRIMARY KEY,
-        data       TEXT NOT NULL,
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      )
-    `);
-    return await fn(client);
-  } finally {
-    await client.end().catch(() => {});
-  }
+  throw lastErr;
 }
 
 async function dbGet(userId: string): Promise<string | null> {

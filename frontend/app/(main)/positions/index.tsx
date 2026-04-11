@@ -12,7 +12,7 @@ import Animated, {
   useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS,
 } from 'react-native-reanimated';
 import Svg, { Path, Polygon, Rect, Text as SvgText, Circle } from 'react-native-svg';
-import { Text, FadeTabView, PressableScale, BalanceCardsSkeleton } from '@/design-system';
+import { Text, FadeTabView, PressableScale, BalanceCardsSkeleton, AnimatedNumber } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
@@ -250,8 +250,22 @@ function PositionRow({ pos, isLast }: { pos: any; isLast: boolean }) {
         <Text style={pr.sub}>{formatKRW(pos.amount)} 투자</Text>
       </View>
       <View style={{ alignItems: 'flex-end' }}>
-        <Text style={[pr.profit, { color: pnlColor }]}>{formatKRWSigned(pos.profit)}</Text>
-        <Text style={[pr.rate, { color: pnlColor }]}>{formatRate(pos.profitRate)}</Text>
+        <AnimatedNumber
+          value={pos.profit}
+          formatter={formatKRWSigned}
+          fontSize={15}
+          fontWeight="700"
+          color={pnlColor}
+          style={pr.profit}
+        />
+        <AnimatedNumber
+          value={pos.profitRate}
+          formatter={formatRate}
+          fontSize={13}
+          fontWeight="500"
+          color={pnlColor}
+          style={pr.rate}
+        />
       </View>
     </Pressable>
   );

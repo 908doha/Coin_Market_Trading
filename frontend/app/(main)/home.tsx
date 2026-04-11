@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Svg, { Polyline, Defs, LinearGradient, Stop, Polygon, Path, Rect, Text as SvgText, Line, Circle } from 'react-native-svg';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
-import { Text, GlassCard, PressableScale, FadeTabView, AssetCardSkeleton, PageHeader, CurrencyToggle } from '@/design-system';
+import { Text, GlassCard, PressableScale, FadeTabView, AssetCardSkeleton, PageHeader, CurrencyToggle, AnimatedNumber } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { accountService, positionsService, tradesService } from '@/services';
 import type { Trade } from '@/services';
@@ -690,9 +690,20 @@ function AccountRow({
         <ExchangeLogo exchange={account.exchange} size={44} />
 
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={accRow.amount} numberOfLines={1}>
-            {balance ? amountFormatter(amountValue) : (error ? '조회 실패' : '—')}
-          </Text>
+          {balance ? (
+            <AnimatedNumber
+              value={amountValue}
+              formatter={amountFormatter}
+              fontSize={16}
+              fontWeight="700"
+              color={colors.text.primary}
+              style={accRow.amount}
+            />
+          ) : (
+            <Text style={accRow.amount} numberOfLines={1}>
+              {error ? '조회 실패' : '—'}
+            </Text>
+          )}
           <Text style={accRow.name} numberOfLines={1}>
             {account.name || label} · {label}
           </Text>
@@ -703,12 +714,22 @@ function AccountRow({
 
         {balance && (
           <View style={accRow.pnlCol}>
-            <Text style={[accRow.pnlText, { color: isProfit ? colors.market.rise : colors.market.fall }]}>
-              {pnlFormatter(pnlValue)}
-            </Text>
-            <Text style={[accRow.pnlRate, { color: isProfit ? colors.market.rise : colors.market.fall }]}>
-              {formatRate(balance.profitRate)}
-            </Text>
+            <AnimatedNumber
+              value={pnlValue}
+              formatter={pnlFormatter}
+              fontSize={13}
+              fontWeight="600"
+              color={isProfit ? colors.market.rise : colors.market.fall}
+              style={accRow.pnlText}
+            />
+            <AnimatedNumber
+              value={balance.profitRate}
+              formatter={formatRate}
+              fontSize={12}
+              fontWeight="500"
+              color={isProfit ? colors.market.rise : colors.market.fall}
+              style={accRow.pnlRate}
+            />
           </View>
         )}
       </View>
@@ -771,21 +792,38 @@ export default function Home() {
             {balLoading && !balance ? <AssetCardSkeleton /> : (
               <>
                 <Text variant="meta" color={colors.text.tertiary} style={{ marginBottom: 6 }}>총 자산</Text>
-                <Text style={styles.heroAmount}>
-                  {showUsd && (balance?.totalUsd ?? 0) > 0
-                    ? `$${balance!.totalUsd!.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                    : formatKRW(balance?.total ?? 0)}
-                </Text>
+                <AnimatedNumber
+                  value={showUsd && (balance?.totalUsd ?? 0) > 0 ? (balance?.totalUsd ?? 0) : (balance?.total ?? 0)}
+                  formatter={(v) => showUsd && (balance?.totalUsd ?? 0) > 0
+                    ? `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    : formatKRW(v)}
+                  fontSize={30}
+                  fontWeight="700"
+                  color={colors.text.primary}
+                  letterSpacing={-0.5}
+                  style={[styles.heroAmount, { marginBottom: 0 }]}
+                />
                 <View style={styles.heroSubRow}>
-                  <Text style={[styles.heroPnl, { color: isProfit ? colors.market.rise : colors.market.fall }]}>
-                    {showUsd && (balance?.usdtKrw ?? 0) > 0
-                      ? (() => { const v = balance!.profitTotal / balance!.usdtKrw!; const s = v >= 0 ? '+' : '-'; return `${s}$${Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; })()
-                      : formatKRWSigned(balance?.profitTotal ?? 0)}
-                  </Text>
+                  <AnimatedNumber
+                    value={showUsd && (balance?.usdtKrw ?? 0) > 0
+                      ? (balance?.profitTotal ?? 0) / (balance?.usdtKrw ?? 1350)
+                      : (balance?.profitTotal ?? 0)}
+                    formatter={(v) => showUsd && (balance?.usdtKrw ?? 0) > 0
+                      ? `${v >= 0 ? '+' : '-'}$${Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                      : formatKRWSigned(v)}
+                    fontSize={15}
+                    fontWeight="600"
+                    color={isProfit ? colors.market.rise : colors.market.fall}
+                    style={styles.heroPnl}
+                  />
                   <View style={[styles.pnlBadge, { backgroundColor: isProfit ? colors.market.riseSubtle : colors.bg.elevated }]}>
-                    <Text style={[styles.pnlBadgeText, { color: isProfit ? colors.negative.text : colors.market.fall }]}>
-                      {formatRate(balance?.profitRate ?? 0)}
-                    </Text>
+                    <AnimatedNumber
+                      value={balance?.profitRate ?? 0}
+                      formatter={formatRate}
+                      fontSize={13}
+                      fontWeight="700"
+                      color={isProfit ? colors.negative.text : colors.market.fall}
+                    />
                   </View>
                 </View>
                 <View style={styles.chartArea}>

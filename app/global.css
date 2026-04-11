@@ -5,4 +5,15 @@
     'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif;
   user-select: none;
   -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+input, textarea, [contenteditable] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }

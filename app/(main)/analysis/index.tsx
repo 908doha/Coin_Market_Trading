@@ -58,6 +58,7 @@ interface Ticker {
   contract:     string;
   symbol:       string;
   coin:         string;
+  name?:        string;
   last:         number;
   change24h:    number;
   volume24hUsd: number;
@@ -314,13 +315,15 @@ function TickerRow({
       <View style={{ flex: 1 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <Text style={tr.coin}>{ticker.coin}</Text>
-          <Text style={tr.vol}>{formatVol(ticker.volume24hUsd)}</Text>
+          {ticker.name && <Text style={tr.name} numberOfLines={1}>{ticker.name}</Text>}
         </View>
         <Text style={tr.price}>
           {'$' + ticker.last.toLocaleString('en-US', {
             minimumFractionDigits:  ticker.last < 1 ? 4 : 2,
             maximumFractionDigits:  ticker.last < 1 ? 4 : 2,
           })}
+          {'  '}
+          <Text style={tr.vol}>{formatVol(ticker.volume24hUsd)}</Text>
         </Text>
       </View>
 
@@ -348,7 +351,8 @@ const tr = StyleSheet.create({
   iconText:   { fontSize: 13, fontWeight: '700', color: colors.text.secondary },
   rank:       { position: 'absolute', bottom: -2, right: -2, fontSize: 9, fontWeight: '700', color: colors.text.tertiary, backgroundColor: '#F0F0F0', borderRadius: 4, paddingHorizontal: 3, paddingVertical: 1 },
   coin:       { fontSize: 15, fontWeight: '700', color: '#191919' },
-  vol:        { fontSize: 11, color: colors.text.tertiary },
+  name:       { fontSize: 12, color: colors.text.tertiary, flexShrink: 1 },
+  vol:        { fontSize: 12, color: colors.text.tertiary },
   price:      { fontSize: 13, color: colors.text.secondary, marginTop: 2 },
   change:     { fontSize: 14, fontWeight: '600' },
   analyzeBtn: { fontSize: 12, fontWeight: '600', color: colors.text.secondary, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: colors.bg.elevated },
@@ -401,19 +405,50 @@ export default function Analysis() {
 
   const kelly = useMemo(() => computeKelly(trades), [trades]);
 
-  // Gate.io 상위 종목 로드
+  // CoinGecko 시가총액 상위 50개 로드
   useEffect(() => {
+    const COINGECKO =
+      'https://api.coingecko.com/api/v3/coins/markets' +
+      '?vs_currency=usd&order=market_cap_desc&per_page=50&page=1' +
+      '&sparkline=false&price_change_percentage=24h';
+
+    const mapCoins = (coins: any[]): Ticker[] =>
+      coins.map((c) => ({
+        contract:     c.symbol.toUpperCase() + '_USDT',
+        symbol:       c.symbol.toUpperCase() + 'USDT',
+        coin:         c.symbol.toUpperCase(),
+        name:         c.name,
+        last:         c.current_price   ?? 0,
+        change24h:    c.price_change_percentage_24h ?? 0,
+        volume24hUsd: c.total_volume    ?? 0,
+        fundingRate:  0,
+      }));
+
+    // 서버 프록시 먼저, 실패 시 CoinGecko 직접 호출
     fetch(`${API_BASE}/api/market-scan`)
       .then((r) => r.json())
-      .then((data) => setTickers(Array.isArray(data) ? data : []))
-      .catch(() => {})
+      .then((data) => {
+        if (Array.isArray(data) && data.length) {
+          setTickers(data);
+        } else {
+          throw new Error('empty');
+        }
+      })
+      .catch(() =>
+        fetch(COINGECKO)
+          .then((r) => r.json())
+          .then((coins: any[]) => Array.isArray(coins) && setTickers(mapCoins(coins)))
+          .catch(() => {}),
+      )
       .finally(() => setTickersLoading(false));
   }, []);
 
   const filtered = useMemo(() => {
     const q = search.trim().toUpperCase();
     if (!q) return tickers;
-    return tickers.filter((t) => t.coin.includes(q) || t.symbol.includes(q));
+    return tickers.filter(
+      (t) => t.coin.includes(q) || t.symbol.includes(q) || (t.name?.toUpperCase().includes(q) ?? false),
+    );
   }, [tickers, search]);
 
   const analyze = useCallback(async (contract: string) => {

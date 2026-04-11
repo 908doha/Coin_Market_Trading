@@ -2,6 +2,7 @@ import './global.css';
 import { useEffect } from 'react';
 import { View, Platform, StyleSheet } from 'react-native';
 import { Stack } from 'expo-router';
+import { Head } from 'expo-router/head';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { useFonts } from 'expo-font';
@@ -28,11 +29,18 @@ export default function RootLayout() {
   if (!fontsLoaded) return null;
 
   // 웹(PC)에서 3:4 비율로 가운데 정렬
+  const viewportMeta = Platform.OS === 'web' ? (
+    <Head>
+      <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    </Head>
+  ) : null;
+
   if (Platform.OS === 'web') {
     return (
       <AuthProvider>
         <AccountsProvider>
           <ToastProvider>
+            {viewportMeta}
             <StatusBar style="dark" backgroundColor="#F5F5F5" />
             <View style={styles.webOuter}>
               <View style={styles.webInner}>

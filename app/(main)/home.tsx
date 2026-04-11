@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Pressable, Platform } from 'react-native';
+import { View, StyleSheet, ScrollView, Pressable, Platform, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Svg, { Polyline, Defs, LinearGradient, Stop, Polygon, Path, Rect, Text as SvgText, Line, Circle } from 'react-native-svg';
@@ -737,6 +737,8 @@ function AccountRow({
 export default function Home() {
   const [period, setPeriod] = useState<PeriodKey>('일');
   const [showUsd, setShowUsd] = useState(false);
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  const [showAccPicker, setShowAccPicker]         = useState(false);
   const { accounts, balances, balanceErrors, totalBalance, balancesLoading, positions } = useAccounts();
 
   const { data: singleBalance, isLoading: singleLoading } = useApi(
@@ -747,16 +749,29 @@ export default function Home() {
     () => tradesService.getAllByAccounts(accounts),
     [accounts],
   );
-  const balance    = accounts.length > 0 ? totalBalance : singleBalance;
-  const balLoading = accounts.length > 0 ? balancesLoading : singleLoading;
-  const isProfit   = (balance?.profitTotal ?? 0) >= 0;
+
+  // 선택된 계좌의 잔고 (null이면 전체 합산)
+  const baseBalance  = accounts.length > 0 ? totalBalance : singleBalance;
+  const displayBal   = selectedAccountId ? (balances[selectedAccountId] ?? null) : baseBalance;
+  const balance      = displayBal;
+  const balLoading   = accounts.length > 0 ? balancesLoading : singleLoading;
+  const isProfit     = (balance?.profitTotal ?? 0) >= 0;
+
+  // 선택된 계좌 레이블
+  const selAcc        = accounts.find((a) => a.id === selectedAccountId);
+  const accLabel      = selAcc
+    ? (selAcc.name || EXCHANGE_LABELS[selAcc.exchange])
+    : accounts.length === 1
+      ? (accounts[0].name || EXCHANGE_LABELS[accounts[0].exchange])
+      : '모든 계좌';
+
   const chartData  = useMemo(
-    () => buildChartFromTrades(allTrades ?? [], balance ?? null, period),
-    [allTrades, balance, period],
+    () => buildChartFromTrades(allTrades ?? [], baseBalance ?? null, period),
+    [allTrades, baseBalance, period],
   );
   const barsData   = useMemo(
-    () => buildPeriodBarsFromTrades(allTrades ?? [], balance ?? null, period),
-    [allTrades, balance, period],
+    () => buildPeriodBarsFromTrades(allTrades ?? [], baseBalance ?? null, period),
+    [allTrades, baseBalance, period],
   );
   return (
     <FadeTabView style={styles.root}>
@@ -783,7 +798,17 @@ export default function Home() {
           <GlassCard style={styles.heroCard} intensity="medium" radius={24}>
             {balLoading && !balance ? <AssetCardSkeleton /> : (
               <>
-                <Text variant="meta" color={colors.text.tertiary} style={{ marginBottom: 6 }}>총 자산</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <Text variant="meta" color={colors.text.tertiary}>총 자산</Text>
+                  {accounts.length > 1 && (
+                    <Pressable style={styles.accDropBtn} onPress={() => setShowAccPicker(true)}>
+                      <Text style={styles.accDropLabel} numberOfLines={1}>{accLabel}</Text>
+                      <Svg width={12} height={12} viewBox="0 0 24 24" fill="none">
+                        <Path d="M6 9l6 6 6-6" stroke="#AEAEB2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      </Svg>
+                    </Pressable>
+                  )}
+                </View>
                 <AnimatedNumber
                   value={showUsd && (balance?.totalUsd ?? 0) > 0
                     ? (balance?.totalUsd ?? 0)
@@ -925,7 +950,7 @@ export default function Home() {
                           <Pressable
                             key={pos.id}
                             style={({ pressed }) => [styles.posRow, idx < group.items.length - 1 && styles.posRowBorder, pressed && { backgroundColor: '#F8F8F8' }]}
-                            onPress={() => router.push(`/(main)/positions/${pos.id}`)}
+                            onPress={() => router.push(`/positions/${pos.id}`)}
                           >
                             <View style={[styles.posIcon, { backgroundColor: up ? colors.market.riseSubtle : colors.market.fallSubtle }]}>
                               <Text style={[styles.posIconText, { color: pnlColor }]}>{pos.coin?.slice(0, 2) ?? '--'}</Text>
@@ -959,6 +984,51 @@ export default function Home() {
         </ScrollView>
       </SafeAreaView>
 
+      {/* ── 계좌 선택 드롭다운 모달 ── */}
+      <Modal
+        visible={showAccPicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowAccPicker(false)}
+      >
+        <Pressable style={styles.pickerOverlay} onPress={() => setShowAccPicker(false)}>
+          <View style={styles.pickerSheet}>
+            <Pressable
+              style={({ pressed }) => [styles.pickerRow, pressed && { backgroundColor: '#F8F8F8' }]}
+              onPress={() => { setSelectedAccountId(null); setShowAccPicker(false); }}
+            >
+              <Text style={[styles.pickerText, !selectedAccountId && { color: '#246CF9', fontWeight: '700' }]}>
+                모든 계좌
+              </Text>
+              {!selectedAccountId && (
+                <Svg width={16} height={16} viewBox="0 0 24 24">
+                  <Path d="M5 13l4 4L19 7" stroke="#246CF9" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                </Svg>
+              )}
+            </Pressable>
+            {accounts.map((acc) => {
+              const isSel = selectedAccountId === acc.id;
+              const label = acc.name || EXCHANGE_LABELS[acc.exchange];
+              return (
+                <Pressable
+                  key={acc.id}
+                  style={({ pressed }) => [styles.pickerRow, pressed && { backgroundColor: '#F8F8F8' }]}
+                  onPress={() => { setSelectedAccountId(acc.id); setShowAccPicker(false); }}
+                >
+                  <Text style={[styles.pickerText, isSel && { color: '#246CF9', fontWeight: '700' }]}>
+                    {label}
+                  </Text>
+                  {isSel && (
+                    <Svg width={16} height={16} viewBox="0 0 24 24">
+                      <Path d="M5 13l4 4L19 7" stroke="#246CF9" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                    </Svg>
+                  )}
+                </Pressable>
+              );
+            })}
+          </View>
+        </Pressable>
+      </Modal>
     </FadeTabView>
   );
 }
@@ -1002,6 +1072,14 @@ const styles = StyleSheet.create({
   posSub:          { fontSize: 13, color: colors.text.tertiary, marginTop: 3 },
   dirBadge:        { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   dirText:         { fontSize: 11, fontWeight: '700' },
+
+  accDropBtn:   { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#F5F5F5', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5, maxWidth: 140 },
+  accDropLabel: { fontSize: 12, fontWeight: '600', color: '#555', flexShrink: 1 },
+
+  pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.25)', justifyContent: 'flex-start', paddingTop: 120, paddingHorizontal: 20 },
+  pickerSheet:   { backgroundColor: '#FFF', borderRadius: 16, paddingVertical: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 16, elevation: 8 },
+  pickerRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14 },
+  pickerText:    { fontSize: 15, fontWeight: '500', color: '#191919' },
   emptyText:       { fontSize: 14, color: colors.text.tertiary },
 });
 

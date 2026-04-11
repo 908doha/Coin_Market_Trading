@@ -374,6 +374,14 @@ export default function PositionDetail() {
   const direction = position?.direction;
   const p         = position as any;
 
+  // 실제 코인 수량: 명목가치(KRW) / 환율 / 진입가
+  const coinQty = (() => {
+    const notionalUsdt = (position?.currentValue ?? 0) / (p.usdtKrw ?? rate ?? 1350);
+    const qty = position?.entryPrice > 0 ? notionalUsdt / (position?.entryPrice ?? 1) : 0;
+    if (!qty || qty <= 0) return p.size > 0 ? String(p.size) : '-';
+    return qty < 0.001 ? qty.toFixed(6) : qty < 1 ? qty.toFixed(4) : qty.toFixed(3);
+  })();
+
   const fmt$ = (v: number) =>
     `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -434,7 +442,7 @@ export default function PositionDetail() {
                 direction={direction ?? 'Long'}
                 rows={[
                   {
-                    leftLabel: '수량', leftValue: `${p.quantity ?? p.size ?? '-'} ${position.coin}`,
+                    leftLabel: '수량', leftValue: `${coinQty} ${position.coin}`,
                     rightLabel: '증거금', rightValue: showUsd ? `$${(position.amount / rate).toFixed(2)}` : formatKRW(position.amount),
                   },
                   {

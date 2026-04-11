@@ -18,6 +18,7 @@ import { useRef } from 'react';
 const VISIBLE_TABS = [
   { name: 'home',      label: '홈' },
   { name: 'positions', label: '트레이딩' },
+  { name: 'analysis',  label: '분석' },
   { name: 'account',   label: '계정' },
 ];
 
@@ -149,6 +150,7 @@ export default function MainLayout() {
     >
       <Tabs.Screen name="home"      options={{ title: '홈' }} />
       <Tabs.Screen name="positions" options={{ title: '트레이딩' }} />
+      <Tabs.Screen name="analysis"  options={{ title: '분석' }} />
       <Tabs.Screen name="account"   options={{ title: '계정' }} />
     </Tabs>
   );

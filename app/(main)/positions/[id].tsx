@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, ScrollView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
-import { Text, GlassCard, Badge, SubPageHeader, ScreenTransition, PositionDetailSkeleton, AnimatedNumber } from '@/design-system';
+import { Text, GlassCard, Badge, SubPageHeader, ScreenTransition, PositionDetailSkeleton, AnimatedNumber, CurrencyToggle } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
@@ -239,126 +239,120 @@ const score_ = StyleSheet.create({
 });
 
 // ─── 가격 레인지 시각화 ───────────────────────────────────────────────────────
-function PriceRangeBar({
+// ─── 미니 가격 바 (통합 손익 카드 우측) ──────────────────────────────────────
+// ─── 가격 차트 (full-width) ──────────────────────────────────────────────────
+function PriceChart({
   entry, current, tp, sl, direction,
 }: {
-  entry: number; current: number; tp: number | null; sl: number | null; direction: 'Long' | 'Short';
+  entry: number; current: number;
+  tp?: number | null; sl?: number | null;
+  direction: 'Long' | 'Short';
 }) {
-  if (!tp && !sl) return null;
+  const prices = [entry, current, tp ?? 0, sl ?? 0].filter(Boolean) as number[];
+  if (prices.length < 2) return null;
 
-  const prices = [entry, current, tp, sl].filter(Boolean) as number[];
-  const high = Math.max(...prices) * 1.002;
-  const low  = Math.min(...prices) * 0.998;
+  const high  = Math.max(...prices) * 1.002;
+  const low   = Math.min(...prices) * 0.998;
   const range = high - low;
   if (range <= 0) return null;
 
-  const toY = (p: number) => ((high - p) / range) * 100; // 0=top 100=bottom
+  const toY   = (p: number) => ((high - p) / range) * 100;
+  const fmt   = (v: number) => `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-  const fmt = (v: number) => `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const entryY   = toY(entry);
   const currentY = toY(current);
-  const tpY      = tp ? toY(tp)   : null;
-  const slY      = sl ? toY(sl)   : null;
+  const tpY      = (tp && tp > 0) ? toY(tp) : null;
+  const slY      = (sl && sl > 0) ? toY(sl) : null;
 
-  // profit zone top and bottom %
-  const profitTop    = tpY    !== null ? Math.min(entryY, tpY)    : entryY;
-  const profitBottom = tpY    !== null ? Math.max(entryY, tpY)    : entryY;
-  const lossTop      = slY    !== null ? Math.min(entryY, slY)    : entryY;
-  const lossBottom   = slY    !== null ? Math.max(entryY, slY)    : entryY;
+  const isLong    = direction === 'Long';
+  const isWinning = isLong ? current >= entry : current <= entry;
+  const currentColor = isWinning ? '#F04452' : '#246CF9';  // KR convention
 
   const rr = tp && sl
     ? (Math.abs(tp - entry) / Math.abs(entry - sl)).toFixed(2)
     : null;
 
   return (
-    <View style={prv.wrap}>
-      <Text style={prv.title}>가격 레인지</Text>
-      <View style={prv.chartArea}>
-        {/* 바 컨테이너 */}
-        <View style={prv.bar}>
-          {/* 수익 구간 (초록) */}
+    <View style={pc.wrap}>
+      <View style={pc.chartArea}>
+        {/* 세로 바 */}
+        <View style={pc.bar}>
           {tpY !== null && (
-            <View style={[prv.zone, {
-              top:    `${profitTop}%` as any,
-              height: `${Math.abs(profitBottom - profitTop)}%` as any,
-              backgroundColor: '#1AC24E22',
+            <View style={[pc.zone, {
+              top:    `${Math.min(entryY, tpY)}%` as any,
+              height: `${Math.max(Math.abs(tpY - entryY), 1)}%` as any,
+              backgroundColor: '#F0445218',
             }]} />
           )}
-          {/* 손실 구간 (빨강) */}
           {slY !== null && (
-            <View style={[prv.zone, {
-              top:    `${lossTop}%` as any,
-              height: `${Math.abs(lossBottom - lossTop)}%` as any,
-              backgroundColor: '#FF474722',
+            <View style={[pc.zone, {
+              top:    `${Math.min(entryY, slY)}%` as any,
+              height: `${Math.max(Math.abs(slY - entryY), 1)}%` as any,
+              backgroundColor: '#246CF918',
             }]} />
           )}
-          {/* TP 선 */}
           {tpY !== null && (
-            <View style={[prv.line, { top: `${tpY}%` as any, backgroundColor: '#1AC24E' }]} />
+            <View style={[pc.line, { top: `${tpY}%` as any, backgroundColor: '#F04452' }]} />
           )}
-          {/* SL 선 */}
           {slY !== null && (
-            <View style={[prv.line, { top: `${slY}%` as any, backgroundColor: '#FF4747' }]} />
+            <View style={[pc.line, { top: `${slY}%` as any, backgroundColor: '#246CF9' }]} />
           )}
-          {/* 진입가 선 */}
-          <View style={[prv.line, { top: `${entryY}%` as any, backgroundColor: colors.text.tertiary }]} />
-          {/* 현재가 마커 */}
-          <View style={[prv.dot, { top: `${currentY}%` as any, marginTop: -6,
-            backgroundColor: current >= entry
-              ? (direction === 'Long' ? '#1AC24E' : '#FF4747')
-              : (direction === 'Long' ? '#FF4747' : '#1AC24E'),
+          <View style={[pc.line, { top: `${entryY}%` as any, backgroundColor: colors.text.tertiary }]} />
+          <View style={[pc.line, {
+            top: `${currentY}%` as any,
+            backgroundColor: currentColor,
+            height: 2,
           }]} />
         </View>
 
         {/* 라벨 */}
-        <View style={prv.labels}>
+        <View style={pc.labels}>
           {tpY !== null && tp && (
-            <View style={[prv.labelRow, { top: `${tpY}%` as any, marginTop: -10 }]}>
-              <Text style={[prv.labelKey, { color: '#1AC24E' }]}>TP</Text>
-              <Text style={[prv.labelVal, { color: '#1AC24E' }]}>{fmt(tp)}</Text>
+            <View style={[pc.labelRow, { top: `${tpY}%` as any, marginTop: -10 }]}>
+              <Text style={[pc.labelKey, { color: '#F04452' }]}>TP</Text>
+              <Text style={[pc.labelVal, { color: '#F04452' }]}>{fmt(tp)}</Text>
             </View>
           )}
-          <View style={[prv.labelRow, { top: `${currentY}%` as any, marginTop: -10 }]}>
-            <Text style={[prv.labelKey, { color: colors.text.primary, fontWeight: '700' }]}>현재</Text>
-            <Text style={[prv.labelVal, { color: colors.text.primary, fontWeight: '700' }]}>{fmt(current)}</Text>
+          <View style={[pc.labelRow, { top: `${currentY}%` as any, marginTop: -10 }]}>
+            <Text style={[pc.labelKey, { color: currentColor, fontWeight: '700' }]}>현재</Text>
+            <Text style={[pc.labelVal, { color: currentColor, fontWeight: '700' }]}>{fmt(current)}</Text>
           </View>
-          <View style={[prv.labelRow, { top: `${entryY}%` as any, marginTop: -10 }]}>
-            <Text style={prv.labelKey}>진입</Text>
-            <Text style={prv.labelVal}>{fmt(entry)}</Text>
+          <View style={[pc.labelRow, { top: `${entryY}%` as any, marginTop: -10 }]}>
+            <Text style={pc.labelKey}>진입</Text>
+            <Text style={pc.labelVal}>{fmt(entry)}</Text>
           </View>
           {slY !== null && sl && (
-            <View style={[prv.labelRow, { top: `${slY}%` as any, marginTop: -10 }]}>
-              <Text style={[prv.labelKey, { color: '#FF4747' }]}>SL</Text>
-              <Text style={[prv.labelVal, { color: '#FF4747' }]}>{fmt(sl)}</Text>
+            <View style={[pc.labelRow, { top: `${slY}%` as any, marginTop: -10 }]}>
+              <Text style={[pc.labelKey, { color: '#246CF9' }]}>SL</Text>
+              <Text style={[pc.labelVal, { color: '#246CF9' }]}>{fmt(sl)}</Text>
             </View>
           )}
         </View>
       </View>
       {rr && (
-        <View style={prv.rrRow}>
-          <Text style={prv.rrLabel}>R:R</Text>
-          <Text style={prv.rrVal}>1 : {rr}</Text>
+        <View style={pc.rrRow}>
+          <Text style={pc.rrLabel}>R:R</Text>
+          <Text style={pc.rrVal}>1 : {rr}</Text>
         </View>
       )}
     </View>
   );
 }
-const prv = StyleSheet.create({
-  wrap:      { paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border.default },
-  title:     { fontSize: 13, fontWeight: '700', color: colors.text.tertiary, marginBottom: 12, letterSpacing: 0.3 },
-  chartArea: { flexDirection: 'row', height: 200 },
-  bar:       { width: 16, marginRight: 0, position: 'relative', backgroundColor: colors.bg.elevated, borderRadius: 4 },
+const pc = StyleSheet.create({
+  wrap:      { paddingBottom: 4 },
+  chartArea: { flexDirection: 'row', height: 140, marginBottom: 4 },
+  bar:       { width: 16, position: 'relative', backgroundColor: colors.bg.elevated, borderRadius: 4 },
   zone:      { position: 'absolute', left: 0, right: 0 },
-  line:      { position: 'absolute', left: 0, right: 0, height: 1 },
-  dot:       { position: 'absolute', left: -5, width: 12, height: 12, borderRadius: 6 },
+  line:      { position: 'absolute', left: 0, right: 0, height: 1.5 },
   labels:    { flex: 1, marginLeft: 12, position: 'relative' },
   labelRow:  { position: 'absolute', left: 0, right: 0, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   labelKey:  { fontSize: 12, color: colors.text.tertiary, fontWeight: '500', width: 32 },
   labelVal:  { fontSize: 12, color: colors.text.secondary, fontWeight: '500' },
-  rrRow:     { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
-  rrLabel:   { fontSize: 13, color: colors.text.tertiary, fontWeight: '600' },
-  rrVal:     { fontSize: 13, color: colors.text.primary, fontWeight: '700' },
+  rrRow:     { flexDirection: 'row', justifyContent: 'space-between', paddingTop: 8 },
+  rrLabel:   { fontSize: 12, color: colors.text.tertiary, fontWeight: '600' },
+  rrVal:     { fontSize: 12, color: colors.text.primary, fontWeight: '700' },
 });
+
 
 // ─── 정보 행 ─────────────────────────────────────────────────────────────────
 function InfoRow({
@@ -412,9 +406,9 @@ export default function PositionDetail() {
     [id],
   );
 
-  // 스토어에서 실시간 포지션 (5초마다 갱신)
-  const { accounts, positions: allPositions } = useAccounts();
-  const livePosition = allPositions.find((p) => p.id === id) ?? null;
+  const [showUsd, setShowUsd] = useState(false);
+  const { accounts, totalBalance } = useAccounts();
+  const rate = totalBalance?.usdtKrw ?? 1350;
   // 라이브 데이터 우선, 없으면 초기 캐시 데이터 사용
   const position = livePosition ?? cachedPosition;
 
@@ -510,7 +504,11 @@ export default function PositionDetail() {
   return (
     <ScreenTransition>
       <SafeAreaView style={st.safe} edges={['top']}>
-        <SubPageHeader title="포지션 상세" onBack={() => router.navigate('/(main)/positions')} />
+        <SubPageHeader
+          title="포지션 상세"
+          onBack={() => router.back()}
+          rightElement={<CurrencyToggle showUsd={showUsd} onToggle={() => setShowUsd((v) => !v)} />}
+        />
 
         <ScrollView contentContainerStyle={st.content} showsVerticalScrollIndicator={false}>
           {isLoading ? (
@@ -548,6 +546,112 @@ export default function PositionDetail() {
                     <Text style={st.subText}>보유 {position.holdingPeriod ?? '-'}</Text>
                   </View>
                 </View>
+              </GlassCard>
+
+              {/* ── 통합 손익/가격 카드 ─────────────────── */}
+              <GlassCard intensity="medium" radius={24} padding={24} style={st.section}>
+                {/* PNL */}
+                <Text style={st.pnlLabel}>평가손익</Text>
+                <AnimatedNumber
+                  value={showUsd ? position.profit / rate : position.profit}
+                  formatter={showUsd
+                    ? (v) => `${v >= 0 ? '+' : ''}$${Math.abs(v).toFixed(2)}`
+                    : formatKRWSigned
+                  }
+                  fontSize={30}
+                  fontWeight="700"
+                  color={pnlColor}
+                  letterSpacing={-0.5}
+                  style={{ marginBottom: 6 }}
+                />
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+                  <View style={[st.rateBadge, { backgroundColor: isProfit ? colors.market.riseSubtle : colors.market.fallSubtle }]}>
+                    <AnimatedNumber
+                      value={position.profitRate}
+                      formatter={formatRate}
+                      fontSize={14}
+                      fontWeight="700"
+                      color={pnlColor}
+                    />
+                  </View>
+                </View>
+
+                {/* 가격 차트 */}
+                <PriceChart
+                  entry={position.entryPrice}
+                  current={position.currentPrice ?? position.markPrice}
+                  tp={position.targetPrice}
+                  sl={position.stopLoss}
+                  direction={direction ?? 'Long'}
+                />
+
+                {/* Row 1: 수량 | 증거금 */}
+                <View style={st.amountRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={st.amountLabel}>수량</Text>
+                    <Text style={st.amountValue}>{p.quantity ?? p.size ?? '-'} {position.coin}</Text>
+                  </View>
+                  <View style={st.amountDivider} />
+                  <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                    <Text style={st.amountLabel}>증거금</Text>
+                    <Text style={st.amountValue}>
+                      {showUsd ? `$${(position.amount / rate).toFixed(2)}` : formatKRW(position.amount)}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Row 2: 진입가 | 현재가 */}
+                <View style={st.gridRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={st.amountLabel}>진입가</Text>
+                    <Text style={st.amountValue}>{fmt$(position.entryPrice)}</Text>
+                  </View>
+                  <View style={st.amountDivider} />
+                  <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                    <Text style={st.amountLabel}>현재가</Text>
+                    <Text style={[st.amountValue, { color: pnlColor }]}>{fmt$(position.currentPrice ?? position.markPrice)}</Text>
+                  </View>
+                </View>
+
+                {/* Row 3: 청산가 | 평가금액 */}
+                <View style={st.gridRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={st.amountLabel}>청산가</Text>
+                    <Text style={[st.amountValue, p.liqPrice > 0 ? { color: colors.negative.text } : {}]}>
+                      {p.liqPrice > 0 ? fmt$(p.liqPrice) : '-'}
+                    </Text>
+                  </View>
+                  <View style={st.amountDivider} />
+                  <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                    <Text style={st.amountLabel}>평가금액</Text>
+                    <AnimatedNumber
+                      value={showUsd ? (position.currentValue ?? 0) / rate : (position.currentValue ?? 0)}
+                      formatter={showUsd ? (v) => `$${v.toFixed(2)}` : formatKRW}
+                      fontSize={15}
+                      fontWeight="700"
+                      color={colors.text.primary}
+                    />
+                  </View>
+                </View>
+
+                {/* Row 4 (조건부): 손절가 | 목표가 */}
+                {(position.stopLoss! > 0 || position.targetPrice! > 0) && (
+                  <View style={st.gridRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={st.amountLabel}>손절가</Text>
+                      <Text style={[st.amountValue, position.stopLoss! > 0 ? { color: colors.negative.text } : {}]}>
+                        {position.stopLoss! > 0 ? fmt$(position.stopLoss!) : '-'}
+                      </Text>
+                    </View>
+                    <View style={st.amountDivider} />
+                    <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                      <Text style={st.amountLabel}>목표가</Text>
+                      <Text style={[st.amountValue, position.targetPrice! > 0 ? { color: colors.positive.text } : {}]}>
+                        {position.targetPrice! > 0 ? fmt$(position.targetPrice!) : '-'}
+                      </Text>
+                    </View>
+                  </View>
+                )}
               </GlassCard>
 
               {/* ── ICT 분석 ────────────────────────────── */}

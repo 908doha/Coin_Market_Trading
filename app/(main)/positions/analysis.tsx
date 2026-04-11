@@ -495,7 +495,7 @@ const ha = StyleSheet.create({
 //    채권이자  →  손익비
 //    계좌이자  →  승률
 // ─────────────────────────────────────────────────────────────────────────────
-type SummaryItem = { label: string; value: string; blue?: string; color?: string };
+type SummaryItem = { label: string; value: string; blue?: string; blueColor?: string; color?: string };
 
 function SummaryRow({ item, isLast }: { item: SummaryItem; isLast?: boolean }) {
   return (
@@ -505,7 +505,11 @@ function SummaryRow({ item, isLast }: { item: SummaryItem; isLast?: boolean }) {
         <Text style={[sl.value, item.color ? { color: item.color } : undefined]}>
           {item.value}
         </Text>
-        {item.blue ? <Text style={sl.blue}>{item.blue}</Text> : null}
+        {item.blue ? (
+          <Text style={[sl.blue, item.blueColor ? { color: item.blueColor } : undefined]}>
+            {item.blue}
+          </Text>
+        ) : null}
       </View>
     </View>
   );
@@ -515,10 +519,11 @@ function SummaryList({ stats, hasData, showUsd, rate }: {
 }) {
   const items: SummaryItem[] = [
     {
-      label: '실현손익',
-      value: hasData ? fmtPnl(stats.totalPnl, showUsd, rate) : (showUsd ? '$0.00' : '0원'),
-      blue : hasData ? `(${stats.profitRate >= 0 ? '+' : ''}${stats.profitRate.toFixed(1)}%)` : undefined,
-      color: hasData ? pnlColor(stats.totalPnl) : C.textGray,
+      label:     '실현손익',
+      value:     hasData ? fmtPnl(stats.totalPnl, showUsd, rate) : (showUsd ? '$0.00' : '0원'),
+      blue:      hasData ? `(${stats.profitRate >= 0 ? '+' : ''}${stats.profitRate.toFixed(1)}%)` : undefined,
+      blueColor: hasData ? pnlColor(stats.profitRate) : undefined,
+      color:     hasData ? pnlColor(stats.totalPnl) : C.textGray,
     },
     {
       label: '수익 거래',

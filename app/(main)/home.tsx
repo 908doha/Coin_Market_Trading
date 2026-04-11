@@ -722,7 +722,7 @@ function AccountRow({
             <AnimatedNumber
               value={balance.profitRate}
               formatter={formatRate}
-              fontSize={12}
+              fontSize={13}
               fontWeight="600"
               color={isProfit ? colors.market.rise : colors.market.fall}
               style={{ marginTop: 2 }}

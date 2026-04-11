@@ -17,7 +17,7 @@ export function SubPageHeader({ title, rightElement, onBack }: SubPageHeaderProp
         <MaterialIcons name="arrow-back-ios-new" size={22} color="#191919" />
       </Pressable>
       <Text style={styles.title}>{title}</Text>
-      <View style={{ width: 40 }}>{rightElement}</View>
+      <View style={{ minWidth: 40, alignItems: 'flex-end' }}>{rightElement}</View>
     </View>
   );
 }

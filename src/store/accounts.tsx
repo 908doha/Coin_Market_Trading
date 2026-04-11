@@ -164,9 +164,8 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
   const [balances, setBalances]          = useState<Record<string, Balance | null>>({});
   const [balanceErrors, setBalErrors]    = useState<Record<string, string | null>>({});
   const [balancesLoading, setBalLoading] = useState(false);
-  const [positions, setPositions]        = useState<Position[]>([]);
-  const accountsRef        = useRef(accounts);
-  const isFirstBalLoad     = useRef(true);
+  const accountsRef     = useRef(accounts);
+  const firstBalLoad    = useRef(true);   // skeleton은 최초 1회만
   accountsRef.current = accounts;
 
   // 앱 시작 + 토큰 변경 시: 로컬 → 백엔드 순서로 로드
@@ -211,10 +210,8 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
   const refreshBalances = useCallback(async () => {
     const list = accountsRef.current;
     if (!list.length) return;
-
-    const firstLoad = isFirstBalLoad.current;
-    if (firstLoad) setBalLoading(true);
-
+    // 스켈레톤은 최초 로드 한 번만, 이후 갱신은 AnimatedNumber 룰렛만 사용
+    if (firstBalLoad.current) setBalLoading(true);
     const results = await Promise.all(
       list.map(async (acc) => {
         try {
@@ -236,23 +233,8 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     results.forEach(({ id, bal, err }) => { map[id] = bal; errMap[id] = err; });
     setBalances(map);
     setBalErrors(errMap);
-
-    if (firstLoad) {
-      setBalLoading(false);
-      isFirstBalLoad.current = false;
-    }
-  }, []);
-
-  // 포지션 silent refresh (로딩 표시 없이 갱신)
-  const refreshPositions = useCallback(async () => {
-    const list = accountsRef.current;
-    if (!list.length) return;
-    try {
-      const pos = await positionsService.getAllByAccounts(list);
-      setPositions(pos);
-    } catch (e) {
-      console.error('[positions] refresh error:', e);
-    }
+    setBalLoading(false);
+    firstBalLoad.current = false;
   }, []);
 
   useEffect(() => {

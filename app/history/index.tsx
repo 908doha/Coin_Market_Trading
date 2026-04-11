@@ -321,7 +321,7 @@ function NavRow({
 }) {
   return (
     <View style={nr.row}>
-      <Text style={nr.label}>{label} 실현수익</Text>
+      <Text style={nr.label}>{label}</Text>
       <View style={nr.btns}>
         <Pressable style={nr.btn} onPress={onPrev} hitSlop={10}>
           <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
@@ -642,7 +642,7 @@ export default function History() {
               />
             ) : (
               <View style={{ paddingVertical: 14, paddingHorizontal: 20 }}>
-                <Text style={{ fontSize: 15, fontWeight: '700', color: '#191919' }}>전체 기간 실현수익</Text>
+                <Text style={{ fontSize: 15, fontWeight: '700', color: '#191919' }}>전체 기간</Text>
               </View>
             )}
 

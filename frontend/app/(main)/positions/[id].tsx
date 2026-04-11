@@ -296,15 +296,15 @@ function MiniPriceBar({
 }
 const mpb = StyleSheet.create({
   container: {
-    width: 44,
+    width: 100,
     alignSelf: 'stretch',
     backgroundColor: colors.bg.elevated,
     borderRadius: 14,
-    padding: 8,
+    padding: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  bar:  { width: 10, flex: 1, minHeight: 80, position: 'relative', backgroundColor: colors.bg.subtle, borderRadius: 5 },
+  bar:  { width: 14, flex: 1, minHeight: 90, position: 'relative', backgroundColor: colors.bg.subtle, borderRadius: 6 },
   zone: { position: 'absolute', left: 0, right: 0 },
   line: { position: 'absolute', left: 0, right: 0, height: 1.5 },
   dot:  { position: 'absolute', left: -5, width: 10, height: 10, borderRadius: 5 },
@@ -796,17 +796,6 @@ export default function PositionDetail() {
                           </View>
                         ))}
                       </View>
-                    )}
-
-                    {/* 가격 레인지 시각화 */}
-                    {ictAnalysis.summary.entry != null && (
-                      <PriceRangeBar
-                        entry={ictAnalysis.summary.entry}
-                        current={ictAnalysis.currentPrice}
-                        tp={ictAnalysis.summary.tp}
-                        sl={ictAnalysis.summary.sl}
-                        direction={direction ?? 'Long'}
-                      />
                     )}
 
                     {/* 종합 판단 */}

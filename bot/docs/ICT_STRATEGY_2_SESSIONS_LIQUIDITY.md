@@ -1,6 +1,6 @@
 # ICT 전략 시리즈 2: 세션 시스템 & 유동성 레벨
 
-> v2.0.0 | 2026-04-06
+> v3.0.0 | 2026-04-12 | ictStrategy.js 기준
 
 ---
 
@@ -25,64 +25,90 @@
 ### 1.3 규칙
 - **점심시간 자동 제외**: 각 세션의 점심시간에는 진입하지 않음
 - **주말 자동 제외**: 토요일/일요일(UTC)에는 진입하지 않음
-- 세션 외 시간에는 진입하지 않음
+- **세션 외 시간**: 신호가 있어도 자동 매매하지 않음
+- **텔레그램 /analyze**: 세션 외에서도 분석 리포트는 조회 가능 (정보 표시용)
 
 ---
 
-## 2. PDH/PDL (Previous Day High/Low)
-
-### 2.1 정의
-- **PDH**: 전일 고가 (UTC 기준 00:00~24:00)
-- **PDL**: 전일 저가
-
-### 2.2 활용
-| 상황 | 의미 | 활용 |
-|------|------|------|
-| 가격이 PDH 돌파 후 복귀 | PDH Sweep (매도 유동성 포착) | Bearish 방향 보강 |
-| 가격이 PDL 돌파 후 복귀 | PDL Sweep (매수 유동성 포착) | Bullish 방향 보강 |
-| HTF 방향 불명확 + PDH Sweep | 하방 반전 신호 | Bearish 방향 결정 |
-| HTF 방향 불명확 + PDL Sweep | 상방 반전 신호 | Bullish 방향 결정 |
-
-### 2.3 SL 기준
-- Long: PDL 아래에 SL 설정 (3순위)
-- Short: PDH 위에 SL 설정 (3순위)
-
----
-
-## 3. Session Range
-
-### 3.1 정의
-각 세션(Asian/London/NY)의 **당일** 고가/저가 레인지.
-
-### 3.2 활용
-| 상황 | 의미 |
-|------|------|
-| Asian Range 형성 → London에서 돌파 | Asian 유동성 포착 후 트렌드 시작 |
-| London Range 형성 → NY에서 돌파 | London 유동성 포착 |
-| Session Range High Sweep | 해당 세션 고가 위 유동성 포착 → 하방 가능 |
-| Session Range Low Sweep | 해당 세션 저가 아래 유동성 포착 → 상방 가능 |
-
-### 3.3 출력 예시
-```
-Asian:    82,100 ~ 82,800 (range: 700)
-London:   82,000 ~ 83,500 (range: 1,500)
-New York: 83,200 ~ 84,100 (range: 900)
-```
-
----
-
-## 4. 유동성 레벨 요약
+## 2. 유동성 레벨 맵
 
 ```
-── PDH ──────────────── (전일 고가)
-── Session High ─────── (세션 고가)
-── 스윙 하이 ─────────── (구조적 고점)
+── PDH ──────────────────── (전일 고가) ─── Short TP / Bearish 방향 보강
+── HTF Swing High ─────── (4h 구조적 고점) ─── BSL, Long TP 타겟
+── MTF Swing High ─────── (15m 고점) ─── BSL
+── Session High ──────── (세션 고가) ─── Session Range Sweep
                         
-     현재가 ●
+     현재가 *
                         
-── 스윙 로우 ─────────── (구조적 저점)
-── Session Low ──────── (세션 저가)
-── PDL ──────────────── (전일 저가)
+── Session Low ───────── (세션 저가) ─── Session Range Sweep
+── MTF Swing Low ──────── (15m 저점) ─── SSL
+── HTF Swing Low ──────── (4h 구조적 저점) ─── SSL, Short TP 타겟
+── PDL ──────────────────── (전일 저가) ─── Long TP / Bullish 방향 보강
 ```
 
-각 레벨은 유동성이 모여있는 곳으로, 가격이 이 레벨을 Sweep 후 반전하면 진입 근거가 됨.
+---
+
+## 3. 유동성 레벨별 역할
+
+### 3.1 TP 구조적 타겟 (가까운 순)
+
+**Long TP 후보**:
+1. HTF Swing High (opposing BSL)
+2. PDH
+3. MTF Opposing OB (bearish OB 하단)
+4. HTF Opposing OB (bearish OB 하단)
+5. HTF Opposing FVG (bearish FVG 하단)
+6. 폴백: risk x 2.5
+
+**Short TP 후보**:
+1. HTF Swing Low (opposing SSL)
+2. PDL
+3. MTF Opposing OB (bullish OB 상단)
+4. HTF Opposing OB (bullish OB 상단)
+5. HTF Opposing FVG (bullish FVG 상단)
+6. 폴백: risk x 2.5
+
+### 3.2 SL 구조적 후보 (우선순위)
+
+**Long SL**:
+1. HTF OB 하단 (리스크 3% 이내)
+2. MTF OB 하단
+3. LTF Swing Low
+4. PDL
+5. 고정 비율 (config.stopLossPercent, 기본 2%)
+
+**Short SL**:
+1. HTF OB 상단 (리스크 3% 이내)
+2. MTF OB 상단
+3. LTF Swing High
+4. PDH
+5. 고정 비율
+
+---
+
+## 4. 멀티 페어 운영
+
+### 4.1 지원 페어
+```
+TRADE_PAIRS=BTC_USDT,ETH_USDT,XAG_USDT,XAUT_USDT,XBR_USDT,XTI_USDT
+```
+
+봇 시작 시 Gate.io API로 각 페어 검증. 없는 심볼은 자동 제외.
+
+### 4.2 동시 포지션 제한
+- `MAX_POSITIONS`: 최대 동시 포지션 수 (기본 3)
+- 한도 도달 시 새 진입 스킵, 기존 포지션 모니터링만
+
+### 4.3 총 노출 상한
+- `KELLY_MAX_TOTAL_EXPOSURE = 0.5`: 전 페어 합산 레버리지 노출이 잔고의 50% 이내
+- 초과 시 해당 진입의 레버리지 노출을 남은 한도로 축소
+
+---
+
+## 5. 일일 손실 한도
+
+| 항목 | 설명 | 기본값 |
+|------|------|--------|
+| `MAX_DAILY_LOSS_USDT` | 한도 도달 시 당일 모든 페어 매매 중단 | 10 USDT |
+| 날짜 변경 | 일일 PnL 자동 초기화 (00:00 UTC) | - |
+| 영구 저장 | `bot/data/kelly-stats.json`에 일일 PnL 저장, 봇 재시작해도 유지 | - |

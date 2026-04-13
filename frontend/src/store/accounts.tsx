@@ -12,6 +12,7 @@ import { exchangeService } from '../services/exchange.service';
 import { positionsService } from '../services/positions.service';
 import type { Balance } from '../services/account.service';
 import type { Position } from '../services/positions.service';
+import { saveIctSnapshot, loadIctSnapshot } from '../utils/ictSnapshot';
 
 export type ExchangeType = 'binance' | 'upbit' | 'bybit' | 'okx' | 'gate' | 'custom';
 
@@ -165,8 +166,9 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
   const [balanceErrors, setBalErrors]    = useState<Record<string, string | null>>({});
   const [balancesLoading, setBalLoading] = useState(false);
   const [positions, setPositions]        = useState<Position[]>([]);
-  const accountsRef     = useRef(accounts);
-  const firstBalLoad    = useRef(true);   // skeleton은 최초 1회만
+  const accountsRef       = useRef(accounts);
+  const firstBalLoad      = useRef(true);   // skeleton은 최초 1회만
+  const capturedContracts = useRef<Set<string>>(new Set()); // 이번 세션에 ICT 캡처 시도한 계약
   accountsRef.current = accounts;
 
   // 앱 시작 + 토큰 변경 시: 로컬 → 백엔드 순서로 로드
@@ -238,13 +240,43 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     firstBalLoad.current = false;
   }, []);
 
-  // 포지션 silent refresh (로딩 표시 없이 갱신)
+  // 포지션 silent refresh (로딩 표시 없이 갱신) + 신규 포지션 ICT 스냅샷 자동 캡처
   const refreshPositions = useCallback(async () => {
     const list = accountsRef.current;
     if (!list.length) return;
     try {
       const pos = await positionsService.getAllByAccounts(list);
       setPositions(pos);
+
+      // 신규 포지션(또는 재진입) 감지 → ICT 스냅샷 자동 캡처
+      for (const p of pos) {
+        const contract = p.symbol.replace('/', '_');
+        const entryAt  = (p as any).entryAt ?? '';
+        const sessionKey = `${contract}_${entryAt}`;
+
+        // 이번 세션에 이미 처리했으면 스킵
+        if (capturedContracts.current.has(sessionKey)) continue;
+        capturedContracts.current.add(sessionKey);
+
+        // 저장된 스냅샷이 같은 진입 시간이면 재사용
+        const stored = loadIctSnapshot(contract);
+        if (stored && stored.entryAt === entryAt) continue;
+
+        // 새 포지션 진입 → 백그라운드로 ICT 분석 캡처
+        const account = list.find((a) => a.id === (p as any).accountId) ?? list[0];
+        if (!account?.apiKey || !account?.apiSecret) continue;
+
+        fetch('/api/ict-analyze', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ apiKey: account.apiKey, apiSecret: account.apiSecret, contract }),
+        })
+          .then((r) => r.json())
+          .then((data) => {
+            if (data?.htf !== undefined) saveIctSnapshot(contract, entryAt, data);
+          })
+          .catch(() => {});
+      }
     } catch (e) {
       console.error('[positions] refresh error:', e);
     }

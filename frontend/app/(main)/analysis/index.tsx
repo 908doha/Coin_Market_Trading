@@ -526,7 +526,6 @@ export default function Analysis() {
                       </View>
                       <View style={{ alignItems: 'flex-end', gap: 4 }}>
                         <Skeleton width={48} height={14} radius={5} />
-                        <Skeleton width={44} height={28} radius={8} />
                       </View>
                     </View>
                   ))}

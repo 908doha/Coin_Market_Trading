@@ -562,6 +562,18 @@ export default function PositionDetail() {
   const direction = position?.direction;
   const p         = position as any;
 
+  // 실제 코인 수량: notional(USD) / 진입가
+  const coinQty = (() => {
+    const usdtKrw   = p?.usdtKrw ?? 1350;
+    const notional  = (position?.currentValue ?? 0) / usdtKrw;
+    const entry     = position?.entryPrice ?? 0;
+    if (entry <= 0) return null;
+    const qty = notional / entry;
+    // 소수점 자리수 결정 (코인 가격대에 따라)
+    const decimals = qty >= 1 ? 4 : qty >= 0.001 ? 6 : 8;
+    return qty.toFixed(decimals);
+  })();
+
   const fmt$ = (v: number) =>
     `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -661,7 +673,7 @@ export default function PositionDetail() {
                 <View style={st.amountRow}>
                   <View style={{ flex: 1 }}>
                     <Text style={st.amountLabel}>수량</Text>
-                    <Text style={st.amountValue}>{p.quantity ?? p.size ?? '-'} {position.coin}</Text>
+                    <Text style={st.amountValue}>{coinQty ?? p.size ?? '-'} {position.coin}</Text>
                   </View>
                   <View style={st.amountDivider} />
                   <View style={{ flex: 1, alignItems: 'flex-end' }}>

@@ -865,7 +865,7 @@ export default function Home() {
 
           {accounts.length === 0 ? (
             <PressableScale onPress={() => router.push('/(main)/account/api-accounts')} scaleTo={0.98}>
-              <GlassCard intensity="low" radius={20} padding={20} style={styles.section}>
+              <GlassCard intensity="low" radius={20} padding={0} style={styles.section}>
                 <View style={styles.emptyAccounts}>
                   <Text style={{ fontSize: 24 }}>🔌</Text>
                   <Text style={styles.emptyAccountsText}>API를 연결하면 여기에 표시돼요</Text>
@@ -891,16 +891,16 @@ export default function Home() {
           )}
 
           {/* ── 활성 포지션 ── */}
-          <GlassCard intensity="low" radius={20} padding={20} style={styles.section}>
+          <GlassCard intensity="low" radius={20} padding={0} style={styles.section}>
             <PressableScale onPress={() => router.push('/(main)/positions')} scaleTo={0.98}>
-              <View style={styles.posHeader}>
+              <View style={[styles.posHeader, { paddingHorizontal: 20, paddingTop: 20 }]}>
                 <Text style={styles.sectionTitle}>활성 포지션</Text>
                 <Text style={styles.posArrow}>›</Text>
               </View>
             </PressableScale>
 
             {!positions?.length ? (
-              <View style={{ paddingTop: 16, alignItems: 'center' }}>
+              <View style={{ paddingTop: 16, paddingHorizontal: 20, alignItems: 'center' }}>
                 <Text style={styles.emptyText}>현재 활성 포지션이 없어요</Text>
               </View>
             ) : (() => {
@@ -930,7 +930,7 @@ export default function Home() {
                         return (
                           <PressableScale
                             key={pos.id}
-                            onPress={() => router.push(`/(main)/positions/${pos.id}`)}
+                            onPress={() => router.push(`/positions/${pos.id}`)}
                             style={[styles.posItem, idx > 0 && { marginTop: 10 }]}
                           >
                             <View style={styles.posRow}>
@@ -1009,7 +1009,7 @@ const styles = StyleSheet.create({
   posArrow:        { fontSize: 22, color: colors.text.disabled, lineHeight: 26 },
   posAccountLabel: { fontSize: 12, fontWeight: '600', color: colors.text.tertiary, marginTop: 14, marginBottom: 6, letterSpacing: 0.3 },
   posItem:         { marginTop: 0 },
-  posRow:          { flexDirection: 'row', alignItems: 'center', gap: spacing[3], paddingVertical: 8 },
+  posRow:          { flexDirection: 'row', alignItems: 'center', gap: spacing[3], paddingVertical: 14, paddingHorizontal: 20 },
   posIcon:      { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
   posSymbol:    { fontSize: 15, fontWeight: '700', color: colors.text.primary },
   posProfit:    { fontSize: 15, fontWeight: '700' },

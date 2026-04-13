@@ -3,4 +3,13 @@
 * {
   font-family: 'PretendardVariable', 'Pretendard', -apple-system, BlinkMacSystemFont,
     'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif;
+  /* Prevent double-tap zoom on mobile */
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+input, textarea {
+  user-select: text;
+  -webkit-user-select: text;
 }

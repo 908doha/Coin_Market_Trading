@@ -1,47 +1,47 @@
 /**
  * Vercel Serverless Function
  * GET /api/market-scan
- * Returns top 50 Gate.io USDT futures by 24h volume (public — no auth needed)
+ *
+ * CoinGecko 시가총액 상위 50개 코인 조회
+ * → ICT 종목 스캔용 Ticker 형식으로 변환
  */
 
-export interface Ticker {
-  contract:     string;
-  symbol:       string;
-  coin:         string;
-  last:         number;
-  change24h:    number;   // %
-  volume24hUsd: number;   // USD
-  fundingRate:  number;   // 현재 펀딩비
-}
+export const config = { runtime: 'edge' };
 
-export default async function handler(req: any, res: any) {
-  res.setHeader('Access-Control-Allow-Origin',  '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
-  if (req.method === 'OPTIONS') { res.status(200).end(); return; }
-
+export default async function handler(req: Request) {
   try {
-    const r = await fetch('https://api.gateio.ws/api/v4/futures/usdt/tickers', {
-      headers: { Accept: 'application/json' },
+    const res = await fetch(
+      'https://api.coingecko.com/api/v3/coins/markets' +
+        '?vs_currency=usd&order=market_cap_desc&per_page=50&page=1' +
+        '&sparkline=false&price_change_percentage=24h',
+      { headers: { Accept: 'application/json' } },
+    );
+
+    if (!res.ok) throw new Error(`CoinGecko ${res.status}`);
+    const coins: any[] = await res.json();
+
+    const tickers = coins.map((c) => ({
+      contract:     c.symbol.toUpperCase() + '_USDT',
+      symbol:       c.symbol.toUpperCase() + 'USDT',
+      coin:         c.symbol.toUpperCase(),
+      name:         c.name,
+      last:         c.current_price ?? 0,
+      change24h:    c.price_change_percentage_24h ?? 0,
+      volume24hUsd: c.total_volume ?? 0,
+      fundingRate:  0,
+    }));
+
+    return new Response(JSON.stringify(tickers), {
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120',
+        'Access-Control-Allow-Origin': '*',
+      },
     });
-    if (!r.ok) throw new Error(`Gate.io tickers ${r.status}`);
-    const data: any[] = await r.json();
-
-    const tickers: Ticker[] = data
-      .filter((t) => (t.contract as string).endsWith('_USDT'))
-      .map((t) => ({
-        contract:     t.contract as string,
-        symbol:       (t.contract as string).replace('_', '/'),
-        coin:         (t.contract as string).replace('_USDT', ''),
-        last:         parseFloat(t.last               || '0'),
-        change24h:    parseFloat(t.change_percentage  || '0'),
-        volume24hUsd: parseFloat(t.volume_24h_usd     || t.volume_24h_settle || '0'),
-        fundingRate:  parseFloat(t.funding_rate        || '0'),
-      }))
-      .sort((a, b) => b.volume24hUsd - a.volume24hUsd)
-      .slice(0, 50);
-
-    res.status(200).json(tickers);
-  } catch (err: any) {
-    res.status(502).json({ error: err?.message ?? 'Failed to fetch tickers' });
+  } catch (e: any) {
+    return new Response(JSON.stringify({ error: e.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 }

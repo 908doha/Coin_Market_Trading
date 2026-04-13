@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
@@ -8,6 +8,8 @@ import { tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAccounts } from '@/store/accounts';
 import { CoinHeaderCard, PnlCard } from '@/components/PositionDetailCard';
+import IctAnalysisCard, { IctAnalysis } from '@/components/IctAnalysisCard';
+import { loadIctSnapshot } from '@/utils/ictSnapshot';
 
 export default function TradeDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -16,6 +18,14 @@ export default function TradeDetail() {
     () => tradesService.getById(id, accounts),
     [id],
   );
+
+  const [ictAnalysis, setIctAnalysis] = useState<IctAnalysis | null>(null);
+  useEffect(() => {
+    if (!trade) return;
+    const contract = trade.symbol.replace('/', '_');
+    const stored = loadIctSnapshot(contract);
+    if (stored?.analysis) setIctAnalysis(stored.analysis as IctAnalysis);
+  }, [trade?.symbol]);
 
   const fmt$ = (v: number) =>
     `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -72,6 +82,13 @@ export default function TradeDetail() {
                     },
                   ]}
                 />
+
+                {ictAnalysis && (
+                  <IctAnalysisCard
+                    ictAnalysis={ictAnalysis}
+                    direction={trade.direction as 'Long' | 'Short'}
+                  />
+                )}
 
                 <View style={{ height: 120 }} />
               </>

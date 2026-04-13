@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, ScrollView, Platform } from 'react-native';
+import { View, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Text, GlassCard, Badge, SubPageHeader, ScreenTransition, PositionDetailSkeleton, AnimatedNumber, CurrencyToggle } from '@/design-system';
@@ -9,237 +9,8 @@ import { useApi } from '@/hooks/useApi';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 import { useAccounts } from '@/store/accounts';
 import { CoinHeaderCard, PnlCard, PriceChart } from '@/components/PositionDetailCard';
-
-interface FvgInfo { ce: number; fillPct: number; }
-interface IctAnalysis {
-  contract:     string;
-  currentPrice: number;
-  session:      { active: boolean; name: string };
-  htf: {
-    timeframe: string; direction: string | null; structure: string | null;
-    swingHigh: number | null; swingLow: number | null;
-    pdh: number | null; pdl: number | null;
-    pdhSweep: boolean; pdlSweep: boolean;
-    ob: { bull: number; bear: number };
-    fvg: { bull: number; bear: number; lastBull: FvgInfo | null; lastBear: FvgInfo | null };
-    inPOI: boolean; poiType: string | null;
-  };
-  mtf: {
-    timeframe: string;
-    mss: { found: boolean; label?: string; kind?: string };
-    ob: { bull: number; bear: number };
-    fvg: { bull: number; bear: number; lastBull: FvgInfo | null; lastBear: FvgInfo | null };
-  };
-  ltf: {
-    timeframe:  string;
-    fvgCE:   { bull: number; bear: number };
-    fvgFill: { bull: number; bear: number };
-    iofed:   Array<{ type: string; bars: number }>;
-  };
-  sessions: Array<{ name: string; low: number; high: number; sweep: boolean }>;
-  summary: {
-    signal: string | null; reason: string;
-    confluence: string[];
-    entry: number | null; sl: number | null; tp: number | null; rr?: string | null;
-  };
-  score?: number;   // 0~100
-  grade?: string;   // S / A / B+ / B / C / D / F
-}
-
-// 구 BotSignal 호환 (폴백용)
-interface BotSignal {
-  signal:     string;
-  reason:     string;
-  confluence: string[];
-  entry:      number;
-  sl?:        number;
-  tp?:        number;
-  entryAt?:   string;
-}
-
-// ─── ICT 섹션 (HTF / MTF) ────────────────────────────────────────────────────
-function IctSection({
-  title, direction, structure, swingHigh, swingLow,
-  pdh, pdl, pdhSweep, pdlSweep, ob, fvg, inPOI, poiType, mss,
-}: {
-  title: string;
-  direction?: string | null; structure?: string | null;
-  swingHigh?: number | null; swingLow?: number | null;
-  pdh?: number | null; pdl?: number | null;
-  pdhSweep?: boolean; pdlSweep?: boolean;
-  ob: { bull: number; bear: number };
-  fvg: { bull: number; bear: number; lastBull: any; lastBear: any };
-  inPOI?: boolean; poiType?: string | null;
-  mss?: { found: boolean; label?: string };
-}) {
-  const dirColor = direction === 'BULLISH' ? '#1AC24E' : direction === 'BEARISH' ? '#FF4747' : colors.text.tertiary;
-  return (
-    <View style={ict.block}>
-      <Text style={ict.blockTitle}>{title}</Text>
-      {direction && (
-        <View style={ict.row}>
-          <Text style={[ict.val, { color: dirColor, fontWeight: '700' }]}>
-            {direction === 'BULLISH' ? '✅' : direction === 'BEARISH' ? '✅' : '⚠️'} {direction}
-            {structure ? ` (${structure})` : ''}
-          </Text>
-        </View>
-      )}
-      {mss !== undefined && (
-        <View style={ict.kv}>
-          <Text style={ict.kvKey}>MSS</Text>
-          <Text style={[ict.kvVal, mss.found && { color: '#1AC24E', fontWeight: '700' }]}>
-            {mss.found ? `✅ ${(mss.label ?? '').toUpperCase()}` : '❌ 없음'}
-          </Text>
-        </View>
-      )}
-      {swingHigh != null && swingLow != null && (
-        <View style={ict.kv}>
-          <Text style={ict.kvKey}>SH / SL</Text>
-          <Text style={ict.kvVal}>{swingHigh.toFixed(2)} / {swingLow.toFixed(2)}</Text>
-        </View>
-      )}
-      {pdh != null && (
-        <View style={ict.kv}>
-          <Text style={ict.kvKey}>PDH</Text>
-          <Text style={[ict.kvVal, pdhSweep && { color: '#FF8A00' }]}>
-            {pdh.toFixed(2)}{pdhSweep ? '  🔄 Sweep!' : ''}
-          </Text>
-        </View>
-      )}
-      {pdl != null && (
-        <View style={ict.kv}>
-          <Text style={ict.kvKey}>PDL</Text>
-          <Text style={[ict.kvVal, pdlSweep && { color: '#FF8A00' }]}>
-            {pdl.toFixed(2)}{pdlSweep ? '  🔄 Sweep!' : ''}
-          </Text>
-        </View>
-      )}
-      <View style={ict.kv}>
-        <Text style={ict.kvKey}>OB</Text>
-        <Text style={ict.kvVal}>
-          Bull {ob.bull}개 / Bear {ob.bear}개
-        </Text>
-      </View>
-      <View style={ict.kv}>
-        <Text style={ict.kvKey}>FVG (미메움)</Text>
-        <Text style={ict.kvVal}>Bull {fvg.bull}개 / Bear {fvg.bear}개</Text>
-      </View>
-      {fvg.lastBull && (
-        <View style={ict.subRow}>
-          <Text style={ict.subText}>└ Bull CE: {fvg.lastBull.ce.toFixed(2)} ({fvg.lastBull.fillPct}% filled)</Text>
-        </View>
-      )}
-      {fvg.lastBear && (
-        <View style={ict.subRow}>
-          <Text style={ict.subText}>└ Bear CE: {fvg.lastBear.ce.toFixed(2)} ({fvg.lastBear.fillPct}% filled)</Text>
-        </View>
-      )}
-      {inPOI && (
-        <View style={ict.poiBadge}>
-          <Text style={ict.poiText}>⭐ 현재가 HTF POI 진입 중 ({poiType})</Text>
-        </View>
-      )}
-    </View>
-  );
-}
-
-function IctLtfSection({ ltf }: { ltf: IctAnalysis['ltf'] }) {
-  return (
-    <View style={ict.block}>
-      <Text style={ict.blockTitle}>LTF ({ltf.timeframe})</Text>
-      <View style={ict.kv}>
-        <Text style={ict.kvKey}>FVG CE 진입</Text>
-        <Text style={ict.kvVal}>Bull {ltf.fvgCE.bull}개 / Bear {ltf.fvgCE.bear}개</Text>
-      </View>
-      <View style={ict.kv}>
-        <Text style={ict.kvKey}>FVG Fill 진입</Text>
-        <Text style={ict.kvVal}>Bull {ltf.fvgFill.bull}개 / Bear {ltf.fvgFill.bear}개</Text>
-      </View>
-      <View style={ict.kv}>
-        <Text style={ict.kvKey}>IOFED</Text>
-        <Text style={[ict.kvVal, ltf.iofed.length > 0 && { color: '#1AC24E', fontWeight: '700' }]}>
-          {ltf.iofed.length > 0
-            ? `✅ ${ltf.iofed.map(d => `${d.type}(${d.bars}봉)`).join(', ')}`
-            : '❌ 없음'}
-        </Text>
-      </View>
-    </View>
-  );
-}
-
-const ict = StyleSheet.create({
-  header:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border.default },
-  headerTitle: { fontSize: 14, fontWeight: '700', color: colors.text.primary },
-  badge:       { fontSize: 12, color: colors.text.disabled },
-  sessionBadge: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, backgroundColor: colors.bg.elevated },
-  sessionText: { fontSize: 12, fontWeight: '600', color: colors.text.tertiary },
-
-  priceRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border.default },
-  priceLabel:  { fontSize: 13, color: colors.text.tertiary },
-  priceValue:  { fontSize: 15, fontWeight: '700', color: colors.text.primary },
-
-  block:       { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border.default },
-  blockTitle:  { fontSize: 13, fontWeight: '700', color: colors.text.tertiary, marginBottom: 8, letterSpacing: 0.3 },
-
-  row:   { marginBottom: 4 },
-  val:   { fontSize: 13, color: colors.text.secondary },
-
-  kv:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingVertical: 3 },
-  kvKey: { fontSize: 13, color: colors.text.tertiary, flex: 1 },
-  kvVal: { fontSize: 13, color: colors.text.primary, fontWeight: '500', flex: 2, textAlign: 'right' },
-
-  subRow:  { paddingLeft: 8, paddingVertical: 2 },
-  subText: { fontSize: 12, color: colors.text.tertiary },
-
-  poiBadge: { marginTop: 8, backgroundColor: '#FFFAE6', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
-  poiText:  { fontSize: 12, fontWeight: '600', color: '#B8860B' },
-
-  sessionRow:   { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 },
-  sessionName:  { fontSize: 13, color: colors.text.tertiary },
-  sessionRange: { fontSize: 13, color: colors.text.primary, fontWeight: '500' },
-
-  signalBadge: { borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, alignItems: 'center', marginBottom: 4 },
-  signalText:  { fontSize: 14, fontWeight: '700' },
-
-  waitText: { fontSize: 13, color: colors.text.tertiary, lineHeight: 20 },
-});
-
-// ─── 점수 카드 ───────────────────────────────────────────────────────────────
-function ScoreCard({ score, grade }: { score: number; grade: string }) {
-  const gradeColors: Record<string, string> = {
-    S: '#8B5CF6', A: '#3B82F6', 'B+': '#10B981', B: '#06B6D4', C: '#F59E0B', D: '#F97316', F: '#EF4444',
-  };
-  const barColor =
-    score >= 75 ? '#10B981' :
-    score >= 55 ? '#F59E0B' : '#EF4444';
-  const gc = gradeColors[grade] ?? '#8B5CF6';
-
-  return (
-    <View style={score_.wrap}>
-      <View style={{ flex: 1, marginRight: 16 }}>
-        <Text style={score_.label}>셋업 점수</Text>
-        <View style={score_.barBg}>
-          <View style={[score_.barFill, { width: `${score}%` as any, backgroundColor: barColor }]} />
-        </View>
-      </View>
-      <View style={[score_.gradeBadge, { backgroundColor: gc + '22', borderColor: gc }]}>
-        <Text style={[score_.gradeText, { color: gc }]}>{grade}</Text>
-        <Text style={[score_.scoreNum, { color: gc }]}>{score}</Text>
-      </View>
-    </View>
-  );
-}
-const score_ = StyleSheet.create({
-  wrap:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border.default },
-  label:      { fontSize: 12, color: colors.text.tertiary, marginBottom: 6, fontWeight: '600' },
-  barBg:      { height: 8, borderRadius: 4, backgroundColor: colors.bg.elevated, overflow: 'hidden' },
-  barFill:    { height: 8, borderRadius: 4 },
-  gradeBadge: { width: 56, height: 56, borderRadius: 14, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
-  gradeText:  { fontSize: 18, fontWeight: '800', lineHeight: 22 },
-  scoreNum:   { fontSize: 11, fontWeight: '700' },
-});
-
-
+import IctAnalysisCard, { IctAnalysis } from '@/components/IctAnalysisCard';
+import { loadIctSnapshot } from '@/utils/ictSnapshot';
 
 // ─── 정보 행 ─────────────────────────────────────────────────────────────────
 function InfoRow({
@@ -301,73 +72,23 @@ export default function PositionDetail() {
   // 라이브 데이터 우선, 없으면 초기 캐시 데이터 사용
   const position = livePosition ?? cachedPosition;
 
-  // 봇 ICT 분석 조회
-  const [ictAnalysis, setIctAnalysis]     = useState<IctAnalysis | null>(null);
-  const [botSignal,   setBotSignal]       = useState<BotSignal | null>(null);
-  const [signalLoading, setSignalLoading] = useState(false);
-
-  // localStorage 캐시 헬퍼
-  const cacheKey = (contract: string) => `ict_analysis_${contract}`;
-  const loadCached = (contract: string): IctAnalysis | BotSignal | null => {
-    if (Platform.OS !== 'web') return null;
-    try {
-      const raw = localStorage.getItem(cacheKey(contract));
-      return raw ? JSON.parse(raw) : null;
-    } catch { return null; }
-  };
-  const saveCache = (contract: string, data: any) => {
-    if (Platform.OS !== 'web') return;
-    try { localStorage.setItem(cacheKey(contract), JSON.stringify(data)); } catch {}
-  };
+  // 진입 당시 ICT 스냅샷 로드 (accounts.tsx 폴링에서 자동 캡처)
+  const [ictAnalysis, setIctAnalysis] = useState<IctAnalysis | null>(null);
+  const [snapPending, setSnapPending] = useState(false);
 
   useEffect(() => {
     if (!position) return;
-
-    // accountId: 포지션 데이터 → accounts store 순서로 탐색
-    const accountId = (position as any).accountId
-      || (accounts.length === 1 ? accounts[0].id : accounts[0]?.id);
     const contract = (position.symbol ?? '').replace('/', '_');
     if (!contract) return;
 
-    // 캐시된 분석이 있으면 즉시 표시
-    const cached = loadCached(contract);
-    if (cached && 'htf' in cached) {
-      setIctAnalysis(cached as IctAnalysis);
-    } else if (cached && 'confluence' in cached) {
-      setBotSignal(cached as BotSignal);
+    const stored = loadIctSnapshot(contract);
+    if (stored?.analysis) {
+      setIctAnalysis(stored.analysis as IctAnalysis);
+    } else {
+      // 아직 캡처 전 (첫 폴링 대기 중)
+      setSnapPending(true);
     }
-
-    if (!accountId) return;
-
-    setSignalLoading(true);
-
-    // 계좌 정보 조회 (ICT 분석에 apiKey/apiSecret 필요)
-    const account = accounts.find((a) => a.id === accountId) ?? accounts[0];
-    if (!account?.apiKey || !account?.apiSecret) {
-      setSignalLoading(false);
-      return;
-    }
-
-    fetch('/api/ict-analyze', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ apiKey: account.apiKey, apiSecret: account.apiSecret, contract }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data?.error || data?.htf === undefined) {
-          if (data?.reason) {
-            setBotSignal(data);
-            if (data.confluence?.length > 0) saveCache(contract, data);
-          }
-          return;
-        }
-        setIctAnalysis(data as IctAnalysis);
-        saveCache(contract, data);
-      })
-      .catch(() => {})
-      .finally(() => setSignalLoading(false));
-  }, [position, accounts.length]);
+  }, [position?.symbol]);
 
   const isProfit  = (position?.profit ?? 0) >= 0;
   const pnlColor  = isProfit ? colors.market.rise : colors.market.fall;
@@ -384,19 +105,6 @@ export default function PositionDetail() {
 
   const fmt$ = (v: number) =>
     `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-  // 포지션 자동 설명 텍스트 생성
-  const positionSummary = position ? (() => {
-    const dir     = direction === 'Long' ? '롱(매수)' : '숏(매도)';
-    const lev     = position.leverage;
-    const profitSign = isProfit ? '수익' : '손실';
-    const pctAbs  = Math.abs(position.profitRate).toFixed(2);
-    const pnlAbs  = Math.abs(position.profit);
-    const since   = p.entryAt ? `${p.entryAt}에 진입한 ` : '';
-    const holding = position.holdingPeriod ? ` ${position.holdingPeriod} 보유 중이며,` : '';
-
-    return `${since}${position.symbol} ${dir} 포지션입니다. ${lev}배 레버리지로${holding} 현재 ${pctAbs}% (${Math.round(pnlAbs / 10000).toLocaleString('ko-KR')}만원) ${profitSign} 중입니다.${p.liqPrice > 0 ? ` 청산가는 $${p.liqPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}입니다.` : ''}`;
-  })() : null;
 
   return (
     <ScreenTransition>
@@ -467,155 +175,12 @@ export default function PositionDetail() {
                 ]}
               />
 
-              {/* ── ICT 분석 ────────────────────────────── */}
-              <GlassCard intensity="low" radius={20} padding={0} style={st.section}>
-                {/* 헤더 */}
-                <View style={ict.header}>
-                  <Text style={ict.headerTitle}>ICT v2 분석</Text>
-                  {signalLoading
-                    ? <Text style={ict.badge}>분석 중...</Text>
-                    : ictAnalysis?.session
-                      ? <View style={[ict.sessionBadge, ictAnalysis.session.active && { backgroundColor: '#E8F5EE' }]}>
-                          <Text style={[ict.sessionText, ictAnalysis.session.active && { color: '#1AC24E' }]}>
-                            {ictAnalysis.session.active ? '✅' : '⏰'} {ictAnalysis.session.name}
-                          </Text>
-                        </View>
-                      : null
-                  }
-                </View>
-
-                {ictAnalysis ? (
-                  <>
-                    {/* 점수 카드 */}
-                    {ictAnalysis.score != null && ictAnalysis.grade && (
-                      <ScoreCard score={ictAnalysis.score} grade={ictAnalysis.grade} />
-                    )}
-
-                    {/* 현재가 */}
-                    <View style={ict.priceRow}>
-                      <Text style={ict.priceLabel}>현재가</Text>
-                      <Text style={ict.priceValue}>${ictAnalysis.currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
-                    </View>
-
-                    {/* HTF */}
-                    <IctSection
-                      title={`HTF (${ictAnalysis.htf.timeframe})`}
-                      direction={ictAnalysis.htf.direction}
-                      structure={ictAnalysis.htf.structure}
-                      swingHigh={ictAnalysis.htf.swingHigh}
-                      swingLow={ictAnalysis.htf.swingLow}
-                      pdh={ictAnalysis.htf.pdh}
-                      pdl={ictAnalysis.htf.pdl}
-                      pdhSweep={ictAnalysis.htf.pdhSweep}
-                      pdlSweep={ictAnalysis.htf.pdlSweep}
-                      ob={ictAnalysis.htf.ob}
-                      fvg={ictAnalysis.htf.fvg}
-                      inPOI={ictAnalysis.htf.inPOI}
-                      poiType={ictAnalysis.htf.poiType}
-                    />
-
-                    {/* MTF */}
-                    <IctSection
-                      title={`MTF (${ictAnalysis.mtf.timeframe})`}
-                      mss={ictAnalysis.mtf.mss}
-                      ob={ictAnalysis.mtf.ob}
-                      fvg={ictAnalysis.mtf.fvg}
-                    />
-
-                    {/* LTF */}
-                    <IctLtfSection ltf={ictAnalysis.ltf} />
-
-                    {/* 세션 레인지 */}
-                    {ictAnalysis.sessions.length > 0 && (
-                      <View style={ict.block}>
-                        <Text style={ict.blockTitle}>Session Range</Text>
-                        {ictAnalysis.sessions.map((s) => (
-                          <View key={s.name} style={ict.sessionRow}>
-                            <Text style={ict.sessionName}>{s.name}</Text>
-                            <Text style={ict.sessionRange}>
-                              {s.low.toFixed(2)} ~ {s.high.toFixed(2)}
-                              {s.sweep ? '  🔄 Sweep!' : ''}
-                            </Text>
-                          </View>
-                        ))}
-                      </View>
-                    )}
-
-                    {/* 가격 레인지 시각화 */}
-                    {ictAnalysis.summary.entry != null && (
-                      <View style={{ paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border.default }}>
-                        <PriceChart
-                          entry={ictAnalysis.summary.entry}
-                          current={ictAnalysis.currentPrice}
-                          tp={ictAnalysis.summary.tp}
-                          sl={ictAnalysis.summary.sl}
-                          direction={direction ?? 'Long'}
-                        />
-                      </View>
-                    )}
-
-                    {/* 종합 판단 */}
-                    <View style={[ict.block, { borderBottomWidth: 0 }]}>
-                      <Text style={ict.blockTitle}>종합 판단</Text>
-                      {ictAnalysis.summary.signal ? (
-                        <>
-                          <View style={[ict.signalBadge, {
-                            backgroundColor: ictAnalysis.summary.signal === 'long' ? '#E8F5EE' : '#FFF0F0',
-                          }]}>
-                            <Text style={[ict.signalText, {
-                              color: ictAnalysis.summary.signal === 'long' ? '#1AC24E' : '#FF4747',
-                            }]}>
-                              {ictAnalysis.summary.signal === 'long' ? '📈 LONG 신호!' : '📉 SHORT 신호!'}
-                            </Text>
-                          </View>
-                          <View style={{ gap: 3, marginTop: 8 }}>
-                            {[
-                              ['진입', ictAnalysis.summary.entry?.toFixed(2) ?? '-'],
-                              ['SL',   ictAnalysis.summary.sl?.toFixed(2)    ?? '-'],
-                              ['TP',   ictAnalysis.summary.tp?.toFixed(2)    ?? '-'],
-                            ].map(([k, v]) => (
-                              <View key={k} style={ict.kv}>
-                                <Text style={ict.kvKey}>{k}</Text>
-                                <Text style={ict.kvVal}>{v}</Text>
-                              </View>
-                            ))}
-                          </View>
-                        </>
-                      ) : (
-                        <Text style={ict.waitText}>⏸️ {ictAnalysis.summary.reason}</Text>
-                      )}
-                      {ictAnalysis.summary.confluence.length > 0 && (
-                        <View style={{ marginTop: 10, gap: 4 }}>
-                          {ictAnalysis.summary.confluence.map((c, i) => (
-                            <View key={i} style={st.confluenceRow}>
-                              <Text style={st.confluenceDot}>•</Text>
-                              <Text style={st.confluenceText}>{c}</Text>
-                            </View>
-                          ))}
-                        </View>
-                      )}
-                    </View>
-                  </>
-                ) : botSignal ? (
-                  <View style={{ padding: 16 }}>
-                    <Text style={st.summaryText}>{botSignal.reason}</Text>
-                    {botSignal.confluence?.length > 0 && (
-                      <View style={{ marginTop: 10, gap: 6 }}>
-                        {botSignal.confluence.map((c, i) => (
-                          <View key={i} style={st.confluenceRow}>
-                            <Text style={st.confluenceDot}>•</Text>
-                            <Text style={st.confluenceText}>{c}</Text>
-                          </View>
-                        ))}
-                      </View>
-                    )}
-                  </View>
-                ) : !signalLoading ? (
-                  <View style={{ padding: 16 }}>
-                    <Text style={st.summaryText}>{positionSummary}</Text>
-                  </View>
-                ) : null}
-              </GlassCard>
+              {/* ── ICT 분석 (진입 당시 스냅샷) ─────────── */}
+              <IctAnalysisCard
+                ictAnalysis={ictAnalysis}
+                direction={direction ?? 'Long'}
+                pending={snapPending && !ictAnalysis}
+              />
 
               <View style={{ height: 120 }} />
             </>
@@ -659,11 +224,6 @@ const st = StyleSheet.create({
   sectionTitle: { fontSize: 15, fontWeight: '700', color: colors.text.primary, marginBottom: 12 },
 
   riskWrap: { paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.border.default },
-
-  summaryText:    { fontSize: 14, color: colors.text.secondary, lineHeight: 22 },
-  confluenceRow:  { flexDirection: 'row', gap: 6 },
-  confluenceDot:  { fontSize: 14, color: colors.text.tertiary, lineHeight: 22 },
-  confluenceText: { fontSize: 14, color: colors.text.secondary, lineHeight: 22, flex: 1 },
 
   reasonBox:  { backgroundColor: colors.bg.subtle, borderRadius: 12, padding: 14 },
   reasonLabel: { fontSize: 12, fontWeight: '600', color: colors.text.tertiary, marginBottom: 6 },

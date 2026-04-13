@@ -25,10 +25,10 @@ const config = {
   //   multi-pair 운영 시 총 노출 상한으로 과다 레버리지 방지
   kelly: {
     fraction: parseFloat(process.env.KELLY_FRACTION) || 0.5,        // Half-Kelly
-    maxFraction: parseFloat(process.env.KELLY_MAX_FRACTION) || 0.25, // 개별 포지션 상한 (잔고 대비 margin 기준)
+    maxFraction: parseFloat(process.env.KELLY_MAX_FRACTION) || 0.15, // 개별 포지션 상한 15% (Kelly 학습 후 과다 베팅 방지)
     minTrades: parseInt(process.env.KELLY_MIN_TRADES, 10) || 20,
-    defaultFraction: parseFloat(process.env.KELLY_DEFAULT_FRACTION) || 0.02, // 표본 부족 폴백
-    maxTotalExposure: parseFloat(process.env.KELLY_MAX_TOTAL_EXPOSURE) || 0.5, // 전 페어 합산 leveraged notional 상한 (잔고 대비)
+    defaultFraction: parseFloat(process.env.KELLY_DEFAULT_FRACTION) || 0.03, // 표본 부족 폴백 3%
+    maxTotalExposure: parseFloat(process.env.KELLY_MAX_TOTAL_EXPOSURE) || 0.6, // 전 페어 합산 leveraged notional 상한 60%
   },
 
   // Multi-Timeframe (HTF → MTF → LTF)

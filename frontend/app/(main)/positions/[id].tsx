@@ -92,13 +92,20 @@ export default function PositionDetail() {
     }
   }, [position?.symbol]);
 
-  // markPrice 변화마다 최신 가격 이력 반영
+  // markPrice 변화마다 최신 가격 이력 반영 (마지막 포인트 동일 시 리렌더 방지)
   useEffect(() => {
     if (!position) return;
     const contract = (position.symbol ?? '').replace('/', '_');
     if (!contract) return;
     const hist = loadPriceHistory(contract);
-    if (hist?.points.length) setPricePoints(hist.points);
+    if (hist?.points.length) {
+      setPricePoints(prev => {
+        const lastNew  = hist.points[hist.points.length - 1];
+        const lastPrev = prev[prev.length - 1];
+        if (lastPrev && lastNew && lastPrev.t === lastNew.t) return prev;
+        return hist.points;
+      });
+    }
   }, [position?.markPrice, position?.symbol]);
 
   const isProfit  = (position?.profit ?? 0) >= 0;

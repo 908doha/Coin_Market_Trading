@@ -15,6 +15,7 @@ import type { Position } from '../services/positions.service';
 import { saveIctSnapshot, loadIctSnapshot } from '../utils/ictSnapshot';
 import { savePositionSnapshot } from '../utils/positionSnapshot';
 import { appendPricePoint } from '../utils/priceHistory';
+import { appendBalanceSnapshot } from '../utils/balanceHistory';
 
 export type ExchangeType = 'binance' | 'upbit' | 'bybit' | 'okx' | 'gate' | 'custom';
 
@@ -241,6 +242,9 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     setBalErrors(errMap);
     setBalLoading(false);
     firstBalLoad.current = false;
+    // 총 자산 스냅샷 저장 (5분 간격 — 홈 차트 실제 잔고 이력용)
+    const snap = sumBalances(Object.values(map));
+    if (snap?.total) appendBalanceSnapshot(snap.total);
   }, []);
 
   // 포지션 silent refresh (로딩 표시 없이 갱신) + 신규 포지션 ICT 스냅샷 자동 캡처

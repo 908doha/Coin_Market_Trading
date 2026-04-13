@@ -12,6 +12,7 @@ import { useApi } from '@/hooks/useApi';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeAccount, ExchangeType } from '@/store/accounts';
 import type { Balance } from '@/services';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
+import { loadBalanceHistory, type BalanceSnapshot } from '@/utils/balanceHistory';
 
 // 로컬 날짜 YYYY-MM-DD 문자열 (UTC 아님)
 function localDateStr(d: Date): string {
@@ -24,7 +25,75 @@ function mondayKey(d: Date): string {
   return localDateStr(new Date(d.getTime() - offset * 86400_000));
 }
 
-// ── 거래 내역으로 자산 차트 데이터 생성 ───────────────────────────────────────
+// ── 실제 잔고 스냅샷으로 자산 차트 데이터 생성 ───────────────────────────────
+// accounts.tsx 5초 폴링 → 5분 간격 저장 → localStorage의 실제 잔고 이력 사용
+function buildChartFromSnapshots(
+  snapshots: BalanceSnapshot[],
+  period: PeriodKey,
+): { value: number; date: string }[] {
+  if (snapshots.length < 2) return [];
+  const now = Math.floor(Date.now() / 1000);
+  const DAY = 86_400, HOUR = 3_600, WEEK = 7 * DAY;
+
+  type Bucket = { ts: number; label: string };
+  const buckets: Bucket[] = [];
+
+  if (period === '시간') {
+    for (let i = 9; i >= 0; i--) {
+      const ts = now - i * HOUR;
+      const d  = new Date(ts * 1000);
+      buckets.push({ ts, label: `${d.getHours()}시` });
+    }
+  } else if (period === '일') {
+    for (let i = 6; i >= 0; i--) {
+      const ts = now - i * DAY;
+      const d  = new Date(ts * 1000);
+      buckets.push({ ts, label: `${d.getMonth()+1}/${d.getDate()}` });
+    }
+  } else if (period === '주') {
+    for (let i = 7; i >= 0; i--) {
+      const ts = now - i * WEEK;
+      const d  = new Date(ts * 1000);
+      const offset = d.getDay() === 0 ? 6 : d.getDay() - 1;
+      const monday = new Date((ts - offset * DAY) * 1000);
+      const wom    = Math.ceil(monday.getDate() / 7);
+      buckets.push({ ts: monday.getTime() / 1000, label: `${monday.getMonth()+1}월${wom}주` });
+    }
+  } else if (period === '월') {
+    for (let i = 5; i >= 0; i--) {
+      const d  = new Date(new Date().getFullYear(), new Date().getMonth() - i, 1);
+      buckets.push({ ts: d.getTime() / 1000, label: `${String(d.getFullYear()).slice(2)}.${d.getMonth()+1}` });
+    }
+  } else if (period === '년') {
+    for (let i = 5; i >= 0; i--) {
+      const y = new Date().getFullYear() - i;
+      buckets.push({ ts: new Date(y, 0, 1).getTime() / 1000, label: `${y}` });
+    }
+  } else {
+    // 전체: 스냅샷 전체를 일별 샘플링
+    const byDay = new Map<string, number>();
+    for (const s of snapshots) {
+      const d = new Date(s.ts * 1000);
+      const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      byDay.set(k, s.total);  // 해당 날의 마지막 값 유지
+    }
+    const keys = Array.from(byDay.keys()).sort();
+    const fmt  = (k: string) => { const [,m,d] = k.split('-'); return `${parseInt(m)}/${parseInt(d)}`; };
+    return keys.map(k => ({ value: byDay.get(k)!, date: fmt(k) }));
+  }
+
+  // 각 버킷 이전 최신 스냅샷 값을 취함 (없으면 carry-forward)
+  const result: { value: number; date: string }[] = [];
+  let lastValue = snapshots[0].total;
+  for (const bucket of buckets) {
+    const candidates = snapshots.filter(s => s.ts <= bucket.ts);
+    if (candidates.length) lastValue = candidates[candidates.length - 1].total;
+    result.push({ value: lastValue, date: bucket.label });
+  }
+  return result;
+}
+
+// ── 거래 내역으로 자산 차트 데이터 생성 (스냅샷 없을 때 fallback) ──────────────
 function buildChartFromTrades(
   trades: Trade[],
   balance: Balance | null,
@@ -776,10 +845,13 @@ export default function Home() {
     return trades.filter((t) => t.accountId === selectedAccountId);
   }, [allTrades, selectedAccountId]);
 
-  const chartData  = useMemo(
-    () => buildChartFromTrades(chartTrades, balance ?? null, period),
-    [chartTrades, balance, period],
-  );
+  const chartData  = useMemo(() => {
+    // 실제 잔고 이력 우선, 부족하면 거래 내역 기반 추정으로 fallback
+    const snaps = loadBalanceHistory();
+    const fromSnaps = buildChartFromSnapshots(snaps, period);
+    if (fromSnaps.length >= 2) return fromSnaps;
+    return buildChartFromTrades(chartTrades, balance ?? null, period);
+  }, [chartTrades, balance, period]);
   const barsData   = useMemo(
     () => buildPeriodBarsFromTrades(chartTrades, balance ?? null, period),
     [chartTrades, balance, period],

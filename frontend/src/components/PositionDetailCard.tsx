@@ -351,8 +351,9 @@ export function TpSlPathChart({
   compact?: boolean;
   entryAtTs?: number;
 }) {
-  // 진입 시각이 첫 포인트보다 이전이면 진입가 포인트를 맨 앞에 추가
-  const allPts: PricePoint[] = entryAtTs && points.length && entryAtTs < points[0].t
+  // compact 모드에서는 entryAtTs 앞 삽입 안 함 (첫 폴링 전 구간이 긴 평선으로 보여 이상함)
+  // full 모드(compact=false)에서만 진입 시각을 앞에 붙여 차트 시작점을 진입가에 맞춤
+  const allPts: PricePoint[] = !compact && entryAtTs && points.length && entryAtTs < points[0].t
     ? [{ t: entryAtTs, p: entry }, ...points]
     : points;
 

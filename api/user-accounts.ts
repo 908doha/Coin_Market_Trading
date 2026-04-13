@@ -3,17 +3,18 @@
  * GET  /api/user-accounts  — 저장된 계좌 목록 반환
  * POST /api/user-accounts  — 계좌 목록 저장 (덮어쓰기)
  *
- * 인증: Authorization: Bearer <jwt> 헤더 (Django JWT)
- * 저장: Supabase (supabase-js) — REST API 사용으로 직접 PG 연결 불필요
+ * 인증: Authorization: Bearer <jwt> 헤더
+ * 저장: Railway PostgreSQL (pg Pool) — exchange_accounts 테이블
  * 암호화: AES-256-GCM (ACCOUNTS_ENCRYPTION_KEY)
  *
  * 필요한 Vercel 환경변수:
- *   SUPABASE_URL            — https://xxxx.supabase.co
- *   SUPABASE_SERVICE_ROLE_KEY — service_role 키 (Settings > API)
+ *   DATABASE_URL             — postgresql://user:pass@host:5432/railway
+ *   ACCOUNTS_ENCRYPTION_KEY  — 32자 이상 암호화 키
+ *   FRONTEND_URL             — https://your-app.vercel.app (CORS 허용)
  */
 
 import crypto from 'crypto';
-import { createClient } from '@supabase/supabase-js';
+import { Pool } from 'pg';
 
 // ── JWT payload decode (검증 없이 userId 추출) ────────────────────────────────
 function decodeJwtPayload(token: string): { user_id?: number; id?: number; sub?: string } | null {
@@ -66,53 +67,96 @@ function decrypt(encoded: string): string {
   return decipher.update(enc).toString('utf8') + decipher.final('utf8');
 }
 
-// ── Supabase 클라이언트 (service_role — RLS 무시, 서버 전용) ─────────────────
-function getSupabase() {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) return null;
-  return createClient(url, key, { auth: { persistSession: false } });
+// ── PostgreSQL 연결 (Railway — SSL + 서버리스 최적화) ─────────────────────────
+let pool: Pool | null = null;
+
+function getPool(): Pool | null {
+  if (!process.env.DATABASE_URL) return null;
+  if (!pool) {
+    pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      max: 1,                        // 서버리스: 최소 연결
+      idleTimeoutMillis: 10_000,     // 유휴 연결 빠르게 정리
+      connectionTimeoutMillis: 10_000,
+      ssl: { rejectUnauthorized: false },  // Railway 자체서명 인증서 허용
+    });
+    pool.on('error', (err) => {
+      console.error('[pg pool] unexpected error:', err.message);
+      pool = null;  // 다음 요청에서 새 풀 생성
+    });
+  }
+  return pool;
+}
+
+let tableEnsured = false;
+
+async function ensureTable(p: Pool): Promise<void> {
+  if (tableEnsured) return;
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS exchange_accounts (
+      user_id    TEXT PRIMARY KEY,
+      data       TEXT NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT now()
+    )
+  `);
+  tableEnsured = true;
 }
 
 async function dbGet(userId: string): Promise<string | null> {
-  const sb = getSupabase();
-  if (!sb) return null;
-  const { data, error } = await sb
-    .from('exchange_accounts')
-    .select('data')
-    .eq('user_id', userId)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  return data?.data ?? null;
+  const p = getPool();
+  if (!p) return null;
+  await ensureTable(p);
+  const { rows } = await p.query(
+    'SELECT data FROM exchange_accounts WHERE user_id = $1',
+    [userId],
+  );
+  return rows[0]?.data ?? null;
 }
 
 async function dbUpsert(userId: string, enc: string): Promise<void> {
-  const sb = getSupabase();
-  if (!sb) return;
-  const { error } = await sb
-    .from('exchange_accounts')
-    .upsert({ user_id: userId, data: enc, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
-  if (error) throw new Error(error.message);
+  const p = getPool();
+  if (!p) return;
+  await ensureTable(p);
+  await p.query(
+    `INSERT INTO exchange_accounts (user_id, data, updated_at)
+     VALUES ($1, $2, now())
+     ON CONFLICT (user_id)
+     DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
+    [userId, enc],
+  );
 }
 
-// ── CORS 헤더 ─────────────────────────────────────────────────────────────────
-function setCors(res: any) {
-  res.setHeader('Access-Control-Allow-Origin',  '*');
+// ── CORS 헤더 (FRONTEND_URL 환경변수 기반) ────────────────────────────────────
+function setCors(req: any, res: any) {
+  const allowed = process.env.FRONTEND_URL;   // e.g. https://my-app.vercel.app
+  const origin  = req.headers?.origin ?? '';
+
+  if (allowed && origin === allowed) {
+    res.setHeader('Access-Control-Allow-Origin', allowed);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  } else if (allowed) {
+    // 요청 origin이 없거나 다르더라도 허용 (same-origin 요청은 origin 헤더 없음)
+    res.setHeader('Access-Control-Allow-Origin', allowed);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  } else {
+    // FRONTEND_URL 미설정 시 개발용 와일드카드
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Authorization,Content-Type');
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────
 export default async function handler(req: any, res: any) {
-  setCors(res);
+  setCors(req, res);
   if (req.method === 'OPTIONS') { res.status(200).end(); return; }
 
   const userId = getUserId(req);
   if (!userId) { res.status(401).json({ error: '인증이 필요해요' }); return; }
 
-  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    // DB 미설정 — 클라이언트가 로컬 스토리지만 사용하도록
-    res.status(204).end();
+  if (!process.env.DATABASE_URL) {
+    // DB 미설정 — 빈 배열 반환 (클라이언트가 로컬 스토리지만 사용)
+    res.status(200).json([]);
     return;
   }
 

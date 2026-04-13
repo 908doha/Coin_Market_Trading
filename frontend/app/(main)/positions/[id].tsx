@@ -8,7 +8,7 @@ import { positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 import { useAccounts } from '@/store/accounts';
-import { CoinHeaderCard, PnlCard, PriceChart, TpSlPathChart } from '@/components/PositionDetailCard';
+import { CoinHeaderCard, PnlCard } from '@/components/PositionDetailCard';
 import IctAnalysisCard, { IctAnalysis } from '@/components/IctAnalysisCard';
 import { loadIctSnapshot } from '@/utils/ictSnapshot';
 import { loadPriceHistory } from '@/utils/priceHistory';
@@ -166,6 +166,7 @@ export default function PositionDetail() {
                 targetPrice={position.targetPrice}
                 stopLoss={position.stopLoss}
                 direction={direction ?? 'Long'}
+                pricePoints={pricePoints.length >= 2 ? pricePoints : undefined}
                 rows={[
                   {
                     leftLabel: '수량', leftValue: `${coinQty} ${position.coin}`,
@@ -199,22 +200,6 @@ export default function PositionDetail() {
                 direction={direction ?? 'Long'}
                 pending={snapPending && !ictAnalysis}
               />
-
-              {/* ── 시계열 가격 흐름 차트 ─────────── */}
-              {pricePoints.length >= 2 && (
-                <GlassCard intensity="medium" radius={24} padding={20} style={{ marginBottom: 12 }}>
-                  <Text style={{ fontSize: 12, color: colors.text.tertiary, marginBottom: 8, fontWeight: '600' } as any}>
-                    가격 흐름 (보유 기간)
-                  </Text>
-                  <TpSlPathChart
-                    points={pricePoints}
-                    entry={position.entryPrice}
-                    tp={position.targetPrice ?? null}
-                    sl={position.stopLoss    ?? null}
-                    direction={direction ?? 'Long'}
-                  />
-                </GlassCard>
-              )}
 
               <View style={{ height: 120 }} />
             </>

@@ -476,12 +476,9 @@ export default function KellyPage() {
 }
 
 const st = StyleSheet.create({
-  accountRow:       { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingVertical: 14, borderTopWidth: 1, borderTopColor: '#F5F5F5' },
-  allIcon:          { width: 28, height: 28, borderRadius: 14, backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center' },
-  accountLabel:     { fontSize: 15, fontWeight: '600', color: '#191919' },
-  balanceGrid:      { flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingVertical: 16 },
-  balanceCard:      { flex: 1, backgroundColor: '#F5F5F5', borderRadius: 16, paddingVertical: 18, paddingHorizontal: 16 },
-  balanceCardLabel: { fontSize: 13, color: colors.text.tertiary, marginBottom: 8 },
+  accountRow:   { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingVertical: 14, borderTopWidth: 1, borderTopColor: '#F5F5F5' },
+  allIcon:      { width: 28, height: 28, borderRadius: 14, backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center' },
+  accountLabel: { fontSize: 15, fontWeight: '600', color: '#191919' },
 });
 
 const ks = StyleSheet.create({

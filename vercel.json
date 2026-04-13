@@ -1,7 +1,6 @@
 {
-  "installCommand": "npm install",
-  "buildCommand": "cd frontend && npm install --legacy-peer-deps && npx expo export -p web",
-  "outputDirectory": "frontend/dist",
+  "buildCommand": "npx expo export -p web",
+  "outputDirectory": "dist",
   "framework": null,
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },

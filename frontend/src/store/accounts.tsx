@@ -13,6 +13,8 @@ import { positionsService } from '../services/positions.service';
 import type { Balance } from '../services/account.service';
 import type { Position } from '../services/positions.service';
 import { saveIctSnapshot, loadIctSnapshot } from '../utils/ictSnapshot';
+import { savePositionSnapshot } from '../utils/positionSnapshot';
+import { appendPricePoint } from '../utils/priceHistory';
 
 export type ExchangeType = 'binance' | 'upbit' | 'bybit' | 'okx' | 'gate' | 'custom';
 
@@ -248,7 +250,15 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
       const pos = await positionsService.getAllByAccounts(list);
       setPositions(pos);
 
-      // 신규 포지션(또는 재진입) 감지 → ICT 스냅샷 자동 캡처
+      // 폴링마다 모든 활성 포지션의 현재가 이력 저장
+      for (const p of pos) {
+        const contract = p.symbol.replace('/', '_');
+        const entryAt  = (p as any).entryAt ?? '';
+        const markPrice = p.markPrice ?? (p as any).currentPrice ?? p.entryPrice;
+        appendPricePoint(contract, entryAt, markPrice);
+      }
+
+      // 신규 포지션(또는 재진입) 감지 → ICT + 포지션 스냅샷 자동 캡처
       for (const p of pos) {
         const contract = p.symbol.replace('/', '_');
         const entryAt  = (p as any).entryAt ?? '';
@@ -258,7 +268,26 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
         if (capturedContracts.current.has(sessionKey)) continue;
         capturedContracts.current.add(sessionKey);
 
-        // 저장된 스냅샷이 같은 진입 시간이면 재사용
+        // 포지션 스냅샷 저장 (항상, 최신 TP/SL 갱신)
+        const usdtKrw    = (p as any).usdtKrw ?? 1350;
+        const marginUsdt = p.amount / usdtKrw;
+        const notionalUsdt = marginUsdt * p.leverage;
+        const qty        = p.entryPrice > 0 ? notionalUsdt / p.entryPrice : 0;
+        const coinQtyStr = qty <= 0 ? '-' : qty < 0.001 ? qty.toFixed(6) : qty < 1 ? qty.toFixed(4) : qty.toFixed(3);
+        savePositionSnapshot({
+          contract,
+          entryAt,
+          coinQty:     coinQtyStr !== '-' ? `${coinQtyStr} ${p.coin}` : '-',
+          coin:        p.coin,
+          amount:      p.amount,
+          leverage:    p.leverage,
+          liqPrice:    (p as any).liqPrice ?? 0,
+          usdtKrw,
+          stopLoss:    p.stopLoss    ?? undefined,
+          targetPrice: p.targetPrice ?? undefined,
+        });
+
+        // 저장된 ICT 스냅샷이 같은 진입 시간이면 재사용
         const stored = loadIctSnapshot(contract);
         if (stored && stored.entryAt === entryAt) continue;
 

@@ -1,15 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
+import { View, StyleSheet, ScrollView, Text as RNText } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
-import { Text, SubPageHeader, ScreenTransition, TradeDetailSkeleton } from '@/design-system';
+import { Text, SubPageHeader, ScreenTransition, TradeDetailSkeleton, GlassCard } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAccounts } from '@/store/accounts';
-import { CoinHeaderCard, PnlCard } from '@/components/PositionDetailCard';
+import { CoinHeaderCard, PnlCard, TpSlPathChart } from '@/components/PositionDetailCard';
 import IctAnalysisCard, { IctAnalysis } from '@/components/IctAnalysisCard';
 import { loadIctSnapshot } from '@/utils/ictSnapshot';
+import { loadPositionSnapshot } from '@/utils/positionSnapshot';
+import { loadPriceHistory } from '@/utils/priceHistory';
+import type { PricePoint } from '@/utils/priceHistory';
 
 export default function TradeDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -20,11 +23,38 @@ export default function TradeDetail() {
   );
 
   const [ictAnalysis, setIctAnalysis] = useState<IctAnalysis | null>(null);
+  const [pricePoints, setPricePoints] = useState<PricePoint[]>([]);
+
   useEffect(() => {
     if (!trade) return;
     const contract = trade.symbol.replace('/', '_');
+
+    // ICT 스냅샷
     const stored = loadIctSnapshot(contract);
     if (stored?.analysis) setIctAnalysis(stored.analysis as IctAnalysis);
+
+    // 포지션 가격 이력 (1순위: localStorage)
+    const hist = loadPriceHistory(contract);
+    if (hist?.points.length) {
+      setPricePoints(hist.points);
+      return;
+    }
+
+    // 2순위: 백엔드 API (Gate.io 캔들)
+    const account = accounts[0];
+    if (!account?.apiKey || !account?.apiSecret) return;
+    const from = trade.entryAt ? Math.floor(new Date(trade.entryAt).getTime() / 1000) : 0;
+    const to   = trade.exitAt  ? Math.floor(new Date(trade.exitAt).getTime()  / 1000) : 0;
+    if (!from || !to || from >= to) return;
+
+    fetch('/api/price-history', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ apiKey: account.apiKey, apiSecret: account.apiSecret, contract, from, to }),
+    })
+      .then((r) => r.json())
+      .then((d) => { if (d?.points?.length) setPricePoints(d.points); })
+      .catch(() => {});
   }, [trade?.symbol]);
 
   const fmt$ = (v: number) =>
@@ -46,6 +76,9 @@ export default function TradeDetail() {
             const isProfit = trade.profit >= 0;
             const pnlColor = isProfit ? colors.market.rise : colors.market.fall;
 
+            // 포지션 스냅샷 (수량/증거금/TP/SL)
+            const posSnap = loadPositionSnapshot(trade.symbol.replace('/', '_'));
+
             return (
               <>
                 <CoinHeaderCard
@@ -66,29 +99,49 @@ export default function TradeDetail() {
                   entryPrice={trade.entryPrice ?? 0}
                   currentOrExitPrice={trade.exitPrice ?? 0}
                   currentLabel="청산"
+                  targetPrice={posSnap?.targetPrice ?? null}
+                  stopLoss={posSnap?.stopLoss ?? null}
                   direction={trade.direction as 'Long' | 'Short'}
                   rows={[
                     {
-                      leftLabel:  '투자금',
-                      leftValue:  trade.amount != null ? `₩${Math.round(trade.amount).toLocaleString('ko-KR')}` : '-',
-                      rightLabel: trade.leverage != null ? '레버리지' : '보유기간',
-                      rightValue: trade.leverage != null ? `${trade.leverage}x` : (trade.holdingDays != null ? `${trade.holdingDays}일` : '-'),
+                      leftLabel:  '수량',
+                      leftValue:  posSnap?.coinQty ?? '-',
+                      rightLabel: '증거금',
+                      rightValue: posSnap?.amount != null
+                        ? `₩${Math.round(posSnap.amount).toLocaleString('ko-KR')}`
+                        : (trade.amount != null ? `₩${Math.round(trade.amount).toLocaleString('ko-KR')}` : '-'),
                     },
                     {
                       leftLabel:  '진입가',
                       leftValue:  fmt$(trade.entryPrice ?? 0),
                       rightLabel: '청산가',
-                      rightValue: fmt$(trade.exitPrice ?? 0),
+                      rightValue: fmt$(trade.exitPrice  ?? 0),
                       rightColor: pnlColor,
                     },
                     {
                       leftLabel:  '진입일시',
                       leftValue:  trade.entryAt ?? '-',
-                      rightLabel: '청산일시',
-                      rightValue: trade.exitAt ?? '-',
+                      rightLabel: '보유기간',
+                      rightValue: trade.holdingDays != null ? `${trade.holdingDays}일` : '-',
                     },
                   ]}
                 />
+
+                {/* 시계열 가격 흐름 차트 */}
+                {pricePoints.length >= 2 && (
+                  <GlassCard intensity="medium" radius={24} padding={20} style={{ marginBottom: 12 }}>
+                    <RNText style={{ fontSize: 12, color: colors.text.tertiary, marginBottom: 8, fontWeight: '600' }}>
+                      가격 흐름 (보유 기간)
+                    </RNText>
+                    <TpSlPathChart
+                      points={pricePoints}
+                      entry={trade.entryPrice ?? 0}
+                      tp={posSnap?.targetPrice ?? null}
+                      sl={posSnap?.stopLoss    ?? null}
+                      direction={trade.direction as 'Long' | 'Short'}
+                    />
+                  </GlassCard>
+                )}
 
                 {ictAnalysis && (
                   <IctAnalysisCard

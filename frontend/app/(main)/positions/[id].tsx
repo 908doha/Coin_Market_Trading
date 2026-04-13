@@ -8,9 +8,11 @@ import { positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 import { useAccounts } from '@/store/accounts';
-import { CoinHeaderCard, PnlCard, PriceChart } from '@/components/PositionDetailCard';
+import { CoinHeaderCard, PnlCard, PriceChart, TpSlPathChart } from '@/components/PositionDetailCard';
 import IctAnalysisCard, { IctAnalysis } from '@/components/IctAnalysisCard';
 import { loadIctSnapshot } from '@/utils/ictSnapshot';
+import { loadPriceHistory } from '@/utils/priceHistory';
+import type { PricePoint } from '@/utils/priceHistory';
 
 // ─── 정보 행 ─────────────────────────────────────────────────────────────────
 function InfoRow({
@@ -75,6 +77,7 @@ export default function PositionDetail() {
   // 진입 당시 ICT 스냅샷 로드 (accounts.tsx 폴링에서 자동 캡처)
   const [ictAnalysis, setIctAnalysis] = useState<IctAnalysis | null>(null);
   const [snapPending, setSnapPending] = useState(false);
+  const [pricePoints, setPricePoints] = useState<PricePoint[]>([]);
 
   useEffect(() => {
     if (!position) return;
@@ -85,10 +88,18 @@ export default function PositionDetail() {
     if (stored?.analysis) {
       setIctAnalysis(stored.analysis as IctAnalysis);
     } else {
-      // 아직 캡처 전 (첫 폴링 대기 중)
       setSnapPending(true);
     }
   }, [position?.symbol]);
+
+  // markPrice 변화마다 최신 가격 이력 반영
+  useEffect(() => {
+    if (!position) return;
+    const contract = (position.symbol ?? '').replace('/', '_');
+    if (!contract) return;
+    const hist = loadPriceHistory(contract);
+    if (hist?.points.length) setPricePoints(hist.points);
+  }, [position?.markPrice, position?.symbol]);
 
   const isProfit  = (position?.profit ?? 0) >= 0;
   const pnlColor  = isProfit ? colors.market.rise : colors.market.fall;
@@ -181,6 +192,22 @@ export default function PositionDetail() {
                 direction={direction ?? 'Long'}
                 pending={snapPending && !ictAnalysis}
               />
+
+              {/* ── 시계열 가격 흐름 차트 ─────────── */}
+              {pricePoints.length >= 2 && (
+                <GlassCard intensity="medium" radius={24} padding={20} style={{ marginBottom: 12 }}>
+                  <Text style={{ fontSize: 12, color: colors.text.tertiary, marginBottom: 8, fontWeight: '600' } as any}>
+                    가격 흐름 (보유 기간)
+                  </Text>
+                  <TpSlPathChart
+                    points={pricePoints}
+                    entry={position.entryPrice}
+                    tp={position.targetPrice ?? null}
+                    sl={position.stopLoss    ?? null}
+                    direction={direction ?? 'Long'}
+                  />
+                </GlassCard>
+              )}
 
               <View style={{ height: 120 }} />
             </>

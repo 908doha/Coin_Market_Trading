@@ -2,12 +2,14 @@
  * 포지션 상세 / 거래 상세 공통 UI 컴포넌트
  * - 코인 헤더 카드 (아이콘 + 심볼 + 방향 + 레버리지)
  * - 손익 + 차트 카드 (PNL + PriceChart + 그리드 행)
+ * - TpSlPathChart: 시간축 기반 TP/SL 구간 가격 흐름 차트
  */
 import React from 'react';
 import { View, StyleSheet, Text as RNText } from 'react-native';
 import { Text, GlassCard, AnimatedNumber } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
+import type { PricePoint } from '@/utils/priceHistory';
 
 // ─── PriceChart ───────────────────────────────────────────────────────────────
 
@@ -252,6 +254,159 @@ export function PnlCard({
         <GridRowView key={i} row={row} isFirst={i === 0} />
       ))}
     </GlassCard>
+  );
+}
+
+// ─── TpSlPathChart ────────────────────────────────────────────────────────────
+/**
+ * 시간축 기반 TP/SL 구간 가격 흐름 차트 (SVG)
+ * - X축: 포지션 보유 기간 (시작 → 끝)
+ * - Y축: TP ~ SL 범위 (없으면 가격 min/max)
+ * - 가격 경로 폴리라인 + TP/entry/SL 수평 기준선
+ */
+export function TpSlPathChart({
+  points,
+  entry,
+  tp,
+  sl,
+  direction,
+  height = 160,
+}: {
+  points: PricePoint[];
+  entry: number;
+  tp?: number | null;
+  sl?: number | null;
+  direction: 'Long' | 'Short';
+  height?: number;
+}) {
+  if (!points || points.length < 2) return null;
+
+  const W = 320; // SVG viewBox width (내부 좌표계)
+  const H = height;
+  const PAD_LEFT  = 8;
+  const PAD_RIGHT = 60; // Y 레이블 공간
+  const PAD_TOP   = 12;
+  const PAD_BOT   = 12;
+  const chartW = W - PAD_LEFT - PAD_RIGHT;
+  const chartH = H - PAD_TOP - PAD_BOT;
+
+  const prices = points.map((p) => p.p);
+  const minP   = Math.min(...prices, sl ?? Infinity, tp ?? -Infinity);
+  const maxP   = Math.max(...prices, tp ?? -Infinity, sl ?? Infinity);
+
+  // entry를 범위에 포함
+  const lo  = Math.min(minP, entry) * 0.999;
+  const hi  = Math.max(maxP, entry) * 1.001;
+  const range = hi - lo;
+  if (range <= 0) return null;
+
+  const minT = points[0].t;
+  const maxT = points[points.length - 1].t;
+  const timeRange = maxT - minT || 1;
+
+  const toX = (t: number) => PAD_LEFT + ((t - minT) / timeRange) * chartW;
+  const toY = (p: number) => PAD_TOP  + ((hi - p) / range) * chartH;
+
+  const fmt = (v: number) =>
+    `$${v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+
+  const entryY = toY(entry);
+  const tpY    = tp && tp > 0 ? toY(tp) : null;
+  const slY    = sl && sl > 0 ? toY(sl) : null;
+
+  // 가격 경로 폴리라인 포인트 문자열 생성
+  const polyline = points.map((pt) => `${toX(pt.t).toFixed(1)},${toY(pt.p).toFixed(1)}`).join(' ');
+
+  // 구간별 색상: Long이면 entry 위 = 수익, 아래 = 손실
+  const isLong = direction === 'Long';
+  const lastPrice = points[points.length - 1].p;
+  const isWinning = isLong ? lastPrice >= entry : lastPrice <= entry;
+  const pathColor = isWinning ? '#F04452' : '#246CF9';
+
+  // R:R 계산
+  const rr = tp && sl && Math.abs(entry - sl) > 0
+    ? (Math.abs(tp - entry) / Math.abs(entry - sl)).toFixed(2)
+    : null;
+
+  return (
+    <View>
+      {/* @ts-ignore — React Native Web supports svg elements */}
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        width="100%"
+        height={H}
+        style={{ display: 'block' } as any}
+      >
+        {/* TP 영역 (entry → TP 사이 반투명) */}
+        {tpY !== null && (
+          <rect
+            x={PAD_LEFT} y={Math.min(entryY, tpY)}
+            width={chartW} height={Math.abs(entryY - tpY)}
+            fill="#F0445214"
+          />
+        )}
+        {/* SL 영역 (entry → SL 사이 반투명) */}
+        {slY !== null && (
+          <rect
+            x={PAD_LEFT} y={Math.min(entryY, slY)}
+            width={chartW} height={Math.abs(entryY - slY)}
+            fill="#246CF914"
+          />
+        )}
+
+        {/* TP 기준선 */}
+        {tpY !== null && tp && (
+          <line x1={PAD_LEFT} y1={tpY} x2={PAD_LEFT + chartW} y2={tpY}
+            stroke="#F04452" strokeWidth="1" strokeDasharray="4 3" />
+        )}
+        {/* SL 기준선 */}
+        {slY !== null && sl && (
+          <line x1={PAD_LEFT} y1={slY} x2={PAD_LEFT + chartW} y2={slY}
+            stroke="#246CF9" strokeWidth="1" strokeDasharray="4 3" />
+        )}
+        {/* entry 기준선 */}
+        <line x1={PAD_LEFT} y1={entryY} x2={PAD_LEFT + chartW} y2={entryY}
+          stroke="#666" strokeWidth="1" strokeDasharray="3 3" />
+
+        {/* 가격 경로 */}
+        <polyline
+          points={polyline}
+          fill="none"
+          stroke={pathColor}
+          strokeWidth="1.5"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+
+        {/* 현재(마지막) 가격 점 */}
+        <circle
+          cx={toX(points[points.length - 1].t)}
+          cy={toY(lastPrice)}
+          r="3"
+          fill={pathColor}
+        />
+
+        {/* Y 레이블 (우측) */}
+        {tpY !== null && tp && (
+          <text x={PAD_LEFT + chartW + 6} y={tpY + 4}
+            fontSize="10" fill="#F04452" fontWeight="600">{fmt(tp)}</text>
+        )}
+        <text x={PAD_LEFT + chartW + 6} y={entryY + 4}
+          fontSize="10" fill="#999" fontWeight="500">{fmt(entry)}</text>
+        {slY !== null && sl && (
+          <text x={PAD_LEFT + chartW + 6} y={slY + 4}
+            fontSize="10" fill="#246CF9" fontWeight="600">{fmt(sl)}</text>
+        )}
+      </svg>
+
+      {/* R:R 행 */}
+      {rr && (
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
+          <RNText style={{ fontSize: 11, color: '#999', fontWeight: '600' }}>R:R</RNText>
+          <RNText style={{ fontSize: 11, color: colors.text.primary, fontWeight: '700' }}>1 : {rr}</RNText>
+        </View>
+      )}
+    </View>
   );
 }
 

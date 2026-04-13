@@ -69,16 +69,23 @@ export default function TradeDetail() {
                   direction={trade.direction as 'Long' | 'Short'}
                   rows={[
                     {
-                      leftLabel: '진입가', leftValue: fmt$(trade.entryPrice ?? 0),
-                      rightLabel: '청산가', rightValue: fmt$(trade.exitPrice ?? 0), rightColor: pnlColor,
+                      leftLabel:  '투자금',
+                      leftValue:  trade.amount != null ? `₩${Math.round(trade.amount).toLocaleString('ko-KR')}` : '-',
+                      rightLabel: trade.leverage != null ? '레버리지' : '보유기간',
+                      rightValue: trade.leverage != null ? `${trade.leverage}x` : (trade.holdingDays != null ? `${trade.holdingDays}일` : '-'),
                     },
                     {
-                      leftLabel: '투자금', leftValue: trade.amount != null ? `₩${Math.round(trade.amount).toLocaleString('ko-KR')}` : '-',
-                      rightLabel: '보유기간', rightValue: trade.holdingDays != null ? `${trade.holdingDays}일` : '-',
+                      leftLabel:  '진입가',
+                      leftValue:  fmt$(trade.entryPrice ?? 0),
+                      rightLabel: '청산가',
+                      rightValue: fmt$(trade.exitPrice ?? 0),
+                      rightColor: pnlColor,
                     },
                     {
-                      leftLabel: '진입일시', leftValue: trade.entryAt ?? '-',
-                      rightLabel: '청산일시', rightValue: trade.exitAt ?? '-',
+                      leftLabel:  '진입일시',
+                      leftValue:  trade.entryAt ?? '-',
+                      rightLabel: '청산일시',
+                      rightValue: trade.exitAt ?? '-',
                     },
                   ]}
                 />

@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Text as RNText } from 'react-native';
+import { View, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
-import { Text, SubPageHeader, ScreenTransition, TradeDetailSkeleton, GlassCard } from '@/design-system';
+import { Text, SubPageHeader, ScreenTransition, TradeDetailSkeleton } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAccounts } from '@/store/accounts';
-import { CoinHeaderCard, PnlCard, TpSlPathChart } from '@/components/PositionDetailCard';
+import { CoinHeaderCard, PnlCard } from '@/components/PositionDetailCard';
 import IctAnalysisCard, { IctAnalysis } from '@/components/IctAnalysisCard';
 import { loadIctSnapshot } from '@/utils/ictSnapshot';
 import { loadPositionSnapshot } from '@/utils/positionSnapshot';
@@ -75,9 +75,7 @@ export default function TradeDetail() {
           ) : (() => {
             const isProfit = trade.profit >= 0;
             const pnlColor = isProfit ? colors.market.rise : colors.market.fall;
-
-            // 포지션 스냅샷 (수량/증거금/TP/SL)
-            const posSnap = loadPositionSnapshot(trade.symbol.replace('/', '_'));
+            const posSnap  = loadPositionSnapshot(trade.symbol.replace('/', '_'));
 
             return (
               <>
@@ -102,6 +100,7 @@ export default function TradeDetail() {
                   targetPrice={posSnap?.targetPrice ?? null}
                   stopLoss={posSnap?.stopLoss ?? null}
                   direction={trade.direction as 'Long' | 'Short'}
+                  pricePoints={pricePoints.length >= 2 ? pricePoints : undefined}
                   rows={[
                     {
                       leftLabel:  '수량',
@@ -126,22 +125,6 @@ export default function TradeDetail() {
                     },
                   ]}
                 />
-
-                {/* 시계열 가격 흐름 차트 */}
-                {pricePoints.length >= 2 && (
-                  <GlassCard intensity="medium" radius={24} padding={20} style={{ marginBottom: 12 }}>
-                    <RNText style={{ fontSize: 12, color: colors.text.tertiary, marginBottom: 8, fontWeight: '600' }}>
-                      가격 흐름 (보유 기간)
-                    </RNText>
-                    <TpSlPathChart
-                      points={pricePoints}
-                      entry={trade.entryPrice ?? 0}
-                      tp={posSnap?.targetPrice ?? null}
-                      sl={posSnap?.stopLoss    ?? null}
-                      direction={trade.direction as 'Long' | 'Short'}
-                    />
-                  </GlassCard>
-                )}
 
                 {ictAnalysis && (
                   <IctAnalysisCard

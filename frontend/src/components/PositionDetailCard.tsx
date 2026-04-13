@@ -197,6 +197,8 @@ export interface PnlCardProps {
   targetPrice?: number | null;
   stopLoss?:   number | null;
   direction:   'Long' | 'Short';
+  // 시계열 가격 이력 (제공 시 TpSlPathChart로 교체)
+  pricePoints?: PricePoint[];
   // 그리드 행
   rows: GridRow[];
 }
@@ -205,6 +207,7 @@ export function PnlCard({
   profit, profitRate, pnlLabel = '손익', animated = false,
   showUsd, rate = 1350, pnlColor, isProfit,
   entryPrice, currentOrExitPrice, currentLabel, targetPrice, stopLoss, direction,
+  pricePoints,
   rows,
 }: PnlCardProps) {
   const fmtProfit = showUsd
@@ -212,10 +215,12 @@ export function PnlCard({
     : formatKRWSigned;
 
   const profitVal = showUsd ? profit / rate : profit;
+  const hasPath   = pricePoints && pricePoints.length >= 2;
 
   return (
     <GlassCard intensity="medium" radius={24} padding={24} style={cd.section}>
-      <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
+      {/* P&L 숫자 행 */}
+      <View style={{ flexDirection: 'row', gap: 12, marginBottom: hasPath ? 14 : 16 }}>
         <View style={{ flex: 1 }}>
           <RNText style={cd.pnlLabel}>{pnlLabel}</RNText>
           {animated ? (
@@ -238,17 +243,34 @@ export function PnlCard({
             )}
           </View>
         </View>
-        <View style={{ width: 140 }}>
-          <PriceChart
+        {/* 시계열 없을 때만 수직 바 차트 표시 */}
+        {!hasPath && (
+          <View style={{ width: 140 }}>
+            <PriceChart
+              entry={entryPrice}
+              current={currentOrExitPrice}
+              tp={targetPrice}
+              sl={stopLoss}
+              direction={direction}
+              currentLabel={currentLabel}
+            />
+          </View>
+        )}
+      </View>
+
+      {/* 시계열 있을 때 풀너비 TpSlPathChart */}
+      {hasPath && (
+        <View style={{ marginBottom: 4 }}>
+          <TpSlPathChart
+            points={pricePoints!}
             entry={entryPrice}
-            current={currentOrExitPrice}
             tp={targetPrice}
             sl={stopLoss}
             direction={direction}
-            currentLabel={currentLabel}
+            height={160}
           />
         </View>
-      </View>
+      )}
 
       {rows.map((row, i) => (
         <GridRowView key={i} row={row} isFirst={i === 0} />
@@ -260,9 +282,10 @@ export function PnlCard({
 // ─── TpSlPathChart ────────────────────────────────────────────────────────────
 /**
  * 시간축 기반 TP/SL 구간 가격 흐름 차트 (SVG)
- * - X축: 포지션 보유 기간 (시작 → 끝)
+ * - X축: 포지션 보유 기간 (시작 → 끝) + 시간 레이블
  * - Y축: TP ~ SL 범위 (없으면 가격 min/max)
- * - 가격 경로 폴리라인 + TP/entry/SL 수평 기준선
+ * - 세그먼트별 색상: 진입가 위(수익) = 빨강, 아래(손실) = 파랑
+ * - 하단: TP/SL 근접도 % (5초마다 갱신) + R:R
  */
 export function TpSlPathChart({
   points,
@@ -270,7 +293,7 @@ export function TpSlPathChart({
   tp,
   sl,
   direction,
-  height = 160,
+  height = 180,
 }: {
   points: PricePoint[];
   entry: number;
@@ -281,131 +304,170 @@ export function TpSlPathChart({
 }) {
   if (!points || points.length < 2) return null;
 
-  const W = 320; // SVG viewBox width (내부 좌표계)
-  const H = height;
-  const PAD_LEFT  = 8;
-  const PAD_RIGHT = 60; // Y 레이블 공간
-  const PAD_TOP   = 12;
-  const PAD_BOT   = 12;
-  const chartW = W - PAD_LEFT - PAD_RIGHT;
-  const chartH = H - PAD_TOP - PAD_BOT;
+  const W    = 320;
+  const H    = height;
+  const PL   = 8;
+  const PR   = 60;
+  const PT   = 16;
+  const PB   = 22;   // X축 시간 레이블 공간
+  const cW   = W - PL - PR;
+  const cH   = H - PT - PB;
 
   const prices = points.map((p) => p.p);
-  const minP   = Math.min(...prices, sl ?? Infinity, tp ?? -Infinity);
-  const maxP   = Math.max(...prices, tp ?? -Infinity, sl ?? Infinity);
-
-  // entry를 범위에 포함
-  const lo  = Math.min(minP, entry) * 0.999;
-  const hi  = Math.max(maxP, entry) * 1.001;
-  const range = hi - lo;
+  const minP   = Math.min(...prices, ...(sl && sl > 0 ? [sl] : []));
+  const maxP   = Math.max(...prices, ...(tp && tp > 0 ? [tp] : []));
+  const lo     = Math.min(minP, entry) * 0.9985;
+  const hi     = Math.max(maxP, entry) * 1.0015;
+  const range  = hi - lo;
   if (range <= 0) return null;
 
-  const minT = points[0].t;
-  const maxT = points[points.length - 1].t;
-  const timeRange = maxT - minT || 1;
+  const minT    = points[0].t;
+  const maxT    = points[points.length - 1].t;
+  const tRange  = maxT - minT || 1;
 
-  const toX = (t: number) => PAD_LEFT + ((t - minT) / timeRange) * chartW;
-  const toY = (p: number) => PAD_TOP  + ((hi - p) / range) * chartH;
+  const toX = (t: number) => PL + ((t - minT) / tRange) * cW;
+  const toY = (p: number) => PT + ((hi - p) / range) * cH;
 
   const fmt = (v: number) =>
     `$${v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  const fmtTime = (ts: number) => {
+    const d = new Date(ts * 1000);
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mi = String(d.getMinutes()).padStart(2, '0');
+    return `${mm}/${dd} ${hh}:${mi}`;
+  };
 
-  const entryY = toY(entry);
-  const tpY    = tp && tp > 0 ? toY(tp) : null;
-  const slY    = sl && sl > 0 ? toY(sl) : null;
+  const isLong   = direction === 'Long';
+  const entryY   = toY(entry);
+  const tpY      = tp && tp > 0 ? toY(tp) : null;
+  const slY      = sl && sl > 0 ? toY(sl) : null;
+  const lastPt   = points[points.length - 1];
+  const lastP    = lastPt.p;
+  const lastX    = toX(lastPt.t);
+  const lastY    = toY(lastP);
 
-  // 가격 경로 폴리라인 포인트 문자열 생성
-  const polyline = points.map((pt) => `${toX(pt.t).toFixed(1)},${toY(pt.p).toFixed(1)}`).join(' ');
+  const PROFIT = '#F04452';
+  const LOSS   = '#246CF9';
 
-  // 구간별 색상: Long이면 entry 위 = 수익, 아래 = 손실
-  const isLong = direction === 'Long';
-  const lastPrice = points[points.length - 1].p;
-  const isWinning = isLong ? lastPrice >= entry : lastPrice <= entry;
-  const pathColor = isWinning ? '#F04452' : '#246CF9';
+  // 세그먼트별 색상: 중간값이 entry 위/아래 기준
+  const segments = points.slice(0, -1).map((pt, i) => {
+    const mid    = (pt.p + points[i + 1].p) / 2;
+    const profit = isLong ? mid >= entry : mid <= entry;
+    return {
+      x1: toX(pt.t),          y1: toY(pt.p),
+      x2: toX(points[i + 1].t), y2: toY(points[i + 1].p),
+      color: profit ? PROFIT : LOSS,
+    };
+  });
 
-  // R:R 계산
-  const rr = tp && sl && Math.abs(entry - sl) > 0
+  const dotColor = (isLong ? lastP >= entry : lastP <= entry) ? PROFIT : LOSS;
+
+  // TP/SL 근접도 (현재가 기준 %)
+  const tpPct = tp && tp > 0
+    ? (isLong ? (tp - lastP) : (lastP - tp)) / lastP * 100
+    : null;
+  const slBuf = sl && sl > 0
+    ? (isLong ? (lastP - sl) : (sl - lastP)) / lastP * 100
+    : null;
+
+  // R:R
+  const rr = tp && sl && tp > 0 && sl > 0 && Math.abs(entry - sl) > 0
     ? (Math.abs(tp - entry) / Math.abs(entry - sl)).toFixed(2)
     : null;
+
+  // 현재가 레이블 X 위치 (우측 레이블 영역과 겹치지 않도록)
+  const priceTagX = Math.min(Math.max(lastX, PL + 24), PL + cW - 4);
 
   return (
     <View>
       {/* @ts-ignore — React Native Web supports svg elements */}
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        width="100%"
-        height={H}
-        style={{ display: 'block' } as any}
-      >
-        {/* TP 영역 (entry → TP 사이 반투명) */}
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H}
+        style={{ display: 'block' } as any}>
+
+        {/* 구간 채우기 */}
         {tpY !== null && (
-          <rect
-            x={PAD_LEFT} y={Math.min(entryY, tpY)}
-            width={chartW} height={Math.abs(entryY - tpY)}
-            fill="#F0445214"
-          />
+          <rect x={PL} y={Math.min(entryY, tpY)}
+            width={cW} height={Math.abs(entryY - tpY)} fill="#F0445210" />
         )}
-        {/* SL 영역 (entry → SL 사이 반투명) */}
         {slY !== null && (
-          <rect
-            x={PAD_LEFT} y={Math.min(entryY, slY)}
-            width={chartW} height={Math.abs(entryY - slY)}
-            fill="#246CF914"
-          />
+          <rect x={PL} y={Math.min(entryY, slY)}
+            width={cW} height={Math.abs(entryY - slY)} fill="#246CF910" />
         )}
 
-        {/* TP 기준선 */}
+        {/* TP 기준선 + 레이블 */}
         {tpY !== null && tp && (
-          <line x1={PAD_LEFT} y1={tpY} x2={PAD_LEFT + chartW} y2={tpY}
-            stroke="#F04452" strokeWidth="1" strokeDasharray="4 3" />
+          <>
+            <line x1={PL} y1={tpY} x2={PL + cW} y2={tpY}
+              stroke={PROFIT} strokeWidth="1" strokeDasharray="4 3" />
+            <text x={PL + cW + 6} y={tpY + 4}
+              fontSize="10" fill={PROFIT} fontWeight="600">{fmt(tp)}</text>
+          </>
         )}
-        {/* SL 기준선 */}
+        {/* SL 기준선 + 레이블 */}
         {slY !== null && sl && (
-          <line x1={PAD_LEFT} y1={slY} x2={PAD_LEFT + chartW} y2={slY}
-            stroke="#246CF9" strokeWidth="1" strokeDasharray="4 3" />
+          <>
+            <line x1={PL} y1={slY} x2={PL + cW} y2={slY}
+              stroke={LOSS} strokeWidth="1" strokeDasharray="4 3" />
+            <text x={PL + cW + 6} y={slY + 4}
+              fontSize="10" fill={LOSS} fontWeight="600">{fmt(sl)}</text>
+          </>
         )}
-        {/* entry 기준선 */}
-        <line x1={PAD_LEFT} y1={entryY} x2={PAD_LEFT + chartW} y2={entryY}
-          stroke="#666" strokeWidth="1" strokeDasharray="3 3" />
+        {/* 진입가 기준선 + 레이블 */}
+        <line x1={PL} y1={entryY} x2={PL + cW} y2={entryY}
+          stroke="#555" strokeWidth="1" strokeDasharray="3 3" />
+        <text x={PL + cW + 6} y={entryY + 4}
+          fontSize="10" fill="#888" fontWeight="500">{fmt(entry)}</text>
 
-        {/* 가격 경로 */}
-        <polyline
-          points={polyline}
-          fill="none"
-          stroke={pathColor}
-          strokeWidth="1.5"
-          strokeLinejoin="round"
-          strokeLinecap="round"
-        />
+        {/* 세그먼트별 가격 경로 */}
+        {segments.map((s, i) => (
+          <line key={i}
+            x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2}
+            stroke={s.color} strokeWidth="1.8" strokeLinecap="round" />
+        ))}
 
-        {/* 현재(마지막) 가격 점 */}
-        <circle
-          cx={toX(points[points.length - 1].t)}
-          cy={toY(lastPrice)}
-          r="3"
-          fill={pathColor}
-        />
+        {/* 현재가 점 */}
+        <circle cx={lastX} cy={lastY} r="3.5" fill={dotColor} />
 
-        {/* Y 레이블 (우측) */}
-        {tpY !== null && tp && (
-          <text x={PAD_LEFT + chartW + 6} y={tpY + 4}
-            fontSize="10" fill="#F04452" fontWeight="600">{fmt(tp)}</text>
-        )}
-        <text x={PAD_LEFT + chartW + 6} y={entryY + 4}
-          fontSize="10" fill="#999" fontWeight="500">{fmt(entry)}</text>
-        {slY !== null && sl && (
-          <text x={PAD_LEFT + chartW + 6} y={slY + 4}
-            fontSize="10" fill="#246CF9" fontWeight="600">{fmt(sl)}</text>
-        )}
+        {/* 현재가 레이블 (점 왼쪽 위) */}
+        <text x={priceTagX} y={lastY - 7}
+          fontSize="9" fill={dotColor} fontWeight="700" textAnchor="middle">
+          {fmt(lastP)}
+        </text>
+
+        {/* X축 시간 레이블 */}
+        <text x={PL} y={H - 5}
+          fontSize="9" fill="#666" textAnchor="start">{fmtTime(minT)}</text>
+        <text x={PL + cW} y={H - 5}
+          fontSize="9" fill="#666" textAnchor="end">{fmtTime(maxT)}</text>
       </svg>
 
-      {/* R:R 행 */}
-      {rr && (
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
-          <RNText style={{ fontSize: 11, color: '#999', fontWeight: '600' }}>R:R</RNText>
-          <RNText style={{ fontSize: 11, color: colors.text.primary, fontWeight: '700' }}>1 : {rr}</RNText>
-        </View>
-      )}
+      {/* TP 근접도 / R:R / SL 근접도 */}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+        {tpPct != null ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <RNText style={{ fontSize: 11, color: '#888', fontWeight: '500' }}>TP</RNText>
+            <RNText style={{ fontSize: 12, color: PROFIT, fontWeight: '700' }}>
+              {tpPct >= 0 ? '+' : ''}{tpPct.toFixed(2)}%
+            </RNText>
+          </View>
+        ) : <View />}
+        {rr ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+            <RNText style={{ fontSize: 11, color: '#888' }}>R:R</RNText>
+            <RNText style={{ fontSize: 11, color: colors.text.primary, fontWeight: '700' }}>1:{rr}</RNText>
+          </View>
+        ) : <View />}
+        {slBuf != null ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <RNText style={{ fontSize: 12, color: LOSS, fontWeight: '700' }}>
+              -{slBuf.toFixed(2)}%
+            </RNText>
+            <RNText style={{ fontSize: 11, color: '#888', fontWeight: '500' }}>SL</RNText>
+          </View>
+        ) : <View />}
+      </View>
     </View>
   );
 }

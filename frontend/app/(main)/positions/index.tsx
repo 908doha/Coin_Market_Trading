@@ -418,17 +418,48 @@ export default function Trading() {
               </Svg>
             </Pressable>
 
-            {posExpanded && (
-              positions && positions.length > 0 ? (
-                positions.map((pos, i) => (
+            {posExpanded && (() => {
+              if (!positions || positions.length === 0) {
+                return (
+                  <View style={st.emptyPos}>
+                    <Text style={st.emptyPosText}>활성 포지션이 없어요</Text>
+                  </View>
+                );
+              }
+              // 다중 계좌 + 전체 보기 → 계좌별 그룹 분리
+              const multiGroup = accounts.length >= 2 && !selectedAccountId;
+              if (!multiGroup) {
+                return positions.map((pos, i) => (
                   <PositionRow key={pos.id} pos={pos} isLast={i === positions.length - 1} />
-                ))
-              ) : (
-                <View style={st.emptyPos}>
-                  <Text style={st.emptyPosText}>활성 포지션이 없어요</Text>
+                ));
+              }
+              // 계좌별로 그룹화
+              const groups = accounts
+                .map((acc) => ({
+                  acc,
+                  label: acc.name || EXCHANGE_LABELS[acc.exchange],
+                  items: positions.filter((p) => p.accountId === acc.id),
+                }))
+                .filter((g) => g.items.length > 0);
+
+              return groups.map((group, gi) => (
+                <View key={group.acc.id}>
+                  {/* 계좌 구분 헤더 */}
+                  <View style={st.groupHeader}>
+                    <ExchangeLogo exchange={group.acc.exchange} size={22} />
+                    <Text style={st.groupLabel}>{group.label}</Text>
+                    <View style={st.groupCount}>
+                      <Text style={st.groupCountText}>{group.items.length}</Text>
+                    </View>
+                  </View>
+                  {group.items.map((pos, i) => (
+                    <PositionRow key={pos.id} pos={pos} isLast={i === group.items.length - 1} />
+                  ))}
+                  {/* 그룹 사이 구분선 (마지막 그룹 제외) */}
+                  {gi < groups.length - 1 && <View style={st.groupDivider} />}
                 </View>
-              )
-            )}
+              ));
+            })()}
           </View>
 
           <View style={{ height: 120 }} />
@@ -486,4 +517,11 @@ const st = StyleSheet.create({
   posSectionTitle:  { fontSize: 17, fontWeight: '700', color: '#191919' },
   emptyPos:         { paddingHorizontal: 20, paddingVertical: 28, alignItems: 'center' },
   emptyPosText:     { fontSize: 14, color: colors.text.tertiary },
+
+  // 계좌별 그룹 헤더
+  groupHeader:      { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingVertical: 10, backgroundColor: '#FAFAFA', borderTopWidth: 1, borderTopColor: '#F0F0F0' },
+  groupLabel:       { fontSize: 13, fontWeight: '600', color: colors.text.secondary, flex: 1 },
+  groupCount:       { backgroundColor: '#E8EAED', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 },
+  groupCountText:   { fontSize: 11, fontWeight: '700', color: '#555' },
+  groupDivider:     { height: 8, backgroundColor: '#F5F5F5' },
 });

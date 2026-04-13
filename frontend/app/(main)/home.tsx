@@ -800,7 +800,7 @@ export default function Home() {
           <GlassCard style={styles.heroCard} intensity="medium" radius={24}>
             {balLoading && !balance ? <AssetCardSkeleton /> : (
               <>
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                   <Text variant="meta" color={colors.text.tertiary}>총 자산</Text>
                   {accounts.length > 1 && (
                     <Pressable
@@ -832,7 +832,7 @@ export default function Home() {
                   fontWeight="700"
                   color={colors.text.primary}
                   letterSpacing={-0.5}
-                  style={{ marginTop: spacing[2], marginBottom: spacing[2] }}
+                  style={{ marginTop: 0, marginBottom: 10 }}
                 />
                 <View style={styles.heroSubRow}>
                   <AnimatedNumber

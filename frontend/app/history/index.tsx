@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   View, StyleSheet, SectionList, Pressable, Modal,
 } from 'react-native';
@@ -435,6 +435,9 @@ const sec = StyleSheet.create({
 // ── 메인 ─────────────────────────────────────────────────────────────────────
 export default function History() {
   const [filter, setFilter]       = useState<Filter>('전체');
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [filterPos, setFilterPos] = useState({ top: 0, right: 0 });
+  const filterBtnRef              = useRef<View>(null);
   const { accountId } = useLocalSearchParams<{ accountId?: string }>();
   const [showUsd, setShowUsd]     = useState(false);
   const [period, setPeriod]       = useState<Period>('월');
@@ -576,6 +579,33 @@ export default function History() {
         onClose={() => setPickerOpen(false)}
       />
 
+      {/* ── 필터 팝오버 ── */}
+      <Modal visible={filterOpen} transparent animationType="fade" onRequestClose={() => setFilterOpen(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'transparent' }} onPress={() => setFilterOpen(false)}>
+          <View style={[st.filterSheet, { position: 'absolute', top: filterPos.top, right: 20 }]}>
+            {(['전체', '수익', '손실'] as Filter[]).map((f, i) => {
+              const isSel = filter === f;
+              return (
+                <Pressable
+                  key={f}
+                  style={({ pressed }) => [st.filterRow, i < 2 && st.filterDivider, pressed && { backgroundColor: '#F8F8F8' }]}
+                  onPress={() => { fade(() => setFilter(f)); setFilterOpen(false); }}
+                >
+                  <View style={st.filterCheck}>
+                    {isSel && (
+                      <Svg width={15} height={15} viewBox="0 0 24 24">
+                        <Path d="M5 13l4 4L19 7" stroke="#246CF9" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                      </Svg>
+                    )}
+                  </View>
+                  <Text style={[st.filterText, isSel && { color: '#246CF9', fontWeight: '700' }]}>{f}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </Pressable>
+      </Modal>
+
       <SectionList
         sections={sections}
         keyExtractor={(item) => item.id}
@@ -607,13 +637,23 @@ export default function History() {
               </View>
             )}
 
-            {/* ── 필터 탭 ── */}
-            <View style={{ paddingHorizontal: 16, paddingVertical: 8 }}>
-              <SlidingPillTabs
-                tabs={['전체', '수익', '손실']}
-                active={filter}
-                onChange={(f) => fade(() => setFilter(f as Filter))}
-              />
+            {/* ── 필터 드롭다운 ── */}
+            <View style={{ paddingHorizontal: 20, paddingVertical: 10, flexDirection: 'row', justifyContent: 'flex-end' }}>
+              <Pressable
+                ref={filterBtnRef}
+                style={st.filterBtn}
+                onPress={() => {
+                  filterBtnRef.current?.measureInWindow((x, y, w, h) => {
+                    setFilterPos({ top: y + h + 6, right: 0 });
+                    setFilterOpen(true);
+                  });
+                }}
+              >
+                <Text style={st.filterBtnText}>{filter}</Text>
+                <Svg width={11} height={11} viewBox="0 0 24 24" fill="none">
+                  <Path d="M6 9l6 6 6-6" stroke="#555" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </Svg>
+              </Pressable>
             </View>
 
             {/* ── 로딩 / 에러 / 빈 상태 ── */}
@@ -668,4 +708,13 @@ const st = StyleSheet.create({
   emptyText: { fontSize: 15, color: colors.text.tertiary },
   retryBtn:  { marginTop: 8, paddingHorizontal: 20, paddingVertical: 10, backgroundColor: '#F5F5F5', borderRadius: 10 },
   retryText: { fontSize: 14, fontWeight: '600', color: colors.text.primary },
+
+  // 필터 드롭다운
+  filterBtn:     { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#F0F0F5', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 },
+  filterBtnText: { fontSize: 13, fontWeight: '600', color: '#555' },
+  filterSheet:   { minWidth: 120, backgroundColor: '#FFF', borderRadius: 14, paddingVertical: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.14, shadowRadius: 20, elevation: 12 },
+  filterRow:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 13 },
+  filterDivider: { borderBottomWidth: 1, borderBottomColor: '#F2F2F7' },
+  filterCheck:   { width: 20, alignItems: 'center', marginRight: 8 },
+  filterText:    { fontSize: 15, fontWeight: '500', color: '#191919' },
 });

@@ -229,10 +229,11 @@ function PositionRow({ pos, isLast }: { pos: any; isLast: boolean }) {
   const up = pos.profit >= 0;
   const pnlColor = up ? colors.market.rise : colors.market.fall;
   return (
-    <Pressable
-      style={({ pressed }) => [pr.row, !isLast && pr.border, pressed && { backgroundColor: '#F8F8F8' }]}
+    <PressableScale
+      style={[!isLast && pr.border]}
       onPress={() => router.push(`/(main)/positions/${pos.id}`)}
     >
+      <View style={pr.row}>
       <View style={[pr.icon, { backgroundColor: up ? colors.market.riseSubtle : colors.market.fallSubtle }]}>
         <Text style={[pr.iconText, { color: pnlColor }]}>{pos.coin?.slice(0, 2) ?? 'BT'}</Text>
       </View>
@@ -264,7 +265,8 @@ function PositionRow({ pos, isLast }: { pos: any; isLast: boolean }) {
           style={{ marginTop: 2 }}
         />
       </View>
-    </Pressable>
+      </View>
+    </PressableScale>
   );
 }
 const pr = StyleSheet.create({
@@ -369,25 +371,23 @@ export default function Trading() {
 
           {/* ── 메뉴: 거래 내역 + 수익 분석 ── */}
           <View style={st.menuSection}>
-            <Pressable
-              style={({ pressed }) => [st.menuRow, pressed && { backgroundColor: '#F8F8F8' }]}
-              onPress={() => router.push('/history')}
-            >
-              <Text style={st.menuText}>거래 내역</Text>
-              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                <Path d="M9 18l6-6-6-6" stroke="#C4C4C4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </Svg>
-            </Pressable>
+            <PressableScale onPress={() => router.push('/history')}>
+              <View style={st.menuRow}>
+                <Text style={st.menuText}>거래 내역</Text>
+                <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                  <Path d="M9 18l6-6-6-6" stroke="#C4C4C4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </Svg>
+              </View>
+            </PressableScale>
             <View style={st.menuDivider} />
-            <Pressable
-              style={({ pressed }) => [st.menuRow, pressed && { backgroundColor: '#F8F8F8' }]}
-              onPress={() => router.push('/(main)/positions/analysis')}
-            >
-              <Text style={st.menuText}>수익 분석</Text>
-              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                <Path d="M9 18l6-6-6-6" stroke="#C4C4C4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </Svg>
-            </Pressable>
+            <PressableScale onPress={() => router.push('/(main)/positions/analysis')}>
+              <View style={st.menuRow}>
+                <Text style={st.menuText}>수익 분석</Text>
+                <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                  <Path d="M9 18l6-6-6-6" stroke="#C4C4C4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </Svg>
+              </View>
+            </PressableScale>
           </View>
 
           {/* ── 포지션 현황 (접기/펼치기) ── */}

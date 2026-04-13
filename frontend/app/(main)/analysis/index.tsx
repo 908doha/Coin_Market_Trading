@@ -13,7 +13,7 @@ import Animated, {
   useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS,
 } from 'react-native-reanimated';
 import Svg, { Path, Polygon, Rect, Text as SvgText, Circle } from 'react-native-svg';
-import { Text, FadeTabView, AnimatedNumber, Skeleton } from '@/design-system';
+import { Text, FadeTabView, AnimatedNumber, Skeleton, PressableScale } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType, ExchangeAccount } from '@/store/accounts';
 import { tradesService } from '@/services';
@@ -273,10 +273,8 @@ function TickerRow({
       : colors.text.secondary;
 
   return (
-    <Pressable
-      style={({ pressed }) => [tr.row, !isLast && tr.border, pressed && { backgroundColor: '#F8F8F8' }]}
-      onPress={onPress}
-    >
+    <PressableScale style={[!isLast && tr.border]} onPress={onPress}>
+      <View style={tr.row}>
       {/* 코인 아이콘 */}
       <View style={tr.icon}>
         <Text style={tr.iconText}>{ticker.coin.slice(0, 2)}</Text>
@@ -299,14 +297,14 @@ function TickerRow({
         </Text>
       </View>
 
-      {/* 우측: 변동률 + 분석 화살표 */}
-      <View style={{ alignItems: 'flex-end', gap: 4 }}>
+      {/* 우측: 변동률만 표시 (분석은 행 전체 탭으로) */}
+      <View style={{ alignItems: 'flex-end' }}>
         <Text style={[tr.change, { color: changeColor }]}>
           {ticker.change24h > 0 ? '+' : ''}{ticker.change24h.toFixed(2)}%
         </Text>
-        <Text style={tr.analyzeBtn}>분석 →</Text>
       </View>
-    </Pressable>
+      </View>
+    </PressableScale>
   );
 }
 
@@ -321,7 +319,6 @@ const tr = StyleSheet.create({
   vol:        { fontSize: 12, color: colors.text.tertiary },
   price:      { fontSize: 13, color: colors.text.secondary, marginTop: 2 },
   change:     { fontSize: 14, fontWeight: '600' },
-  analyzeBtn: { fontSize: 12, fontWeight: '600', color: colors.text.secondary, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: colors.bg.elevated },
 });
 
 // ─── 메인 ─────────────────────────────────────────────────────────────────────
@@ -610,7 +607,7 @@ const st = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    fontSize: 14,
+    fontSize: 16,
     color: colors.text.primary,
     borderWidth: 1,
     borderColor: colors.border.default,

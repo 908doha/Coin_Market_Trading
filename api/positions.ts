@@ -161,8 +161,10 @@ async function fetchGatePositions(apiKey: string, apiSecret: string): Promise<Po
           : holdingMins > 0 ? `${holdingMins}분` : '1분 미만';
 
       const DOW = ['일', '월', '화', '수', '목', '금', '토'];
-      const entryAt = openTime
-        ? `${openTime.getFullYear()}.${String(openTime.getMonth()+1).padStart(2,'0')}.${String(openTime.getDate()).padStart(2,'0')} (${DOW[openTime.getDay()]}) ${String(openTime.getHours()).padStart(2,'0')}:${String(openTime.getMinutes()).padStart(2,'0')}`
+      // KST = UTC+9 (한국 표준시, DST 없음) — Vercel 서버는 UTC이므로 명시적 변환
+      const kst = openTime ? new Date(openTime.getTime() + 9 * 3_600_000) : null;
+      const entryAt = kst
+        ? `${kst.getUTCFullYear()}.${String(kst.getUTCMonth()+1).padStart(2,'0')}.${String(kst.getUTCDate()).padStart(2,'0')} (${DOW[kst.getUTCDay()]}) ${String(kst.getUTCHours()).padStart(2,'0')}:${String(kst.getUTCMinutes()).padStart(2,'0')}`
         : '-';
 
       const tpsl = priceOrders.get(contract);

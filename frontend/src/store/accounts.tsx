@@ -137,7 +137,8 @@ interface AccountsContextValue {
   addAccount:      (input: Omit<ExchangeAccount, 'id' | 'createdAt'>) => Promise<ExchangeAccount>;
   updateAccount:   (id: string, updates: Partial<Omit<ExchangeAccount, 'id' | 'createdAt'>>) => Promise<void>;
   removeAccount:   (id: string) => Promise<void>;
-  refreshBalances: () => Promise<void>;
+  refreshBalances:  () => Promise<void>;
+  refreshPositions: () => Promise<void>;
 }
 
 const AccountsContext = createContext<AccountsContextValue | null>(null);
@@ -372,7 +373,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
       accounts, isLoading,
       balances, balanceErrors, totalBalance, balancesLoading,
       positions,
-      addAccount, updateAccount, removeAccount, refreshBalances,
+      addAccount, updateAccount, removeAccount, refreshBalances, refreshPositions,
     }}>
       {children}
     </AccountsContext.Provider>

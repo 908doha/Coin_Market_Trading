@@ -36,7 +36,8 @@ export default function PositionDetail() {
   );
 
   const [showUsd, setShowUsd] = useState(false);
-  const { positions: allPositions, totalBalance } = useAccounts();
+  const [tpSlRefreshing, setTpSlRefreshing] = useState(false);
+  const { positions: allPositions, totalBalance, refreshPositions } = useAccounts();
   const livePosition = allPositions.find((p) => p.id === id) ?? null;
   const rate = totalBalance?.usdtKrw ?? 1350;
   const position = livePosition ?? cachedPosition;
@@ -116,6 +117,11 @@ export default function PositionDetail() {
       entryAtTs={entryAtTs}
       ictAnalysis={ictAnalysis}
       ictPending={snapPending && !ictAnalysis}
+      onRefreshTpSl={async () => {
+        setTpSlRefreshing(true);
+        try { await refreshPositions(); } finally { setTpSlRefreshing(false); }
+      }}
+      tpSlRefreshing={tpSlRefreshing}
       rows={!position ? [] : [
         {
           leftLabel: '수량',    leftValue: `${coinQty} ${position.coin}`,
@@ -140,14 +146,14 @@ export default function PositionDetail() {
             />
           ),
         },
-        ...(position.stopLoss! > 0 || position.targetPrice! > 0 ? [{
+        {
           leftLabel:  '손절가',
-          leftValue:  position.stopLoss! > 0 ? fmt$(position.stopLoss!) : '-',
-          leftColor:  position.stopLoss! > 0 ? colors.negative.text : undefined,
+          leftValue:  position.stopLoss! > 0 ? fmt$(position.stopLoss!) : '설정 안됨',
+          leftColor:  position.stopLoss! > 0 ? colors.negative.text : colors.text.tertiary,
           rightLabel: '목표가',
-          rightValue: position.targetPrice! > 0 ? fmt$(position.targetPrice!) : '-',
+          rightValue: position.targetPrice! > 0 ? fmt$(position.targetPrice!) : '설정 안됨',
           rightColor: position.targetPrice! > 0 ? colors.positive.text : undefined,
-        }] : []),
+        },
       ]}
     />
   );

@@ -4,7 +4,7 @@
  * → UI를 변경하려면 이 파일 하나만 수정하면 양쪽 화면에 반영됨
  */
 import React from 'react';
-import { View, ScrollView } from 'react-native';
+import { View, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import {
@@ -58,6 +58,10 @@ export interface PositionDetailViewProps {
   // ─ ICT 분석
   ictAnalysis: IctAnalysis | null;
   ictPending?: boolean;
+
+  // ─ TP/SL 수동 새로고침 (포지션 상세에서만 사용)
+  onRefreshTpSl?:    () => void;
+  tpSlRefreshing?:   boolean;
 }
 
 export function PositionDetailView({
@@ -71,6 +75,7 @@ export function PositionDetailView({
   rows,
   pricePoints, entryAtTs,
   ictAnalysis, ictPending,
+  onRefreshTpSl, tpSlRefreshing,
 }: PositionDetailViewProps) {
   return (
     <ScreenTransition>
@@ -125,6 +130,21 @@ export function PositionDetailView({
                 entryAtTs={entryAtTs}
                 rows={rows}
               />
+
+              {/* TP/SL 수동 새로고침 버튼 (포지션 상세에서만 표시) */}
+              {onRefreshTpSl && (
+                <Pressable
+                  onPress={onRefreshTpSl}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end',
+                    marginTop: -4, marginBottom: 10, paddingHorizontal: 4, gap: 5,
+                  }}
+                >
+                  <Text style={{ fontSize: 11, color: tpSlRefreshing ? colors.text.disabled : colors.text.tertiary }}>
+                    {tpSlRefreshing ? 'TP/SL 조회 중...' : '↻  TP/SL 새로고침'}
+                  </Text>
+                </Pressable>
+              )}
 
               <IctAnalysisCard
                 ictAnalysis={ictAnalysis}

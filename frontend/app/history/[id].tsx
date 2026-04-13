@@ -15,6 +15,16 @@ import type { PricePoint } from '@/utils/priceHistory';
 const fmt$ = (v: number) =>
   `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+// ISO 문자열 → KST 표시 형식 ("2025.04.10 (목) 18:07")
+function formatKST(iso?: string): string {
+  if (!iso) return '-';
+  const ms = Date.parse(iso);
+  if (isNaN(ms)) return iso;
+  const DOW = ['일', '월', '화', '수', '목', '금', '토'];
+  const d   = new Date(ms + 9 * 3_600_000);  // UTC → KST
+  return `${d.getUTCFullYear()}.${String(d.getUTCMonth()+1).padStart(2,'0')}.${String(d.getUTCDate()).padStart(2,'0')} (${DOW[d.getUTCDay()]}) ${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`;
+}
+
 export default function TradeDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { accounts } = useAccounts();
@@ -62,6 +72,14 @@ export default function TradeDetail() {
     ? Math.floor(Date.parse(trade.entryAt) / 1000) || undefined
     : undefined;
 
+  // 레버리지 반영 수익률: 실제 손익 / 실제 증거금
+  const leveragedRate = posSnap?.amount && posSnap.amount > 0 && trade
+    ? parseFloat(((trade.profit / posSnap.amount) * 100).toFixed(2))
+    : trade?.profitRate ?? 0;
+
+  // KST 포맷 진입 시각
+  const entryAtKST = formatKST(trade?.entryAt);
+
   return (
     <PositionDetailView
       title="거래 상세"
@@ -73,10 +91,10 @@ export default function TradeDetail() {
       symbol={trade?.symbol ?? ''}
       direction={(trade?.direction ?? 'Long') as 'Long' | 'Short'}
       leverage={trade?.leverage}
-      entryAt={trade?.entryAt}
+      entryAt={entryAtKST}
       holdingLabel={trade?.holdingDays != null ? `${trade.holdingDays}일 보유` : undefined}
       profit={trade?.profit ?? 0}
-      profitRate={trade?.profitRate ?? 0}
+      profitRate={leveragedRate}
       pnlLabel="실현손익"
       animated={false}
       pnlColor={pnlColor}
@@ -105,7 +123,7 @@ export default function TradeDetail() {
           rightColor: pnlColor,
         },
         {
-          leftLabel:  '진입일시', leftValue:  trade.entryAt ?? '-',
+          leftLabel:  '진입일시', leftValue:  entryAtKST,
           rightLabel: '보유기간', rightValue: trade.holdingDays != null ? `${trade.holdingDays}일` : '-',
         },
       ]}

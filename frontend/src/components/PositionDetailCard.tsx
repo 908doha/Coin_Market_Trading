@@ -385,11 +385,12 @@ export function TpSlPathChart({
   const fmt = (v: number) =>
     `$${v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
   const fmtTime = (ts: number) => {
-    const d  = new Date(ts * 1000);
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    const hh = String(d.getHours()).padStart(2, '0');
-    const mi = String(d.getMinutes()).padStart(2, '0');
+    // KST = UTC+9 (브라우저 로케일에 무관하게 항상 한국 시간)
+    const d  = new Date((ts + 9 * 3600) * 1000);
+    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(d.getUTCDate()).padStart(2, '0');
+    const hh = String(d.getUTCHours()).padStart(2, '0');
+    const mi = String(d.getUTCMinutes()).padStart(2, '0');
     return `${mm}/${dd} ${hh}:${mi}`;
   };
 

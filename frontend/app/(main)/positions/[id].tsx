@@ -113,6 +113,19 @@ export default function PositionDetail() {
   const direction = position?.direction;
   const p         = position as any;
 
+  // entryAt → Unix 초 변환 (그래프 시작점 앵커)
+  const parseEntryAtTs = (s?: string): number | undefined => {
+    if (!s || s === '-') return undefined;
+    const ts = Date.parse(s);
+    if (!isNaN(ts)) return Math.floor(ts / 1000);
+    const m = s.match(/(\d{4})\.(\d{2})\.(\d{2})\s+\([^)]+\)\s+(\d{2}):(\d{2})/);
+    if (m) return Math.floor(new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00`).getTime() / 1000);
+    const m2 = s.match(/(\d{4})\.(\d{2})\.(\d{2})\s+(\d{2}):(\d{2})/);
+    if (m2) return Math.floor(new Date(`${m2[1]}-${m2[2]}-${m2[3]}T${m2[4]}:${m2[5]}:00`).getTime() / 1000);
+    return undefined;
+  };
+  const entryAtTs = parseEntryAtTs(p.entryAt);
+
   // 실제 코인 수량: 명목가치(KRW) / 환율 / 진입가
   const coinQty = (() => {
     const notionalUsdt = (position?.currentValue ?? 0) / (p.usdtKrw ?? rate ?? 1350);
@@ -167,6 +180,7 @@ export default function PositionDetail() {
                 stopLoss={position.stopLoss}
                 direction={direction ?? 'Long'}
                 pricePoints={pricePoints.length >= 2 ? pricePoints : undefined}
+                entryAtTs={entryAtTs}
                 rows={[
                   {
                     leftLabel: '수량', leftValue: `${coinQty} ${position.coin}`,

@@ -187,8 +187,16 @@ async function fetchGatePositions(apiKey: string, apiSecret: string): Promise<Po
         liqPrice:     parseFloat(p.liq_price || '0'),
         size:         Math.abs(size),
         usdtKrw,
-        ...(tpsl?.tp ? { targetPrice: tpsl.tp } : {}),
-        ...(tpsl?.sl ? { stopLoss:    tpsl.sl } : {}),
+        ...((() => {
+          const posLvlTp = parseFloat(p.take_profit || '0') || null;
+          const posLvlSl = parseFloat(p.stop_loss   || '0') || null;
+          const finalTp  = tpsl?.tp ?? posLvlTp;
+          const finalSl  = tpsl?.sl ?? posLvlSl;
+          return {
+            ...(finalTp ? { targetPrice: finalTp } : {}),
+            ...(finalSl ? { stopLoss:    finalSl } : {}),
+          };
+        })()),
       };
     });
 }

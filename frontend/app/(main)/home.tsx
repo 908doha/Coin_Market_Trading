@@ -32,10 +32,12 @@ function buildChartFromTrades(
 ): { value: number; date: string }[] {
   if (!trades.length) return [];
 
-  const sorted     = [...trades].sort((a, b) => +new Date(a.exitAt) - +new Date(b.exitAt));
-  const totalPnl   = sorted.reduce((s, t) => s + t.profit, 0);
+  const sorted       = [...trades].sort((a, b) => +new Date(a.exitAt) - +new Date(b.exitAt));
+  const totalPnl     = sorted.reduce((s, t) => s + t.profit, 0);
   const currentTotal = balance?.total ?? 0;
-  const base       = currentTotal > 0 ? currentTotal - totalPnl : 0;
+  // 미실현 손익(오픈 포지션)을 제외한 순수 초기 자본 기준
+  const openPnl      = balance?.profitTotal ?? 0;
+  const base         = currentTotal > 0 ? currentTotal - totalPnl - openPnl : 0;
   const now        = new Date();
 
   // ── 전체: 거래가 있는 날만 sparse하게 표시 ────────────────────────────────
@@ -767,13 +769,20 @@ export default function Home() {
       ? (accounts[0].name || EXCHANGE_LABELS[accounts[0].exchange])
       : '모든 계좌';
 
+  // 선택된 계좌에 맞게 거래 필터 (전체 선택이면 전부 사용)
+  const chartTrades = useMemo(() => {
+    const trades = allTrades ?? [];
+    if (!selectedAccountId) return trades;
+    return trades.filter((t) => t.accountId === selectedAccountId);
+  }, [allTrades, selectedAccountId]);
+
   const chartData  = useMemo(
-    () => buildChartFromTrades(allTrades ?? [], baseBalance ?? null, period),
-    [allTrades, baseBalance, period],
+    () => buildChartFromTrades(chartTrades, balance ?? null, period),
+    [chartTrades, balance, period],
   );
   const barsData   = useMemo(
-    () => buildPeriodBarsFromTrades(allTrades ?? [], baseBalance ?? null, period),
-    [allTrades, baseBalance, period],
+    () => buildPeriodBarsFromTrades(chartTrades, balance ?? null, period),
+    [chartTrades, balance, period],
   );
   return (
     <FadeTabView style={styles.root}>

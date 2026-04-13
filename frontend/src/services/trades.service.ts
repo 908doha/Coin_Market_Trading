@@ -11,6 +11,7 @@ export interface Trade {
   holdingDays: number;
   entryAt:     string;
   exitAt:      string;
+  accountId?:        string;   // getAllByAccounts 에서 주입
   leverage?:         number;
   // compat
   entryPrice?:       number;
@@ -51,6 +52,7 @@ export const tradesService = {
       accounts.map((acc) =>
         tradesService
           .getByAccount({ exchange: acc.exchange, apiKey: acc.apiKey, apiSecret: acc.apiSecret })
+          .then((ts) => ts.map((t) => ({ ...t, accountId: acc.id })))
           .catch(() => [] as Trade[]),
       ),
     );

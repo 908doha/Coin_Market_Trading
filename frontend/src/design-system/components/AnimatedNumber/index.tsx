@@ -5,6 +5,10 @@
  * - 오른쪽 자릿수(ones) = key "d0", 왼쪽으로 갈수록 d1, d2...
  * - 기호(₩, +, ,, 원) = key "sym0", "sym1"... (왼쪽부터)
  * - 자릿수 증가 시 새 자리만 마운트(애니메이션 없이 즉시 표시)
+ *
+ * Web SSR 주의: useSharedValue/useAnimatedStyle은 정적 생성 시 transform을 적용 못해
+ * 하이드레이션 불일치(React #418)를 유발한다. mounted 가드로 초기 렌더는 plain Text,
+ * 마운트 후 애니메이션으로 전환.
  */
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -124,7 +128,7 @@ export function AnimatedNumber({
         /\d/.test(char) ? (
           <RollingDigit key={key} digit={char} lineH={lineH} txStyle={txStyle} />
         ) : (
-          <Text key={key} style={[txStyle, { lineHeight: lineH, height: lineH }]}>{char}</Text>
+          <Text key={key} style={txStyle}>{char}</Text>
         ),
       )}
     </View>

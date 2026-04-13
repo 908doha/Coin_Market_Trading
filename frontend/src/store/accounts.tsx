@@ -9,7 +9,9 @@ import React, { createContext, useContext, useEffect, useState, useCallback, use
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import { exchangeService } from '../services/exchange.service';
+import { positionsService } from '../services/positions.service';
 import type { Balance } from '../services/account.service';
+import type { Position } from '../services/positions.service';
 
 export type ExchangeType = 'binance' | 'upbit' | 'bybit' | 'okx' | 'gate' | 'custom';
 
@@ -128,6 +130,7 @@ interface AccountsContextValue {
   totalBalance:    Balance | null;
   balancesLoading: boolean;
   isLoading:       boolean;
+  positions:       Position[];
   addAccount:      (input: Omit<ExchangeAccount, 'id' | 'createdAt'>) => Promise<ExchangeAccount>;
   updateAccount:   (id: string, updates: Partial<Omit<ExchangeAccount, 'id' | 'createdAt'>>) => Promise<void>;
   removeAccount:   (id: string) => Promise<void>;
@@ -161,10 +164,12 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
   const [balances, setBalances]          = useState<Record<string, Balance | null>>({});
   const [balanceErrors, setBalErrors]    = useState<Record<string, string | null>>({});
   const [balancesLoading, setBalLoading] = useState(false);
-  const accountsRef = useRef(accounts);
+  const [positions, setPositions]        = useState<Position[]>([]);
+  const accountsRef     = useRef(accounts);
+  const firstBalLoad    = useRef(true);   // skeleton은 최초 1회만
   accountsRef.current = accounts;
 
-  // 앱 시작 + 로그인 후: 로컬 → 백엔드 순서로 로드
+  // 앱 시작 + 토큰 변경 시: 로컬 → 백엔드 순서로 로드
   const syncFromBackend = useCallback(async () => {
     const local = await localLoad();
     setAccounts(local);
@@ -185,10 +190,11 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     syncFromBackend();
   }, []);
 
-  // 로그인 후 토큰이 생기면 재동기화 (새 컴퓨터 로그인 대응)
+  // 로그인 후 토큰이 생기면 재동기화 (토큰 없이 마운트된 경우 대비)
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     let lastToken = localStorage.getItem(TOKEN_KEY);
+
     const interval = setInterval(() => {
       const current = localStorage.getItem(TOKEN_KEY);
       if (current && current !== lastToken) {
@@ -197,14 +203,16 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
         syncFromBackend();
       }
     }, 1000);
+
     return () => clearInterval(interval);
   }, [syncFromBackend]);
 
-  // 잔고 자동 fetch
+  // 잔고 자동 fetch — 첫 로드만 로딩 표시, 이후 5초 폴링은 silent
   const refreshBalances = useCallback(async () => {
     const list = accountsRef.current;
     if (!list.length) return;
-    setBalLoading(true);
+    // 스켈레톤은 최초 로드 한 번만, 이후 갱신은 AnimatedNumber 룰렛만 사용
+    if (firstBalLoad.current) setBalLoading(true);
     const results = await Promise.all(
       list.map(async (acc) => {
         try {
@@ -227,18 +235,37 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     setBalances(map);
     setBalErrors(errMap);
     setBalLoading(false);
+    firstBalLoad.current = false;
+  }, []);
+
+  // 포지션 silent refresh (로딩 표시 없이 갱신)
+  const refreshPositions = useCallback(async () => {
+    const list = accountsRef.current;
+    if (!list.length) return;
+    try {
+      const pos = await positionsService.getAllByAccounts(list);
+      setPositions(pos);
+    } catch (e) {
+      console.error('[positions] refresh error:', e);
+    }
   }, []);
 
   useEffect(() => {
-    if (!isLoading && accounts.length > 0) refreshBalances();
+    if (!isLoading && accounts.length > 0) {
+      refreshBalances();
+      refreshPositions();
+    }
   }, [isLoading, accounts.length]);
 
-  // 30초마다 잔고 자동 갱신
+  // 5초마다 잔고 + 포지션 자동 갱신
   useEffect(() => {
     if (isLoading || accounts.length === 0) return;
-    const id = setInterval(refreshBalances, 10_000);
+    const id = setInterval(() => {
+      refreshBalances();
+      refreshPositions();
+    }, 5_000);
     return () => clearInterval(id);
-  }, [isLoading, accounts.length, refreshBalances]);
+  }, [isLoading, accounts.length, refreshBalances, refreshPositions]);
 
   const totalBalance = accounts.length
     ? sumBalances(accounts.map((a) => balances[a.id] ?? null))
@@ -283,6 +310,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     <AccountsContext.Provider value={{
       accounts, isLoading,
       balances, balanceErrors, totalBalance, balancesLoading,
+      positions,
       addAccount, updateAccount, removeAccount, refreshBalances,
     }}>
       {children}

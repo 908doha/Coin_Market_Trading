@@ -1,12 +1,12 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Pressable } from 'react-native';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
+import { View, StyleSheet, ScrollView, Pressable, Platform, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Svg, { Polyline, Defs, LinearGradient, Stop, Polygon, Path, Rect, Text as SvgText, Line, Circle } from 'react-native-svg';
-import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
 import { Text, GlassCard, PressableScale, FadeTabView, AssetCardSkeleton, PageHeader, CurrencyToggle, AnimatedNumber } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
-import { accountService, positionsService, tradesService } from '@/services';
+import { accountService, tradesService } from '@/services';
 import type { Trade } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeAccount, ExchangeType } from '@/store/accounts';
@@ -694,15 +694,13 @@ function AccountRow({
             <AnimatedNumber
               value={amountValue}
               formatter={amountFormatter}
-              fontSize={16}
+              fontSize={18}
               fontWeight="700"
               color={colors.text.primary}
-              style={accRow.amount}
+              letterSpacing={-0.3}
             />
           ) : (
-            <Text style={accRow.amount} numberOfLines={1}>
-              {error ? '조회 실패' : '—'}
-            </Text>
+            <Text style={accRow.amount} numberOfLines={1}>{error ? '조회 실패' : '—'}</Text>
           )}
           <Text style={accRow.name} numberOfLines={1}>
             {account.name || label} · {label}
@@ -717,18 +715,17 @@ function AccountRow({
             <AnimatedNumber
               value={pnlValue}
               formatter={pnlFormatter}
-              fontSize={13}
-              fontWeight="600"
+              fontSize={14}
+              fontWeight="700"
               color={isProfit ? colors.market.rise : colors.market.fall}
-              style={accRow.pnlText}
             />
             <AnimatedNumber
               value={balance.profitRate}
               formatter={formatRate}
-              fontSize={12}
-              fontWeight="500"
+              fontSize={13}
+              fontWeight="600"
               color={isProfit ? colors.market.rise : colors.market.fall}
-              style={accRow.pnlRate}
+              style={{ marginTop: 2 }}
             />
           </View>
         )}
@@ -740,7 +737,9 @@ function AccountRow({
 export default function Home() {
   const [period, setPeriod] = useState<PeriodKey>('일');
   const [showUsd, setShowUsd] = useState(false);
-  const { accounts, balances, balanceErrors, totalBalance, balancesLoading } = useAccounts();
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  const [showAccPicker, setShowAccPicker]         = useState(false);
+  const { accounts, balances, balanceErrors, totalBalance, balancesLoading, positions } = useAccounts();
 
   const { data: singleBalance, isLoading: singleLoading } = useApi(
     () => accounts.length === 0 ? accountService.getBalance() : Promise.resolve(null),
@@ -750,21 +749,29 @@ export default function Home() {
     () => tradesService.getAllByAccounts(accounts),
     [accounts],
   );
-  const { data: positions } = useApi(
-    () => positionsService.getAllByAccounts(accounts),
-    [accounts],
-    { pollingInterval: 10_000 },
-  );
-  const balance    = accounts.length > 0 ? totalBalance : singleBalance;
-  const balLoading = accounts.length > 0 ? balancesLoading : singleLoading;
-  const isProfit   = (balance?.profitTotal ?? 0) >= 0;
+
+  // 선택된 계좌의 잔고 (null이면 전체 합산)
+  const baseBalance  = accounts.length > 0 ? totalBalance : singleBalance;
+  const displayBal   = selectedAccountId ? (balances[selectedAccountId] ?? null) : baseBalance;
+  const balance      = displayBal;
+  const balLoading   = accounts.length > 0 ? balancesLoading : singleLoading;
+  const isProfit     = (balance?.profitTotal ?? 0) >= 0;
+
+  // 선택된 계좌 레이블
+  const selAcc        = accounts.find((a) => a.id === selectedAccountId);
+  const accLabel      = selAcc
+    ? (selAcc.name || EXCHANGE_LABELS[selAcc.exchange])
+    : accounts.length === 1
+      ? (accounts[0].name || EXCHANGE_LABELS[accounts[0].exchange])
+      : '모든 계좌';
+
   const chartData  = useMemo(
-    () => buildChartFromTrades(allTrades ?? [], balance ?? null, period),
-    [allTrades, balance, period],
+    () => buildChartFromTrades(allTrades ?? [], baseBalance ?? null, period),
+    [allTrades, baseBalance, period],
   );
   const barsData   = useMemo(
-    () => buildPeriodBarsFromTrades(allTrades ?? [], balance ?? null, period),
-    [allTrades, balance, period],
+    () => buildPeriodBarsFromTrades(allTrades ?? [], baseBalance ?? null, period),
+    [allTrades, baseBalance, period],
   );
   return (
     <FadeTabView style={styles.root}>
@@ -791,37 +798,48 @@ export default function Home() {
           <GlassCard style={styles.heroCard} intensity="medium" radius={24}>
             {balLoading && !balance ? <AssetCardSkeleton /> : (
               <>
-                <Text variant="meta" color={colors.text.tertiary} style={{ marginBottom: 6 }}>총 자산</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <Text variant="meta" color={colors.text.tertiary}>총 자산</Text>
+                  {accounts.length > 1 && (
+                    <Pressable style={styles.accDropBtn} onPress={() => setShowAccPicker(true)}>
+                      <Text style={styles.accDropLabel} numberOfLines={1}>{accLabel}</Text>
+                      <Svg width={12} height={12} viewBox="0 0 24 24" fill="none">
+                        <Path d="M6 9l6 6 6-6" stroke="#AEAEB2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      </Svg>
+                    </Pressable>
+                  )}
+                </View>
                 <AnimatedNumber
-                  value={showUsd && (balance?.totalUsd ?? 0) > 0 ? (balance?.totalUsd ?? 0) : (balance?.total ?? 0)}
-                  formatter={(v) => showUsd && (balance?.totalUsd ?? 0) > 0
-                    ? `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                    : formatKRW(v)}
-                  fontSize={30}
+                  value={showUsd && (balance?.totalUsd ?? 0) > 0
+                    ? (balance?.totalUsd ?? 0)
+                    : (balance?.total ?? 0)}
+                  formatter={showUsd && (balance?.totalUsd ?? 0) > 0
+                    ? (v) => `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    : formatKRW}
+                  fontSize={26}
                   fontWeight="700"
                   color={colors.text.primary}
                   letterSpacing={-0.5}
-                  style={[styles.heroAmount, { marginBottom: 0 }]}
+                  style={{ marginTop: spacing[2], marginBottom: spacing[2] }}
                 />
                 <View style={styles.heroSubRow}>
                   <AnimatedNumber
                     value={showUsd && (balance?.usdtKrw ?? 0) > 0
-                      ? (balance?.profitTotal ?? 0) / (balance?.usdtKrw ?? 1350)
+                      ? (balance!.profitTotal / balance!.usdtKrw!)
                       : (balance?.profitTotal ?? 0)}
-                    formatter={(v) => showUsd && (balance?.usdtKrw ?? 0) > 0
-                      ? `${v >= 0 ? '+' : '-'}$${Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                      : formatKRWSigned(v)}
+                    formatter={showUsd && (balance?.usdtKrw ?? 0) > 0
+                      ? (v) => { const s = v >= 0 ? '+' : '-'; return `${s}$${Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
+                      : formatKRWSigned}
                     fontSize={15}
                     fontWeight="600"
                     color={isProfit ? colors.market.rise : colors.market.fall}
-                    style={styles.heroPnl}
                   />
                   <View style={[styles.pnlBadge, { backgroundColor: isProfit ? colors.market.riseSubtle : colors.bg.elevated }]}>
                     <AnimatedNumber
                       value={balance?.profitRate ?? 0}
                       formatter={formatRate}
                       fontSize={13}
-                      fontWeight="700"
+                      fontWeight="600"
                       color={isProfit ? colors.negative.text : colors.market.fall}
                     />
                   </View>
@@ -865,7 +883,7 @@ export default function Home() {
 
           {accounts.length === 0 ? (
             <PressableScale onPress={() => router.push('/(main)/account/api-accounts')} scaleTo={0.98}>
-              <GlassCard intensity="low" radius={20} padding={0} style={styles.section}>
+              <GlassCard intensity="low" radius={20} padding={20} style={styles.section}>
                 <View style={styles.emptyAccounts}>
                   <Text style={{ fontSize: 24 }}>🔌</Text>
                   <Text style={styles.emptyAccountsText}>API를 연결하면 여기에 표시돼요</Text>
@@ -893,14 +911,14 @@ export default function Home() {
           {/* ── 활성 포지션 ── */}
           <GlassCard intensity="low" radius={20} padding={0} style={styles.section}>
             <PressableScale onPress={() => router.push('/(main)/positions')} scaleTo={0.98}>
-              <View style={[styles.posHeader, { paddingHorizontal: 20, paddingTop: 20 }]}>
+              <View style={[styles.posHeader, { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 0 }]}>
                 <Text style={styles.sectionTitle}>활성 포지션</Text>
                 <Text style={styles.posArrow}>›</Text>
               </View>
             </PressableScale>
 
             {!positions?.length ? (
-              <View style={{ paddingTop: 16, paddingHorizontal: 20, alignItems: 'center' }}>
+              <View style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 20, alignItems: 'center' }}>
                 <Text style={styles.emptyText}>현재 활성 포지션이 없어요</Text>
               </View>
             ) : (() => {
@@ -919,7 +937,7 @@ export default function Home() {
                   : [{ accountId: undefined, label: '', items: positions }];
 
               return (
-                <View style={{ marginTop: 16, gap: multiAccount ? 0 : 0 }}>
+                <View style={{ marginTop: 8, paddingBottom: 8 }}>
                   {groups.map((group) => (
                     <View key={group.accountId ?? 'all'}>
                       {multiAccount && (
@@ -927,39 +945,32 @@ export default function Home() {
                       )}
                       {group.items.map((pos, idx) => {
                         const up = pos.profit >= 0;
+                        const pnlColor = up ? colors.market.rise : colors.market.fall;
                         return (
-                          <PressableScale
+                          <Pressable
                             key={pos.id}
+                            style={({ pressed }) => [styles.posRow, idx < group.items.length - 1 && styles.posRowBorder, pressed && { backgroundColor: '#F8F8F8' }]}
                             onPress={() => router.push(`/positions/${pos.id}`)}
-                            style={[styles.posItem, idx > 0 && { marginTop: 10 }]}
                           >
-                            <View style={styles.posRow}>
-                              <View style={[styles.posIcon, { backgroundColor: up ? colors.market.riseSubtle : colors.bg.elevated }]}>
-                                <Text style={{ fontSize: 18, fontWeight: '700', color: up ? colors.negative.text : colors.market.fall }}>
-                                  {pos.coin.slice(0, 2)}
-                                </Text>
-                              </View>
-                              <View style={{ flex: 1 }}>
-                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing[2] }}>
-                                  <Text style={styles.posSymbol}>{pos.symbol}</Text>
-                                  <View style={[styles.dirBadge, { backgroundColor: pos.direction === 'Long' ? colors.bg.elevated : colors.market.riseSubtle }]}>
-                                    <Text style={[styles.dirText, { color: pos.direction === 'Long' ? colors.text.secondary : colors.negative.text }]}>
-                                      {pos.direction === 'Long' ? '롱' : '숏'}
-                                    </Text>
-                                  </View>
-                                </View>
-                                <Text variant="meta" color={colors.text.tertiary}>{formatKRW(pos.amount)}</Text>
-                              </View>
-                              <View style={{ alignItems: 'flex-end' }}>
-                                <Text style={[styles.posProfit, { color: up ? colors.market.rise : colors.market.fall }]}>
-                                  {formatKRWSigned(pos.profit)}
-                                </Text>
-                                <Text style={[styles.posProfitRate, { color: up ? colors.market.rise : colors.market.fall }]}>
-                                  {formatRate(pos.profitRate)}
-                                </Text>
-                              </View>
+                            <View style={[styles.posIcon, { backgroundColor: up ? colors.market.riseSubtle : colors.market.fallSubtle }]}>
+                              <Text style={[styles.posIconText, { color: pnlColor }]}>{pos.coin?.slice(0, 2) ?? '--'}</Text>
                             </View>
-                          </PressableScale>
+                            <View style={{ flex: 1 }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <Text style={styles.posSymbol}>{pos.symbol}</Text>
+                                <View style={[styles.dirBadge, { backgroundColor: pos.direction === 'Long' ? '#EAF6F0' : '#FFF0F0' }]}>
+                                  <Text style={[styles.dirText, { color: pos.direction === 'Long' ? '#1AC24E' : '#FF4747' }]}>
+                                    {pos.direction === 'Long' ? '롱' : '숏'}
+                                  </Text>
+                                </View>
+                              </View>
+                              <Text style={styles.posSub}>{formatKRW(pos.amount)} 투자</Text>
+                            </View>
+                            <View style={{ alignItems: 'flex-end' }}>
+                              <AnimatedNumber value={pos.profit} formatter={formatKRWSigned} fontSize={15} fontWeight="700" color={pnlColor} />
+                              <AnimatedNumber value={pos.profitRate} formatter={formatRate} fontSize={13} fontWeight="600" color={pnlColor} style={{ marginTop: 2 }} />
+                            </View>
+                          </Pressable>
                         );
                       })}
                     </View>
@@ -973,6 +984,51 @@ export default function Home() {
         </ScrollView>
       </SafeAreaView>
 
+      {/* ── 계좌 선택 드롭다운 모달 ── */}
+      <Modal
+        visible={showAccPicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowAccPicker(false)}
+      >
+        <Pressable style={styles.pickerOverlay} onPress={() => setShowAccPicker(false)}>
+          <View style={styles.pickerSheet}>
+            <Pressable
+              style={({ pressed }) => [styles.pickerRow, pressed && { backgroundColor: '#F8F8F8' }]}
+              onPress={() => { setSelectedAccountId(null); setShowAccPicker(false); }}
+            >
+              <Text style={[styles.pickerText, !selectedAccountId && { color: '#246CF9', fontWeight: '700' }]}>
+                모든 계좌
+              </Text>
+              {!selectedAccountId && (
+                <Svg width={16} height={16} viewBox="0 0 24 24">
+                  <Path d="M5 13l4 4L19 7" stroke="#246CF9" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                </Svg>
+              )}
+            </Pressable>
+            {accounts.map((acc) => {
+              const isSel = selectedAccountId === acc.id;
+              const label = acc.name || EXCHANGE_LABELS[acc.exchange];
+              return (
+                <Pressable
+                  key={acc.id}
+                  style={({ pressed }) => [styles.pickerRow, pressed && { backgroundColor: '#F8F8F8' }]}
+                  onPress={() => { setSelectedAccountId(acc.id); setShowAccPicker(false); }}
+                >
+                  <Text style={[styles.pickerText, isSel && { color: '#246CF9', fontWeight: '700' }]}>
+                    {label}
+                  </Text>
+                  {isSel && (
+                    <Svg width={16} height={16} viewBox="0 0 24 24">
+                      <Path d="M5 13l4 4L19 7" stroke="#246CF9" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                    </Svg>
+                  )}
+                </Pressable>
+              );
+            })}
+          </View>
+        </Pressable>
+      </Modal>
     </FadeTabView>
   );
 }
@@ -1007,16 +1063,24 @@ const styles = StyleSheet.create({
 
   posHeader:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   posArrow:        { fontSize: 22, color: colors.text.disabled, lineHeight: 26 },
-  posAccountLabel: { fontSize: 12, fontWeight: '600', color: colors.text.tertiary, marginTop: 14, marginBottom: 6, letterSpacing: 0.3 },
-  posItem:         { marginTop: 0 },
-  posRow:          { flexDirection: 'row', alignItems: 'center', gap: spacing[3], paddingVertical: 14, paddingHorizontal: 20 },
-  posIcon:      { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
-  posSymbol:    { fontSize: 15, fontWeight: '700', color: colors.text.primary },
-  posProfit:    { fontSize: 15, fontWeight: '700' },
-  posProfitRate:{ fontSize: 12, fontWeight: '600', marginTop: 2 },
-  dirBadge:     { borderRadius: borderRadius.xs + 2, paddingHorizontal: spacing[1] + 2, paddingVertical: 2 },
-  dirText:      { fontSize: 11, fontWeight: '600' },
-  emptyText:    { fontSize: 14, color: colors.text.tertiary },
+  posAccountLabel: { fontSize: 12, fontWeight: '600', color: colors.text.tertiary, paddingHorizontal: 20, paddingTop: 8, paddingBottom: 2, letterSpacing: 0.3 },
+  posRow:          { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16 },
+  posRowBorder:    { borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
+  posIcon:         { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  posIconText:     { fontSize: 13, fontWeight: '700' },
+  posSymbol:       { fontSize: 15, fontWeight: '700', color: colors.text.primary },
+  posSub:          { fontSize: 13, color: colors.text.tertiary, marginTop: 3 },
+  dirBadge:        { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  dirText:         { fontSize: 11, fontWeight: '700' },
+
+  accDropBtn:   { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#F5F5F5', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5, maxWidth: 140 },
+  accDropLabel: { fontSize: 12, fontWeight: '600', color: '#555', flexShrink: 1 },
+
+  pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.25)', justifyContent: 'flex-start', paddingTop: 120, paddingHorizontal: 20 },
+  pickerSheet:   { backgroundColor: '#FFF', borderRadius: 16, paddingVertical: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 16, elevation: 8 },
+  pickerRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14 },
+  pickerText:    { fontSize: 15, fontWeight: '500', color: '#191919' },
+  emptyText:       { fontSize: 14, color: colors.text.tertiary },
 });
 
 const accRow = StyleSheet.create({

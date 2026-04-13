@@ -1,36 +1,13 @@
 import React from 'react';
-import {
-  View,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-} from 'react-native';
+import { View, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
-import Svg, { Path } from 'react-native-svg';
-import { Text, Card, Badge, Divider, SubPageHeader, GlassCard, TradeDetailSkeleton } from '@/design-system';
-import { colors, spacing, borderRadius } from '@/design-system/tokens';
+import { Text, SubPageHeader, ScreenTransition, TradeDetailSkeleton } from '@/design-system';
+import { colors } from '@/design-system/tokens';
 import { tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAccounts } from '@/store/accounts';
-import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
-
-function InfoRow({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
-  return (
-    <View style={rowStyles.row}>
-      <Text variant="body2" color={colors.text.tertiary}>{label}</Text>
-      <Text variant="body1Medium" color={valueColor ?? colors.text.primary}>{value}</Text>
-    </View>
-  );
-}
-const rowStyles = StyleSheet.create({
-  row: {
-    flexDirection:   'row',
-    justifyContent:  'space-between',
-    alignItems:      'center',
-    paddingVertical: spacing[2],
-  },
-});
+import { CoinHeaderCard, PnlCard } from '@/components/PositionDetailCard';
 
 export default function TradeDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -40,165 +17,74 @@ export default function TradeDetail() {
     [id],
   );
 
-  if (isLoading) {
-    return (
-      <SafeAreaView style={styles.safe} edges={['top']}>
-        <SubPageHeader title="거래 상세" onBack={() => router.back()} />
-        <ScrollView showsVerticalScrollIndicator={false}>
-          <TradeDetailSkeleton />
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
-
-  if (error || !trade) {
-    return (
-      <SafeAreaView style={styles.safe} edges={['top']}>
-        <SubPageHeader title="거래 상세" onBack={() => router.back()} />
-        <View style={styles.center}>
-          <Text variant="body1" color={colors.text.tertiary}>거래 내역을 찾을 수 없어요</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  const isProfit = trade.profit >= 0;
+  const fmt$ = (v: number) =>
+    `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <SubPageHeader title="거래 상세" onBack={() => router.back()} />
+    <ScreenTransition>
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <SubPageHeader title="거래 상세" onBack={() => router.back()} />
 
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* ── 코인 헤더 ── */}
-        <View style={styles.coinHeader}>
-          <View style={[styles.coinIcon, {
-            backgroundColor: isProfit ? colors.positive.subtle : colors.negative.subtle,
-          }]}>
-            <Text variant="heading2" color={isProfit ? colors.positive.text : colors.negative.text}>
-              {trade.symbol.slice(0, 2)}
-            </Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing[2] }}>
-              <Text variant="title2">{trade.symbol}</Text>
-              <Badge label={trade.direction} variant={trade.direction === 'Long' ? 'positive' : 'negative'} />
-              {trade.type === 'stop_loss' && <Badge label="손절" variant="negative" />}
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          {isLoading ? (
+            <TradeDetailSkeleton />
+          ) : error || !trade ? (
+            <View style={styles.center}>
+              <Text variant="body1" color={colors.text.tertiary}>거래 내역을 찾을 수 없어요</Text>
             </View>
-            <Text variant="body2" color={colors.text.tertiary}>{trade.coin}</Text>
-          </View>
-        </View>
+          ) : (() => {
+            const isProfit = trade.profit >= 0;
+            const pnlColor = isProfit ? colors.market.rise : colors.market.fall;
 
-        {/* ── 손익 요약 ── */}
-        <Card variant="filled" style={styles.profitCard}>
-          <View style={styles.profitRow}>
-            <View>
-              <Text variant="caption1" color={colors.text.tertiary}>실현 손익</Text>
-              <Text
-                variant="numericLarge"
-                color={isProfit ? colors.market.rise : colors.market.fall}
-                style={{ marginTop: spacing[1] }}
-              >
-                {formatKRWSigned(trade.profit)}
-              </Text>
-              <Text
-                variant="heading3"
-                color={isProfit ? colors.market.rise : colors.market.fall}
-              >
-                {formatRate(trade.profitRate)}
-              </Text>
-            </View>
-            <View style={{ alignItems: 'flex-end', gap: spacing[2] }}>
-              <View>
-                <Text variant="caption1" color={colors.text.tertiary} align="right">투자금</Text>
-                <Text variant="body1Medium" align="right">{formatKRW(trade.amount ?? 0)}</Text>
-              </View>
-              <View>
-                <Text variant="caption1" color={colors.text.tertiary} align="right">보유기간</Text>
-                <Text variant="body1Medium" align="right">{trade.holdingDays}일</Text>
-              </View>
-            </View>
-          </View>
-        </Card>
+            return (
+              <>
+                <CoinHeaderCard
+                  coin={trade.coin ?? trade.symbol.slice(0, 3)}
+                  symbol={trade.symbol}
+                  direction={trade.direction as 'Long' | 'Short'}
+                  entryAt={trade.entryAt}
+                  holdingLabel={trade.holdingDays != null ? `${trade.holdingDays}일 보유` : undefined}
+                />
 
-        {/* ── 거래 정보 ── */}
-        <Card variant="outlined" style={styles.section}>
-          <Text variant="heading3" style={{ marginBottom: spacing[3] }}>거래 정보</Text>
-          <InfoRow label="진입가"  value={formatKRW(trade.entryPrice ?? 0)} />
-          <Divider />
-          <InfoRow label="청산가"  value={formatKRW(trade.exitPrice ?? 0)} valueColor={isProfit ? colors.market.rise : colors.market.fall} />
-          <Divider />
-          <InfoRow label="진입일시" value={trade.entryAt} />
-          <Divider />
-          <InfoRow label="청산일시" value={trade.exitAt} />
-          <Divider />
-          <InfoRow label="보유기간" value={`${trade.holdingDays}일`} />
-        </Card>
+                <PnlCard
+                  profit={trade.profit}
+                  profitRate={trade.profitRate}
+                  pnlLabel="실현손익"
+                  animated={false}
+                  pnlColor={pnlColor}
+                  isProfit={isProfit}
+                  entryPrice={trade.entryPrice ?? 0}
+                  currentOrExitPrice={trade.exitPrice ?? 0}
+                  currentLabel="청산"
+                  direction={trade.direction as 'Long' | 'Short'}
+                  rows={[
+                    {
+                      leftLabel: '진입가', leftValue: fmt$(trade.entryPrice ?? 0),
+                      rightLabel: '청산가', rightValue: fmt$(trade.exitPrice ?? 0), rightColor: pnlColor,
+                    },
+                    {
+                      leftLabel: '투자금', leftValue: trade.amount != null ? `₩${Math.round(trade.amount).toLocaleString('ko-KR')}` : '-',
+                      rightLabel: '보유기간', rightValue: trade.holdingDays != null ? `${trade.holdingDays}일` : '-',
+                    },
+                    {
+                      leftLabel: '진입일시', leftValue: trade.entryAt ?? '-',
+                      rightLabel: '청산일시', rightValue: trade.exitAt ?? '-',
+                    },
+                  ]}
+                />
 
-
-        <View style={{ height: spacing[10] }} />
-      </ScrollView>
-    </SafeAreaView>
+                <View style={{ height: 120 }} />
+              </>
+            );
+          })()}
+        </ScrollView>
+      </SafeAreaView>
+    </ScreenTransition>
   );
 }
 
 const styles = StyleSheet.create({
-  safe:   { flex: 1, backgroundColor: colors.bg.default },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  navBar: {
-    flexDirection:    'row',
-    alignItems:       'center',
-    justifyContent:   'space-between',
-    paddingHorizontal: spacing[5],
-    paddingVertical:  spacing[3],
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border.default,
-  },
-  backBtn: { width: 40, paddingVertical: spacing[1] },
-  scroll:  { flex: 1 },
-  content: { paddingHorizontal: spacing[5], paddingTop: spacing[5] },
-
-  coinHeader: {
-    flexDirection: 'row',
-    gap:           spacing[4],
-    marginBottom:  spacing[5],
-  },
-  coinIcon: {
-    width:           56,
-    height:          56,
-    borderRadius:    28,
-    alignItems:      'center',
-    justifyContent:  'center',
-  },
-
-  profitCard: { marginBottom: spacing[4] },
-  profitRow:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-
-  section: { marginBottom: spacing[4] },
-
-  agentHeader: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    gap:           spacing[2],
-    marginBottom:  spacing[4],
-  },
-  block: {
-    backgroundColor: colors.bg.subtle,
-    borderRadius:    borderRadius.md,
-    padding:         spacing[4],
-  },
-  blockLabel: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    gap:           spacing[2],
-    marginBottom:  spacing[2],
-  },
-  dot: {
-    width:        8,
-    height:       8,
-    borderRadius: 4,
-  },
+  safe:    { flex: 1, backgroundColor: '#FFFFFF' },
+  content: { paddingHorizontal: 20, paddingTop: 8 },
+  center:  { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80 },
 });

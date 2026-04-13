@@ -2,12 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, ScrollView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
-import { Text, GlassCard, Badge, SubPageHeader, ScreenTransition, PositionDetailSkeleton, AnimatedNumber } from '@/design-system';
+import { Text, GlassCard, Badge, SubPageHeader, ScreenTransition, PositionDetailSkeleton, AnimatedNumber, CurrencyToggle } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 import { useAccounts } from '@/store/accounts';
+import { CoinHeaderCard, PnlCard, PriceChart } from '@/components/PositionDetailCard';
 
 interface FvgInfo { ce: number; fillPct: number; }
 interface IctAnalysis {
@@ -238,198 +239,7 @@ const score_ = StyleSheet.create({
   scoreNum:   { fontSize: 11, fontWeight: '700' },
 });
 
-// ─── 가격 레인지 시각화 ───────────────────────────────────────────────────────
-// ─── 미니 가격 바 (통합 손익 카드 우측) ──────────────────────────────────────
-function MiniPriceBar({
-  entry, current, tp, sl, direction,
-}: {
-  entry: number; current: number;
-  tp?: number | null; sl?: number | null;
-  direction: 'Long' | 'Short';
-}) {
-  const prices = [entry, current, tp ?? 0, sl ?? 0].filter(Boolean) as number[];
-  if (prices.length < 2) return null;
 
-  const high  = Math.max(...prices) * 1.003;
-  const low   = Math.min(...prices) * 0.997;
-  const range = high - low;
-  if (range <= 0) return null;
-
-  const toY = (p: number) => ((high - p) / range) * 100;
-  const entryY   = toY(entry);
-  const currentY = toY(current);
-  const tpY      = (tp && tp > 0) ? toY(tp) : null;
-  const slY      = (sl && sl > 0) ? toY(sl) : null;
-
-  const isLong    = direction === 'Long';
-  const isWinning = isLong ? current >= entry : current <= entry;
-  const dotColor  = isWinning ? '#1AC24E' : '#FF4747';
-
-  return (
-    <View style={mpb.container}>
-      <View style={mpb.bar}>
-        {tpY !== null && (
-          <View style={[mpb.zone, {
-            top: `${Math.min(entryY, tpY)}%` as any,
-            height: `${Math.max(Math.abs(tpY - entryY), 1)}%` as any,
-            backgroundColor: '#1AC24E22',
-          }]} />
-        )}
-        {slY !== null && (
-          <View style={[mpb.zone, {
-            top: `${Math.min(entryY, slY)}%` as any,
-            height: `${Math.max(Math.abs(slY - entryY), 1)}%` as any,
-            backgroundColor: '#FF474722',
-          }]} />
-        )}
-        {tpY !== null && (
-          <View style={[mpb.line, { top: `${tpY}%` as any, backgroundColor: '#1AC24E' }]} />
-        )}
-        {slY !== null && (
-          <View style={[mpb.line, { top: `${slY}%` as any, backgroundColor: '#FF4747' }]} />
-        )}
-        <View style={[mpb.line, { top: `${entryY}%` as any, backgroundColor: colors.text.tertiary }]} />
-        <View style={[mpb.dot, { top: `${currentY}%` as any, marginTop: -5, backgroundColor: dotColor }]} />
-      </View>
-    </View>
-  );
-}
-const mpb = StyleSheet.create({
-  container: {
-    width: 100,
-    alignSelf: 'stretch',
-    backgroundColor: colors.bg.elevated,
-    borderRadius: 14,
-    padding: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  bar:  { width: 14, flex: 1, minHeight: 90, position: 'relative', backgroundColor: colors.bg.subtle, borderRadius: 6 },
-  zone: { position: 'absolute', left: 0, right: 0 },
-  line: { position: 'absolute', left: 0, right: 0, height: 1.5 },
-  dot:  { position: 'absolute', left: -5, width: 10, height: 10, borderRadius: 5 },
-});
-
-function PriceRangeBar({
-  entry, current, tp, sl, direction,
-}: {
-  entry: number; current: number; tp: number | null; sl: number | null; direction: 'Long' | 'Short';
-}) {
-  if (!tp && !sl) return null;
-
-  const prices = [entry, current, tp, sl].filter(Boolean) as number[];
-  const high = Math.max(...prices) * 1.002;
-  const low  = Math.min(...prices) * 0.998;
-  const range = high - low;
-  if (range <= 0) return null;
-
-  const toY = (p: number) => ((high - p) / range) * 100; // 0=top 100=bottom
-
-  const fmt = (v: number) => `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  const entryY   = toY(entry);
-  const currentY = toY(current);
-  const tpY      = tp ? toY(tp)   : null;
-  const slY      = sl ? toY(sl)   : null;
-
-  // profit zone top and bottom %
-  const profitTop    = tpY    !== null ? Math.min(entryY, tpY)    : entryY;
-  const profitBottom = tpY    !== null ? Math.max(entryY, tpY)    : entryY;
-  const lossTop      = slY    !== null ? Math.min(entryY, slY)    : entryY;
-  const lossBottom   = slY    !== null ? Math.max(entryY, slY)    : entryY;
-
-  const rr = tp && sl
-    ? (Math.abs(tp - entry) / Math.abs(entry - sl)).toFixed(2)
-    : null;
-
-  return (
-    <View style={prv.wrap}>
-      <Text style={prv.title}>가격 레인지</Text>
-      <View style={prv.chartArea}>
-        {/* 바 컨테이너 */}
-        <View style={prv.bar}>
-          {/* 수익 구간 (초록) */}
-          {tpY !== null && (
-            <View style={[prv.zone, {
-              top:    `${profitTop}%` as any,
-              height: `${Math.abs(profitBottom - profitTop)}%` as any,
-              backgroundColor: '#1AC24E22',
-            }]} />
-          )}
-          {/* 손실 구간 (빨강) */}
-          {slY !== null && (
-            <View style={[prv.zone, {
-              top:    `${lossTop}%` as any,
-              height: `${Math.abs(lossBottom - lossTop)}%` as any,
-              backgroundColor: '#FF474722',
-            }]} />
-          )}
-          {/* TP 선 */}
-          {tpY !== null && (
-            <View style={[prv.line, { top: `${tpY}%` as any, backgroundColor: '#1AC24E' }]} />
-          )}
-          {/* SL 선 */}
-          {slY !== null && (
-            <View style={[prv.line, { top: `${slY}%` as any, backgroundColor: '#FF4747' }]} />
-          )}
-          {/* 진입가 선 */}
-          <View style={[prv.line, { top: `${entryY}%` as any, backgroundColor: colors.text.tertiary }]} />
-          {/* 현재가 마커 */}
-          <View style={[prv.dot, { top: `${currentY}%` as any, marginTop: -6,
-            backgroundColor: current >= entry
-              ? (direction === 'Long' ? '#1AC24E' : '#FF4747')
-              : (direction === 'Long' ? '#FF4747' : '#1AC24E'),
-          }]} />
-        </View>
-
-        {/* 라벨 */}
-        <View style={prv.labels}>
-          {tpY !== null && tp && (
-            <View style={[prv.labelRow, { top: `${tpY}%` as any, marginTop: -10 }]}>
-              <Text style={[prv.labelKey, { color: '#1AC24E' }]}>TP</Text>
-              <Text style={[prv.labelVal, { color: '#1AC24E' }]}>{fmt(tp)}</Text>
-            </View>
-          )}
-          <View style={[prv.labelRow, { top: `${currentY}%` as any, marginTop: -10 }]}>
-            <Text style={[prv.labelKey, { color: colors.text.primary, fontWeight: '700' }]}>현재</Text>
-            <Text style={[prv.labelVal, { color: colors.text.primary, fontWeight: '700' }]}>{fmt(current)}</Text>
-          </View>
-          <View style={[prv.labelRow, { top: `${entryY}%` as any, marginTop: -10 }]}>
-            <Text style={prv.labelKey}>진입</Text>
-            <Text style={prv.labelVal}>{fmt(entry)}</Text>
-          </View>
-          {slY !== null && sl && (
-            <View style={[prv.labelRow, { top: `${slY}%` as any, marginTop: -10 }]}>
-              <Text style={[prv.labelKey, { color: '#FF4747' }]}>SL</Text>
-              <Text style={[prv.labelVal, { color: '#FF4747' }]}>{fmt(sl)}</Text>
-            </View>
-          )}
-        </View>
-      </View>
-      {rr && (
-        <View style={prv.rrRow}>
-          <Text style={prv.rrLabel}>R:R</Text>
-          <Text style={prv.rrVal}>1 : {rr}</Text>
-        </View>
-      )}
-    </View>
-  );
-}
-const prv = StyleSheet.create({
-  wrap:      { paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border.default },
-  title:     { fontSize: 13, fontWeight: '700', color: colors.text.tertiary, marginBottom: 12, letterSpacing: 0.3 },
-  chartArea: { flexDirection: 'row', height: 200 },
-  bar:       { width: 16, marginRight: 0, position: 'relative', backgroundColor: colors.bg.elevated, borderRadius: 4 },
-  zone:      { position: 'absolute', left: 0, right: 0 },
-  line:      { position: 'absolute', left: 0, right: 0, height: 1 },
-  dot:       { position: 'absolute', left: -5, width: 12, height: 12, borderRadius: 6 },
-  labels:    { flex: 1, marginLeft: 12, position: 'relative' },
-  labelRow:  { position: 'absolute', left: 0, right: 0, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  labelKey:  { fontSize: 12, color: colors.text.tertiary, fontWeight: '500', width: 32 },
-  labelVal:  { fontSize: 12, color: colors.text.secondary, fontWeight: '500' },
-  rrRow:     { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
-  rrLabel:   { fontSize: 13, color: colors.text.tertiary, fontWeight: '600' },
-  rrVal:     { fontSize: 13, color: colors.text.primary, fontWeight: '700' },
-});
 
 // ─── 정보 행 ─────────────────────────────────────────────────────────────────
 function InfoRow({
@@ -483,28 +293,31 @@ export default function PositionDetail() {
     [id],
   );
 
-  const { accounts } = useAccounts();
+  const [showUsd, setShowUsd] = useState(false);
+  // 스토어에서 실시간 포지션 (5초마다 갱신)
+  const { accounts, positions: allPositions, totalBalance } = useAccounts();
+  const livePosition = allPositions.find((p) => p.id === id) ?? null;
+  const rate = totalBalance?.usdtKrw ?? 1350;
   // 라이브 데이터 우선, 없으면 초기 캐시 데이터 사용
-  const position = cachedPosition;
+  const position = livePosition ?? cachedPosition;
 
   // 봇 ICT 분석 조회
   const [ictAnalysis, setIctAnalysis]     = useState<IctAnalysis | null>(null);
   const [botSignal,   setBotSignal]       = useState<BotSignal | null>(null);
   const [signalLoading, setSignalLoading] = useState(false);
 
-  // localStorage 캐시 헬퍼 — contract + 진입시각으로 키 구성 (포지션마다 고유)
-  const cacheKey = (contract: string, openTime?: number) =>
-    openTime ? `ict_analysis_${contract}_${openTime}` : `ict_analysis_${contract}`;
-  const loadCached = (contract: string, openTime?: number): IctAnalysis | BotSignal | null => {
+  // localStorage 캐시 헬퍼
+  const cacheKey = (contract: string) => `ict_analysis_${contract}`;
+  const loadCached = (contract: string): IctAnalysis | BotSignal | null => {
     if (Platform.OS !== 'web') return null;
     try {
-      const raw = localStorage.getItem(cacheKey(contract, openTime));
+      const raw = localStorage.getItem(cacheKey(contract));
       return raw ? JSON.parse(raw) : null;
     } catch { return null; }
   };
-  const saveCache = (contract: string, data: any, openTime?: number) => {
+  const saveCache = (contract: string, data: any) => {
     if (Platform.OS !== 'web') return;
-    try { localStorage.setItem(cacheKey(contract, openTime), JSON.stringify(data)); } catch {}
+    try { localStorage.setItem(cacheKey(contract), JSON.stringify(data)); } catch {}
   };
 
   useEffect(() => {
@@ -514,11 +327,10 @@ export default function PositionDetail() {
     const accountId = (position as any).accountId
       || (accounts.length === 1 ? accounts[0].id : accounts[0]?.id);
     const contract = (position.symbol ?? '').replace('/', '_');
-    const openTime = (position as any).openTime as number | undefined;
     if (!contract) return;
 
-    // 캐시된 분석이 있으면 즉시 표시 (진입 시각 포함 키로 조회)
-    const cached = loadCached(contract, openTime);
+    // 캐시된 분석이 있으면 즉시 표시
+    const cached = loadCached(contract);
     if (cached && 'htf' in cached) {
       setIctAnalysis(cached as IctAnalysis);
     } else if (cached && 'confluence' in cached) {
@@ -539,19 +351,19 @@ export default function PositionDetail() {
     fetch('/api/ict-analyze', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ apiKey: account.apiKey, apiSecret: account.apiSecret, contract, entryTime: openTime }),
+      body:    JSON.stringify({ apiKey: account.apiKey, apiSecret: account.apiSecret, contract }),
     })
       .then((r) => r.json())
       .then((data) => {
         if (data?.error || data?.htf === undefined) {
           if (data?.reason) {
             setBotSignal(data);
-            if (data.confluence?.length > 0) saveCache(contract, data, openTime);
+            if (data.confluence?.length > 0) saveCache(contract, data);
           }
           return;
         }
         setIctAnalysis(data as IctAnalysis);
-        saveCache(contract, data, openTime);
+        saveCache(contract, data);
       })
       .catch(() => {})
       .finally(() => setSignalLoading(false));
@@ -562,16 +374,12 @@ export default function PositionDetail() {
   const direction = position?.direction;
   const p         = position as any;
 
-  // 실제 코인 수량: notional(USD) / 진입가
+  // 실제 코인 수량: 명목가치(KRW) / 환율 / 진입가
   const coinQty = (() => {
-    const usdtKrw   = p?.usdtKrw ?? 1350;
-    const notional  = (position?.currentValue ?? 0) / usdtKrw;
-    const entry     = position?.entryPrice ?? 0;
-    if (entry <= 0) return null;
-    const qty = notional / entry;
-    // 소수점 자리수 결정 (코인 가격대에 따라)
-    const decimals = qty >= 1 ? 4 : qty >= 0.001 ? 6 : 8;
-    return qty.toFixed(decimals);
+    const notionalUsdt = (position?.currentValue ?? 0) / (p.usdtKrw ?? rate ?? 1350);
+    const qty = position?.entryPrice > 0 ? notionalUsdt / (position?.entryPrice ?? 1) : 0;
+    if (!qty || qty <= 0) return p.size > 0 ? String(p.size) : '-';
+    return qty < 0.001 ? qty.toFixed(6) : qty < 1 ? qty.toFixed(4) : qty.toFixed(3);
   })();
 
   const fmt$ = (v: number) =>
@@ -585,7 +393,7 @@ export default function PositionDetail() {
     const pctAbs  = Math.abs(position.profitRate).toFixed(2);
     const pnlAbs  = Math.abs(position.profit);
     const since   = p.entryAt ? `${p.entryAt}에 진입한 ` : '';
-    const holding = position.holdingPeriod ? ` ${position.holdingPeriod}째 보유 중이며,` : '';
+    const holding = position.holdingPeriod ? ` ${position.holdingPeriod} 보유 중이며,` : '';
 
     return `${since}${position.symbol} ${dir} 포지션입니다. ${lev}배 레버리지로${holding} 현재 ${pctAbs}% (${Math.round(pnlAbs / 10000).toLocaleString('ko-KR')}만원) ${profitSign} 중입니다.${p.liqPrice > 0 ? ` 청산가는 $${p.liqPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}입니다.` : ''}`;
   })() : null;
@@ -593,7 +401,11 @@ export default function PositionDetail() {
   return (
     <ScreenTransition>
       <SafeAreaView style={st.safe} edges={['top']}>
-        <SubPageHeader title="포지션 상세" onBack={() => router.navigate('/(main)/positions')} />
+        <SubPageHeader
+          title="포지션 상세"
+          onBack={() => router.back()}
+          rightElement={<CurrencyToggle showUsd={showUsd} onToggle={() => setShowUsd((v) => !v)} />}
+        />
 
         <ScrollView contentContainerStyle={st.content} showsVerticalScrollIndicator={false}>
           {isLoading ? (
@@ -604,137 +416,56 @@ export default function PositionDetail() {
             </GlassCard>
           ) : (
             <>
-              {/* ── 코인 헤더 카드 ─────────────────────── */}
-              <GlassCard intensity="medium" radius={24} padding={20} style={st.section}>
-                <View style={st.headerRow}>
-                  {/* 코인 아이콘 */}
-                  <View style={st.coinIcon}>
-                    <Text style={st.coinIconText}>{position.coin.slice(0, 2)}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                      <Text style={st.symbol}>{position.symbol}</Text>
-                      <View style={[st.dirBadge, {
-                        backgroundColor: direction === 'Long' ? '#EAF6F0' : '#FFF0F0',
-                      }]}>
-                        <Text style={[st.dirText, {
-                          color: direction === 'Long' ? '#1AC24E' : '#FF4747',
-                        }]}>
-                          {direction === 'Long' ? '롱' : '숏'}
-                        </Text>
-                      </View>
-                      <View style={[st.leverBadge]}>
-                        <Text style={st.leverText}>{position.leverage}x</Text>
-                      </View>
-                    </View>
-                    <Text style={st.subText}>{p.entryAt ?? '-'} 진입</Text>
-                    <Text style={st.subText}>{position.holdingPeriod ?? '-'}째 보유중</Text>
-                  </View>
-                </View>
-              </GlassCard>
+              <CoinHeaderCard
+                coin={position.coin}
+                symbol={position.symbol}
+                direction={direction ?? 'Long'}
+                leverage={position.leverage}
+                entryAt={p.entryAt}
+                holdingLabel={position.holdingPeriod ? `보유 ${position.holdingPeriod}` : undefined}
+              />
 
-              {/* ── 통합 손익/가격 카드 ─────────────────── */}
-              <GlassCard intensity="medium" radius={24} padding={24} style={st.section}>
-                {/* PNL + 미니 가격 바 */}
-                <View style={{ flexDirection: 'row', alignItems: 'stretch', gap: 12, marginBottom: 16 }}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={st.pnlLabel}>평가손익</Text>
-                    <AnimatedNumber
-                      value={position.profit}
-                      formatter={formatKRWSigned}
-                      fontSize={30}
-                      fontWeight="700"
-                      color={pnlColor}
-                      letterSpacing={-0.5}
-                      style={{ marginBottom: 6 }}
-                    />
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      <View style={[st.rateBadge, { backgroundColor: isProfit ? colors.market.riseSubtle : '#FFF0F0' }]}>
-                        <AnimatedNumber
-                          value={position.profitRate}
-                          formatter={formatRate}
-                          fontSize={14}
-                          fontWeight="700"
-                          color={pnlColor}
-                        />
-                      </View>
-                    </View>
-                  </View>
-                  <MiniPriceBar
-                    entry={position.entryPrice}
-                    current={position.currentPrice ?? position.markPrice}
-                    tp={position.targetPrice}
-                    sl={position.stopLoss}
-                    direction={direction ?? 'Long'}
-                  />
-                </View>
-
-                {/* Row 1: 수량 | 증거금 */}
-                <View style={st.amountRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={st.amountLabel}>수량</Text>
-                    <Text style={st.amountValue}>{coinQty ?? p.size ?? '-'} {position.coin}</Text>
-                  </View>
-                  <View style={st.amountDivider} />
-                  <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                    <Text style={st.amountLabel}>증거금</Text>
-                    <Text style={st.amountValue}>{formatKRW(position.amount)}</Text>
-                  </View>
-                </View>
-
-                {/* Row 2: 진입가 | 현재가 */}
-                <View style={st.gridRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={st.amountLabel}>진입가</Text>
-                    <Text style={st.amountValue}>{fmt$(position.entryPrice)}</Text>
-                  </View>
-                  <View style={st.amountDivider} />
-                  <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                    <Text style={st.amountLabel}>현재가</Text>
-                    <Text style={[st.amountValue, { color: pnlColor }]}>{fmt$(position.currentPrice ?? position.markPrice)}</Text>
-                  </View>
-                </View>
-
-                {/* Row 3: 청산가 | 평가금액 */}
-                <View style={st.gridRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={st.amountLabel}>청산가</Text>
-                    <Text style={[st.amountValue, p.liqPrice > 0 ? { color: colors.negative.text } : {}]}>
-                      {p.liqPrice > 0 ? fmt$(p.liqPrice) : '-'}
-                    </Text>
-                  </View>
-                  <View style={st.amountDivider} />
-                  <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                    <Text style={st.amountLabel}>평가금액</Text>
-                    <AnimatedNumber
-                      value={position.currentValue ?? 0}
-                      formatter={formatKRW}
-                      fontSize={15}
-                      fontWeight="700"
-                      color={colors.text.primary}
-                    />
-                  </View>
-                </View>
-
-                {/* Row 4 (조건부): 손절가 | 목표가 */}
-                {(position.stopLoss! > 0 || position.targetPrice! > 0) && (
-                  <View style={st.gridRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={st.amountLabel}>손절가</Text>
-                      <Text style={[st.amountValue, position.stopLoss! > 0 ? { color: colors.negative.text } : {}]}>
-                        {position.stopLoss! > 0 ? fmt$(position.stopLoss!) : '-'}
-                      </Text>
-                    </View>
-                    <View style={st.amountDivider} />
-                    <View style={{ flex: 1, alignItems: 'flex-end' }}>
-                      <Text style={st.amountLabel}>목표가</Text>
-                      <Text style={[st.amountValue, position.targetPrice! > 0 ? { color: colors.positive.text } : {}]}>
-                        {position.targetPrice! > 0 ? fmt$(position.targetPrice!) : '-'}
-                      </Text>
-                    </View>
-                  </View>
-                )}
-              </GlassCard>
+              <PnlCard
+                profit={position.profit}
+                profitRate={position.profitRate}
+                pnlLabel="평가손익"
+                animated
+                showUsd={showUsd}
+                rate={rate}
+                pnlColor={pnlColor}
+                isProfit={isProfit}
+                entryPrice={position.entryPrice}
+                currentOrExitPrice={position.currentPrice ?? position.markPrice}
+                currentLabel="현재"
+                targetPrice={position.targetPrice}
+                stopLoss={position.stopLoss}
+                direction={direction ?? 'Long'}
+                rows={[
+                  {
+                    leftLabel: '수량', leftValue: `${coinQty} ${position.coin}`,
+                    rightLabel: '증거금', rightValue: showUsd ? `$${(position.amount / rate).toFixed(2)}` : formatKRW(position.amount),
+                  },
+                  {
+                    leftLabel: '진입가', leftValue: fmt$(position.entryPrice),
+                    rightLabel: '현재가', rightValue: fmt$(position.currentPrice ?? position.markPrice), rightColor: pnlColor,
+                  },
+                  {
+                    leftLabel: '청산가', leftValue: p.liqPrice > 0 ? fmt$(p.liqPrice) : '-', leftColor: p.liqPrice > 0 ? colors.negative.text : undefined,
+                    rightLabel: '평가금액',
+                    rightValue: (
+                      <AnimatedNumber
+                        value={showUsd ? (position.currentValue ?? 0) / rate : (position.currentValue ?? 0)}
+                        formatter={showUsd ? (v) => `$${v.toFixed(2)}` : formatKRW}
+                        fontSize={15} fontWeight="700" color={colors.text.primary}
+                      />
+                    ),
+                  },
+                  ...(position.stopLoss! > 0 || position.targetPrice! > 0 ? [{
+                    leftLabel: '손절가', leftValue: position.stopLoss! > 0 ? fmt$(position.stopLoss!) : '-', leftColor: position.stopLoss! > 0 ? colors.negative.text : undefined,
+                    rightLabel: '목표가', rightValue: position.targetPrice! > 0 ? fmt$(position.targetPrice!) : '-', rightColor: position.targetPrice! > 0 ? colors.positive.text : undefined,
+                  }] : []),
+                ]}
+              />
 
               {/* ── ICT 분석 ────────────────────────────── */}
               <GlassCard intensity="low" radius={20} padding={0} style={st.section}>
@@ -807,6 +538,19 @@ export default function PositionDetail() {
                             </Text>
                           </View>
                         ))}
+                      </View>
+                    )}
+
+                    {/* 가격 레인지 시각화 */}
+                    {ictAnalysis.summary.entry != null && (
+                      <View style={{ paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border.default }}>
+                        <PriceChart
+                          entry={ictAnalysis.summary.entry}
+                          current={ictAnalysis.currentPrice}
+                          tp={ictAnalysis.summary.tp}
+                          sl={ictAnalysis.summary.sl}
+                          direction={direction ?? 'Long'}
+                        />
                       </View>
                     )}
 

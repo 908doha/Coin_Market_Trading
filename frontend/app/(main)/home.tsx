@@ -739,6 +739,8 @@ export default function Home() {
   const [showUsd, setShowUsd] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [showAccPicker, setShowAccPicker]         = useState(false);
+  const [dropPos, setDropPos]                     = useState({ top: 0, right: 0 });
+  const dropBtnRef                                = useRef<View>(null);
   const { accounts, balances, balanceErrors, totalBalance, balancesLoading, positions } = useAccounts();
 
   const { data: singleBalance, isLoading: singleLoading } = useApi(
@@ -801,7 +803,17 @@ export default function Home() {
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                   <Text variant="meta" color={colors.text.tertiary}>총 자산</Text>
                   {accounts.length > 1 && (
-                    <Pressable style={styles.accDropBtn} onPress={() => setShowAccPicker(true)}>
+                    <Pressable
+                      ref={dropBtnRef}
+                      style={styles.accDropBtn}
+                      onPress={() => {
+                        dropBtnRef.current?.measureInWindow((x, y, w, h) => {
+                          // 우측 끝에 정렬, 버튼 아래 8px
+                          setDropPos({ top: y + h + 8, right: 0 });
+                          setShowAccPicker(true);
+                        });
+                      }}
+                    >
                       <Text style={styles.accDropLabel} numberOfLines={1}>{accLabel}</Text>
                       <Svg width={12} height={12} viewBox="0 0 24 24" fill="none">
                         <Path d="M6 9l6 6 6-6" stroke="#AEAEB2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -984,7 +996,7 @@ export default function Home() {
         </ScrollView>
       </SafeAreaView>
 
-      {/* ── 계좌 선택 드롭다운 모달 ── */}
+      {/* ── 계좌 선택 팝오버 ── */}
       <Modal
         visible={showAccPicker}
         transparent
@@ -992,37 +1004,43 @@ export default function Home() {
         onRequestClose={() => setShowAccPicker(false)}
       >
         <Pressable style={styles.pickerOverlay} onPress={() => setShowAccPicker(false)}>
-          <View style={styles.pickerSheet}>
+          {/* 버튼 바로 아래에 우측 정렬로 팝오버 표시 */}
+          <View style={[styles.pickerSheet, { position: 'absolute', top: dropPos.top, right: 20 }]}>
+            {/* 전체 계좌 행 */}
             <Pressable
-              style={({ pressed }) => [styles.pickerRow, pressed && { backgroundColor: '#F8F8F8' }]}
+              style={({ pressed }) => [styles.pickerRow, styles.pickerDivider, pressed && { backgroundColor: '#F8F8F8' }]}
               onPress={() => { setSelectedAccountId(null); setShowAccPicker(false); }}
             >
+              <View style={styles.pickerCheck}>
+                {!selectedAccountId && (
+                  <Svg width={16} height={16} viewBox="0 0 24 24">
+                    <Path d="M5 13l4 4L19 7" stroke="#246CF9" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                  </Svg>
+                )}
+              </View>
               <Text style={[styles.pickerText, !selectedAccountId && { color: '#246CF9', fontWeight: '700' }]}>
-                모든 계좌
+                전체계좌
               </Text>
-              {!selectedAccountId && (
-                <Svg width={16} height={16} viewBox="0 0 24 24">
-                  <Path d="M5 13l4 4L19 7" stroke="#246CF9" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                </Svg>
-              )}
             </Pressable>
-            {accounts.map((acc) => {
+            {accounts.map((acc, idx) => {
               const isSel = selectedAccountId === acc.id;
               const label = acc.name || EXCHANGE_LABELS[acc.exchange];
               return (
                 <Pressable
                   key={acc.id}
-                  style={({ pressed }) => [styles.pickerRow, pressed && { backgroundColor: '#F8F8F8' }]}
+                  style={({ pressed }) => [styles.pickerRow, idx < accounts.length - 1 && styles.pickerDivider, pressed && { backgroundColor: '#F8F8F8' }]}
                   onPress={() => { setSelectedAccountId(acc.id); setShowAccPicker(false); }}
                 >
+                  <View style={styles.pickerCheck}>
+                    {isSel && (
+                      <Svg width={16} height={16} viewBox="0 0 24 24">
+                        <Path d="M5 13l4 4L19 7" stroke="#246CF9" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                      </Svg>
+                    )}
+                  </View>
                   <Text style={[styles.pickerText, isSel && { color: '#246CF9', fontWeight: '700' }]}>
                     {label}
                   </Text>
-                  {isSel && (
-                    <Svg width={16} height={16} viewBox="0 0 24 24">
-                      <Path d="M5 13l4 4L19 7" stroke="#246CF9" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                    </Svg>
-                  )}
                 </Pressable>
               );
             })}
@@ -1073,13 +1091,15 @@ const styles = StyleSheet.create({
   dirBadge:        { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   dirText:         { fontSize: 11, fontWeight: '700' },
 
-  accDropBtn:   { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#F5F5F5', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5, maxWidth: 140 },
+  accDropBtn:   { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#F0F0F5', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5, maxWidth: 140 },
   accDropLabel: { fontSize: 12, fontWeight: '600', color: '#555', flexShrink: 1 },
 
-  pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.25)', justifyContent: 'flex-start', paddingTop: 120, paddingHorizontal: 20 },
-  pickerSheet:   { backgroundColor: '#FFF', borderRadius: 16, paddingVertical: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 16, elevation: 8 },
-  pickerRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14 },
-  pickerText:    { fontSize: 15, fontWeight: '500', color: '#191919' },
+  pickerOverlay: { flex: 1, backgroundColor: 'transparent' },
+  pickerSheet:   { minWidth: 160, backgroundColor: '#FFF', borderRadius: 14, paddingVertical: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.14, shadowRadius: 20, elevation: 12 },
+  pickerRow:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14 },
+  pickerDivider: { borderBottomWidth: 1, borderBottomColor: '#F2F2F7' },
+  pickerCheck:   { width: 22, alignItems: 'center', marginRight: 6 },
+  pickerText:    { fontSize: 15, fontWeight: '500', color: '#191919', flex: 1 },
   emptyText:       { fontSize: 14, color: colors.text.tertiary },
 });
 

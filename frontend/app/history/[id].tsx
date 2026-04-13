@@ -77,6 +77,10 @@ export default function TradeDetail() {
             const pnlColor = isProfit ? colors.market.rise : colors.market.fall;
             const posSnap  = loadPositionSnapshot(trade.symbol.replace('/', '_'));
 
+            const entryAtTs = trade.entryAt
+              ? Math.floor(Date.parse(trade.entryAt) / 1000) || undefined
+              : undefined;
+
             return (
               <>
                 <CoinHeaderCard
@@ -101,6 +105,7 @@ export default function TradeDetail() {
                   stopLoss={posSnap?.stopLoss ?? null}
                   direction={trade.direction as 'Long' | 'Short'}
                   pricePoints={pricePoints.length >= 2 ? pricePoints : undefined}
+                  entryAtTs={entryAtTs}
                   rows={[
                     {
                       leftLabel:  '수량',
@@ -126,12 +131,11 @@ export default function TradeDetail() {
                   ]}
                 />
 
-                {ictAnalysis && (
-                  <IctAnalysisCard
-                    ictAnalysis={ictAnalysis}
-                    direction={trade.direction as 'Long' | 'Short'}
-                  />
-                )}
+                <IctAnalysisCard
+                  ictAnalysis={ictAnalysis}
+                  direction={trade.direction as 'Long' | 'Short'}
+                  pending={!ictAnalysis}
+                />
 
                 <View style={{ height: 120 }} />
               </>
@@ -144,7 +148,7 @@ export default function TradeDetail() {
 }
 
 const styles = StyleSheet.create({
-  safe:    { flex: 1, backgroundColor: '#FFFFFF' },
+  safe:    { flex: 1, backgroundColor: colors.bg.elevated },
   content: { paddingHorizontal: 20, paddingTop: 8 },
   center:  { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80 },
 });

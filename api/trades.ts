@@ -26,6 +26,8 @@ interface Trade {
   holdingDays: number;
   entryAt:     string;
   exitAt:      string;
+  entryPrice?: number;
+  exitPrice?:  number;
 }
 
 // ── Gate.io 포지션 청산 내역 조회 ────────────────────────────────────────────
@@ -101,16 +103,13 @@ async function fetchGateTrades(apiKey: string, apiSecret: string): Promise<Trade
       fillPrice = parseFloat(best.price || '0');
     }
 
-    // 레버리지
-    const leverage = parseInt(t.leverage || '1', 10);
-
-    // 수익률 계산 (레버리지 반영)
-    // 1순위: entryPrice + fillPrice 모두 있을 때 가격 변화율 × 레버리지
+    // 수익률 계산
+    // 1순위: entryPrice + fillPrice 모두 있을 때 가격 변화율 (방향 반영)
     // 2순위: pnl 부호만이라도 반영 (0.01% * sign)
     let profitRate = 0;
     if (entryPrice > 0 && fillPrice > 0) {
       const diff = side === 'long' ? fillPrice - entryPrice : entryPrice - fillPrice;
-      profitRate  = parseFloat(((diff / entryPrice) * 100 * leverage).toFixed(2));
+      profitRate  = parseFloat(((diff / entryPrice) * 100).toFixed(2));
     } else if (pnl !== 0) {
       // 가격 데이터 없음 → 부호만 표시
       profitRate = pnl < 0 ? -0.01 : 0.01;
@@ -126,6 +125,8 @@ async function fetchGateTrades(apiKey: string, apiSecret: string): Promise<Trade
       holdingDays: 0,
       entryAt:    exitAt,
       exitAt,
+      entryPrice,
+      exitPrice:  fillPrice > 0 ? fillPrice : entryPrice,
     };
   });
 }

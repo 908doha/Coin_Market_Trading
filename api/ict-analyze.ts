@@ -546,21 +546,17 @@ export default async function handler(req: any, res: any) {
   if (req.method === 'OPTIONS') { res.status(200).end(); return; }
   if (req.method !== 'POST')   { res.status(405).json({ error: 'Method not allowed' }); return; }
 
-  const { apiKey, apiSecret, contract, entryTime } = req.body ?? {};
+  const { apiKey, apiSecret, contract } = req.body ?? {};
   if (!apiKey || !apiSecret || !contract) {
     res.status(400).json({ error: 'apiKey, apiSecret, contract 필요' }); return;
   }
 
-  // entryTime: Unix timestamp(초) — 진입 시점 기준 캔들 조회 (없으면 현재 시각)
-  // Gate.io candlesticks API: to= 파라미터로 해당 시각 이전 캔들 반환
-  const toSuffix = entryTime ? `&to=${Math.floor(Number(entryTime))}` : '';
-
   try {
-    // Gate.io 캔들 병렬 fetch — 진입 시점 기준
+    // Gate.io 캔들 병렬 fetch
     const [htfRaw, mtfRaw, ltfRaw] = await Promise.all([
-      gateGet(apiKey, apiSecret, '/api/v4/futures/usdt/candlesticks', `contract=${contract}&interval=4h&limit=200${toSuffix}`),
-      gateGet(apiKey, apiSecret, '/api/v4/futures/usdt/candlesticks', `contract=${contract}&interval=15m&limit=200${toSuffix}`),
-      gateGet(apiKey, apiSecret, '/api/v4/futures/usdt/candlesticks', `contract=${contract}&interval=5m&limit=100${toSuffix}`),
+      gateGet(apiKey, apiSecret, '/api/v4/futures/usdt/candlesticks', `contract=${contract}&interval=4h&limit=200`),
+      gateGet(apiKey, apiSecret, '/api/v4/futures/usdt/candlesticks', `contract=${contract}&interval=15m&limit=200`),
+      gateGet(apiKey, apiSecret, '/api/v4/futures/usdt/candlesticks', `contract=${contract}&interval=5m&limit=100`),
     ]);
 
     const htfC = parseCandles(htfRaw);

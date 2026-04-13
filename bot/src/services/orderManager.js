@@ -393,42 +393,55 @@ class OrderManager {
         entryPrice: position.entryPrice,
         unrealisedPnl: position.unrealisedPnl,
       });
-      this.emptyReadCount.delete(contract); // 정상 조회 시 카운터 리셋
+      this.emptyReadCount.delete(contract);
       logger.debug(
         `[${contract}] [포지션] ${direction} | 현재: ${currentPrice} | PnL: ${position.unrealisedPnl.toFixed(2)} USDT | SL: ${sl} | TP: ${tp}`
       );
       return { action: 'holding', price: currentPrice, pnl: position.unrealisedPnl };
     }
 
-    // 포지션 empty — 3회 연속 확인 필요 (race condition 방지)
-    // Gate.io eventual consistency / 일시 네트워크 장애로 getPosition이
-    // 가끔 null을 반환할 수 있음. 즉시 청산 판단하면 SL/TP 주문이 잘못 취소됨.
+    // 포지션 empty — 즉시 재조회 (2초 후) 후 카운트
+    // Gate.io API가 소형 포지션(1계약)을 간헐적으로 누락하는 문제 대응
+    await new Promise((r) => setTimeout(r, 2000));
+    const retryPosition = await gateClient.getPosition(contract);
+
+    if (retryPosition && retryPosition.size !== 0) {
+      // 재조회 성공 → 일시적 API 장애였음, 정상 복귀
+      const currentPrice = retryPosition.markPrice;
+      this.lastKnownPositions.set(contract, {
+        size: retryPosition.size,
+        entryPrice: retryPosition.entryPrice,
+        unrealisedPnl: retryPosition.unrealisedPnl,
+      });
+      this.emptyReadCount.delete(contract);
+      logger.info(`[${contract}] 포지션 재조회 성공 (2초 후) — 일시적 API 누락`);
+      return { action: 'holding', price: currentPrice, pnl: retryPosition.unrealisedPnl };
+    }
+
+    // 재조회도 empty → 카운터 증가
     const prevCount = this.emptyReadCount.get(contract) || 0;
     const count = prevCount + 1;
     this.emptyReadCount.set(contract, count);
 
-    const EMPTY_THRESHOLD = 3;
+    const EMPTY_THRESHOLD = 5;
 
     if (count < EMPTY_THRESHOLD) {
-      // 이전에 포지션이 있었던 경우만 holding_check (보호 모드)
       if (this.lastKnownPositions.has(contract)) {
         logger.warn(
-          `[${contract}] 포지션 조회 empty ${count}/${EMPTY_THRESHOLD} — 확인 중 (SL/TP 유지, 취소 안 함)`
+          `[${contract}] 포지션 조회 empty ${count}/${EMPTY_THRESHOLD} (재조회 포함) — SL/TP 유지`
         );
         return { action: 'holding_check', price: 0, pnl: 0 };
       }
-      // lastKnown 없음: 처음부터 없던 경우 (진입 실패 등)
       logger.warn(
         `[${contract}] 포지션 empty ${count}/${EMPTY_THRESHOLD} & 이전 기록 없음`
       );
       return { action: 'holding_check', price: 0, pnl: 0 };
     }
 
-    // 3회 연속 empty → 진짜 청산됨으로 판단
+    // 5회 연속 empty (재조회 포함 = 10번 조회) → 진짜 청산됨
     this.emptyReadCount.delete(contract);
 
     if (!this.lastKnownPositions.has(contract)) {
-      // 이전 기록도 없는 경우 → 진입 실패
       logger.warn(`[${contract}] 포지션 확인 불가 (${EMPTY_THRESHOLD}회 연속 empty) - 조건부 주문 정리`);
       try {
         await gateClient.cancelAllTriggerOrders(contract);
@@ -439,7 +452,7 @@ class OrderManager {
       return { action: 'failed', reason: '포지션 조회 실패' };
     }
 
-    // 이전에 있었는데 3회 연속 없음 → SL/TP 체결 또는 수동 청산으로 판단
+    // 이전에 있었는데 5회 연속 없음 → SL/TP 체결 또는 수동 청산
     try {
       await gateClient.cancelAllTriggerOrders(contract);
     } catch {}

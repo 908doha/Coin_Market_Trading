@@ -13,8 +13,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import Svg, { Path, Polygon, Rect, Text as SvgText, Circle } from 'react-native-svg';
 import {
-  Text, GlassCard, SubPageHeader, ScreenTransition, BalanceCardsSkeleton,
-  AnimatedNumber, Skeleton,
+  Text, GlassCard, SubPageHeader, ScreenTransition,
+  Skeleton,
 } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType, ExchangeAccount } from '@/store/accounts';
@@ -261,25 +261,19 @@ export default function KellyPage() {
   const [trades,   setTrades]   = useState<Trade[]>([]);
   const [loading,  setLoading]  = useState(true);
 
-  const { accounts, balances, totalBalance, balancesLoading } = useAccounts();
+  const { accounts, balances, totalBalance } = useAccounts();
 
   const selectedAccounts = selectedAccountId
     ? accounts.filter((a) => a.id === selectedAccountId)
     : accounts;
 
   const selectedAccount  = accounts.find((a) => a.id === selectedAccountId) ?? null;
-  const displayBalance   = selectedAccountId
-    ? (balances[selectedAccountId] ?? null)
-    : totalBalance;
 
   const selectedLabel = selectedAccount
     ? (selectedAccount.name || EXCHANGE_LABELS[selectedAccount.exchange])
     : accounts.length === 1
       ? (accounts[0].name || EXCHANGE_LABELS[accounts[0].exchange])
       : '모든 계좌';
-
-  const krwAvail = displayBalance?.available ?? 0;
-  const usdTotal = displayBalance?.totalUsd  ?? 0;
 
   // 선택된 계좌 변경 시 거래 데이터 재조회
   useEffect(() => {
@@ -322,61 +316,51 @@ export default function KellyPage() {
             <View style={{ flex: 1 }} />
           </Pressable>
 
-          {/* 잔고 카드 */}
-          {balancesLoading ? (
-            <BalanceCardsSkeleton />
-          ) : (
-            <View style={st.balanceGrid}>
-              <View style={st.balanceCard}>
-                <Text style={st.balanceCardLabel}>원화</Text>
-                <AnimatedNumber value={krwAvail} formatter={formatKRW} fontSize={18} fontWeight="700" color="#191919" />
-              </View>
-              <View style={st.balanceCard}>
-                <Text style={st.balanceCardLabel}>달러</Text>
-                <AnimatedNumber
-                  value={usdTotal}
-                  formatter={(v) => `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                  fontSize={18}
-                  fontWeight="700"
-                  color="#191919"
-                />
-              </View>
-            </View>
-          )}
-
           {/* Kelly 통계 */}
           <View style={{ borderTopWidth: 8, borderTopColor: '#F5F5F5', paddingTop: 8 }}>
             {loading ? (
               <View style={{ padding: 20, gap: 12 }}>
+                {/* 전체 Kelly 통계 카드 스켈레톤 */}
                 <GlassCard intensity="medium" radius={20} padding={20}>
-                  <Skeleton width={120} height={16} radius={6} style={{ marginBottom: 16 }} />
-                  <View style={{ flexDirection: 'row', paddingBottom: 14, gap: 8 }}>
+                  <Skeleton width={130} height={15} radius={5} style={{ marginBottom: 20 }} />
+                  {/* 3열 지표 */}
+                  <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#F0F0F0', paddingBottom: 16, marginBottom: 14 }}>
                     {[1, 2, 3].map((i) => (
-                      <View key={i} style={{ flex: 1, alignItems: 'center', gap: 6 }}>
-                        <Skeleton width={60} height={24} radius={6} />
-                        <Skeleton width={40} height={12} radius={4} />
+                      <View key={i} style={{ flex: 1, alignItems: 'center', gap: 8, borderRightWidth: i < 3 ? 1 : 0, borderRightColor: '#F0F0F0' }}>
+                        <Skeleton width={56} height={26} radius={6} />
+                        <Skeleton width={36} height={12} radius={4} />
                       </View>
                     ))}
                   </View>
-                  {[1, 2, 3].map((i) => (
-                    <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8 }}>
-                      <Skeleton width={80} height={14} radius={5} />
-                      <Skeleton width={100} height={14} radius={5} />
+                  {/* 데이터 행 4개 */}
+                  {[1, 2, 3, 4].map((i) => (
+                    <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 9, borderBottomWidth: i < 4 ? 1 : 0, borderBottomColor: '#F5F5F5' }}>
+                      <Skeleton width={70} height={14} radius={5} />
+                      <Skeleton width={110} height={14} radius={5} />
                     </View>
                   ))}
-                  <Skeleton width="100%" height={8} radius={4} style={{ marginTop: 16 }} />
+                  {/* Kelly 비율 진행바 */}
+                  <View style={{ marginTop: 18, gap: 8 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                      <Skeleton width={60} height={12} radius={4} />
+                      <Skeleton width={40} height={12} radius={4} />
+                    </View>
+                    <Skeleton width="100%" height={8} radius={4} />
+                  </View>
                 </GlassCard>
+                {/* 코인별 성과 카드 스켈레톤 */}
                 <GlassCard intensity="medium" radius={20} padding={20}>
-                  <Skeleton width={100} height={16} radius={6} style={{ marginBottom: 16 }} />
-                  {[1, 2, 3, 4].map((i) => (
-                    <View key={i} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, gap: 12 }}>
-                      <View style={{ flex: 1, gap: 6 }}>
-                        <Skeleton width={80} height={14} radius={5} />
-                        <Skeleton width="100%" height={5} radius={3} />
+                  <Skeleton width={90} height={15} radius={5} style={{ marginBottom: 20 }} />
+                  {[1, 2, 3].map((i) => (
+                    <View key={i} style={{ paddingVertical: 14, borderBottomWidth: i < 3 ? 1 : 0, borderBottomColor: '#F5F5F5', gap: 10 }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                        <Skeleton width={60} height={15} radius={5} />
+                        <Skeleton width={80} height={15} radius={5} />
                       </View>
-                      <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                        <Skeleton width={50} height={18} radius={5} />
-                        <Skeleton width={60} height={11} radius={4} />
+                      <Skeleton width="100%" height={6} radius={3} />
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                        <Skeleton width={80} height={12} radius={4} />
+                        <Skeleton width={50} height={12} radius={4} />
                       </View>
                     </View>
                   ))}

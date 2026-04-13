@@ -5,30 +5,42 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   View, StyleSheet, ScrollView, Pressable, Modal, LayoutAnimation, Platform, UIManager,
-  TextInput, ActivityIndicator,
+  TextInput,
 } from 'react-native';
-
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Animated, {
   useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS,
 } from 'react-native-reanimated';
 import Svg, { Path, Polygon, Rect, Text as SvgText, Circle } from 'react-native-svg';
-import { Text, FadeTabView, BalanceCardsSkeleton, AnimatedNumber, Skeleton } from '@/design-system';
+import { Text, FadeTabView, AnimatedNumber, Skeleton, PressableScale } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType, ExchangeAccount } from '@/store/accounts';
+import { tradesService } from '@/services';
+import type { Trade } from '@/services/trades.service';
 import { formatKRW } from '@/utils/format';
 import type { Balance } from '@/services/account.service';
 
-// ─── 상수 ────────────────────────────────────────────────────────────────────
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
-const GRADE_COLORS: Record<string, string> = {
-  S: '#8B5CF6', A: '#3B82F6', 'B+': '#10B981', B: '#06B6D4',
-  C: '#F59E0B', D: '#F97316', F: '#EF4444',
-};
+// ─── Kelly 계산 ───────────────────────────────────────────────────────────────
+function computeKelly(trades: Trade[]) {
+  if (!trades.length) return null;
+  const wins   = trades.filter((t) => t.profit > 0);
+  const losses = trades.filter((t) => t.profit <= 0);
+  const total  = trades.length;
+  const p      = wins.length / total;
+  const q      = 1 - p;
+  const avgWin  = wins.length   ? wins.reduce((s, t) => s + t.profit, 0) / wins.length   : 0;
+  const avgLoss = losses.length ? Math.abs(losses.reduce((s, t) => s + t.profit, 0)) / losses.length : 0;
+  const b       = avgLoss > 0 ? avgWin / avgLoss : 0;
+  const kelly   = b > 0 ? Math.max(0, (p * b - q) / b) : 0;
+  return { winRate: p, ratio: b, halfKelly: kelly / 2 };
+}
+
+// ─── 상수 ────────────────────────────────────────────────────────────────────
 
 const API_BASE =
   typeof window !== 'undefined' && (window as any).location?.origin
@@ -41,17 +53,11 @@ interface Ticker {
   contract:     string;
   symbol:       string;
   coin:         string;
+  name?:        string;
   last:         number;
   change24h:    number;
   volume24hUsd: number;
   fundingRate:  number;
-}
-
-interface IctResult {
-  score:  number;
-  grade:  string;
-  signal: string | null;
-  reason: string;
 }
 
 // ─── 거래소 로고 ──────────────────────────────────────────────────────────────
@@ -245,18 +251,6 @@ const bs = StyleSheet.create({
   addText:      { fontSize: 16, fontWeight: '500', color: '#555' },
 });
 
-// ─── ICT 배지 ─────────────────────────────────────────────────────────────────
-
-function IctBadge({ score, grade }: { score: number; grade: string }) {
-  const gc = GRADE_COLORS[grade] ?? '#8B5CF6';
-  return (
-    <View style={[ls.ictBadge, { borderColor: gc, backgroundColor: gc + '18' }]}>
-      <Text style={[ls.ictGrade, { color: gc }]}>{grade}</Text>
-      <Text style={[ls.ictScore, { color: gc }]}>{score}</Text>
-    </View>
-  );
-}
-
 function formatVol(usd: number): string {
   if (usd >= 1e9) return `$${(usd / 1e9).toFixed(1)}B`;
   if (usd >= 1e6) return `$${(usd / 1e6).toFixed(0)}M`;
@@ -266,10 +260,9 @@ function formatVol(usd: number): string {
 // ─── 종목 행 (포지션 현황과 동일한 디자인) ─────────────────────────────────────
 
 function TickerRow({
-  ticker, idx, ict, onPress, isLast,
+  ticker, idx, onPress, isLast,
 }: {
   ticker: Ticker; idx: number;
-  ict:    IctResult | 'loading' | undefined;
   onPress: () => void;
   isLast: boolean;
 }) {
@@ -279,14 +272,9 @@ function TickerRow({
       ? colors.market.fall
       : colors.text.secondary;
 
-  const isLoading = ict === 'loading';
-  const result    = typeof ict === 'object' ? ict : null;
-
   return (
-    <Pressable
-      style={({ pressed }) => [tr.row, !isLast && tr.border, pressed && { backgroundColor: '#F8F8F8' }]}
-      onPress={onPress}
-    >
+    <PressableScale style={[!isLast && tr.border]} onPress={onPress}>
+      <View style={tr.row}>
       {/* 코인 아이콘 */}
       <View style={tr.icon}>
         <Text style={tr.iconText}>{ticker.coin.slice(0, 2)}</Text>
@@ -297,30 +285,26 @@ function TickerRow({
       <View style={{ flex: 1 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <Text style={tr.coin}>{ticker.coin}</Text>
-          <Text style={tr.vol}>{formatVol(ticker.volume24hUsd)}</Text>
+          {ticker.name && <Text style={tr.name} numberOfLines={1}>{ticker.name}</Text>}
         </View>
         <Text style={tr.price}>
           {'$' + ticker.last.toLocaleString('en-US', {
             minimumFractionDigits:  ticker.last < 1 ? 4 : 2,
             maximumFractionDigits:  ticker.last < 1 ? 4 : 2,
           })}
+          {'  '}
+          <Text style={tr.vol}>{formatVol(ticker.volume24hUsd)}</Text>
         </Text>
       </View>
 
-      {/* 우측: 변동률 + ICT */}
-      <View style={{ alignItems: 'flex-end', gap: 4 }}>
+      {/* 우측: 변동률만 표시 (분석은 행 전체 탭으로) */}
+      <View style={{ alignItems: 'flex-end' }}>
         <Text style={[tr.change, { color: changeColor }]}>
           {ticker.change24h > 0 ? '+' : ''}{ticker.change24h.toFixed(2)}%
         </Text>
-        {isLoading ? (
-          <ActivityIndicator size="small" color={colors.text.secondary} />
-        ) : result ? (
-          <IctBadge score={result.score} grade={result.grade} />
-        ) : (
-          <Text style={tr.analyzeBtn}>분석</Text>
-        )}
       </View>
-    </Pressable>
+      </View>
+    </PressableScale>
   );
 }
 
@@ -331,16 +315,10 @@ const tr = StyleSheet.create({
   iconText:   { fontSize: 13, fontWeight: '700', color: colors.text.secondary },
   rank:       { position: 'absolute', bottom: -2, right: -2, fontSize: 9, fontWeight: '700', color: colors.text.tertiary, backgroundColor: '#F0F0F0', borderRadius: 4, paddingHorizontal: 3, paddingVertical: 1 },
   coin:       { fontSize: 15, fontWeight: '700', color: '#191919' },
-  vol:        { fontSize: 11, color: colors.text.tertiary },
+  name:       { fontSize: 12, color: colors.text.tertiary, flexShrink: 1 },
+  vol:        { fontSize: 12, color: colors.text.tertiary },
   price:      { fontSize: 13, color: colors.text.secondary, marginTop: 2 },
   change:     { fontSize: 14, fontWeight: '600' },
-  analyzeBtn: { fontSize: 12, fontWeight: '600', color: colors.text.secondary, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: colors.bg.elevated },
-});
-
-const ls = StyleSheet.create({
-  ictBadge: { borderRadius: 8, borderWidth: 1.5, paddingHorizontal: 6, paddingVertical: 2, alignItems: 'center', minWidth: 44 },
-  ictGrade: { fontSize: 13, fontWeight: '800', lineHeight: 18 },
-  ictScore: { fontSize: 10, fontWeight: '700' },
 });
 
 // ─── 메인 ─────────────────────────────────────────────────────────────────────
@@ -354,64 +332,84 @@ export default function Analysis() {
   const [tickers, setTickers]   = useState<Ticker[]>([]);
   const [tickersLoading, setTickersLoading] = useState(true);
   const [search,  setSearch]    = useState('');
-  const [ictMap,  setIctMap]    = useState<Map<string, IctResult | 'loading'>>(new Map());
 
-  const { accounts, balances, totalBalance, balancesLoading } = useAccounts();
+  const { accounts, balances, totalBalance } = useAccounts();
 
-  const selectedAccount  = accounts.find((a) => a.id === selectedAccountId) ?? null;
-  const displayBalance   = selectedAccountId
-    ? (balances[selectedAccountId] ?? null)
-    : totalBalance;
-  const selectedLabel = selectedAccount
+  const selectedAccount = accounts.find((a) => a.id === selectedAccountId) ?? null;
+  const selectedLabel   = selectedAccount
     ? (selectedAccount.name || EXCHANGE_LABELS[selectedAccount.exchange])
     : accounts.length === 1
       ? (accounts[0].name || EXCHANGE_LABELS[accounts[0].exchange])
       : '모든 계좌';
 
-  const krwAvail = displayBalance?.available ?? 0;
-  const usdTotal = displayBalance?.totalUsd  ?? 0;
+  // 거래 내역 + Kelly 통계
+  const [trades,       setTrades]       = useState<Trade[]>([]);
+  const [tradesLoading, setTradesLoading] = useState(true);
 
-  // Gate.io 상위 종목 로드
   useEffect(() => {
+    const selected = selectedAccountId
+      ? accounts.filter((a) => a.id === selectedAccountId)
+      : accounts;
+    const apiAccounts = selected.filter((a) => a.apiKey && a.apiSecret);
+    if (!apiAccounts.length) { setTradesLoading(false); return; }
+    setTradesLoading(true);
+    tradesService.getAllByAccounts(apiAccounts)
+      .then(setTrades)
+      .catch(() => {})
+      .finally(() => setTradesLoading(false));
+  }, [selectedAccountId, accounts.length]);
+
+  const kelly = useMemo(() => computeKelly(trades), [trades]);
+
+  // CoinGecko 시가총액 상위 50개 로드
+  useEffect(() => {
+    const COINGECKO =
+      'https://api.coingecko.com/api/v3/coins/markets' +
+      '?vs_currency=usd&order=market_cap_desc&per_page=50&page=1' +
+      '&sparkline=false&price_change_percentage=24h';
+
+    const mapCoins = (coins: any[]): Ticker[] =>
+      coins.map((c) => ({
+        contract:     c.symbol.toUpperCase() + '_USDT',
+        symbol:       c.symbol.toUpperCase() + 'USDT',
+        coin:         c.symbol.toUpperCase(),
+        name:         c.name,
+        last:         c.current_price   ?? 0,
+        change24h:    c.price_change_percentage_24h ?? 0,
+        volume24hUsd: c.total_volume    ?? 0,
+        fundingRate:  0,
+      }));
+
+    // 서버 프록시 먼저, 실패 시 CoinGecko 직접 호출
     fetch(`${API_BASE}/api/market-scan`)
       .then((r) => r.json())
-      .then((data) => setTickers(Array.isArray(data) ? data : []))
-      .catch(() => {})
+      .then((data) => {
+        if (Array.isArray(data) && data.length) {
+          setTickers(data);
+        } else {
+          throw new Error('empty');
+        }
+      })
+      .catch(() =>
+        fetch(COINGECKO)
+          .then((r) => r.json())
+          .then((coins: any[]) => Array.isArray(coins) && setTickers(mapCoins(coins)))
+          .catch(() => {}),
+      )
       .finally(() => setTickersLoading(false));
   }, []);
 
   const filtered = useMemo(() => {
     const q = search.trim().toUpperCase();
     if (!q) return tickers;
-    return tickers.filter((t) => t.coin.includes(q) || t.symbol.includes(q));
+    return tickers.filter(
+      (t) => t.coin.includes(q) || t.symbol.includes(q) || (t.name?.toUpperCase().includes(q) ?? false),
+    );
   }, [tickers, search]);
 
-  const analyze = useCallback(async (contract: string) => {
-    if (ictMap.get(contract) === 'loading') return;
-    const account = accounts.find((a) => a.apiKey && a.apiSecret) ?? accounts[0];
-    if (!account?.apiKey || !account?.apiSecret) return;
-    setIctMap((m) => new Map(m).set(contract, 'loading'));
-    try {
-      const res = await fetch(`${API_BASE}/api/ict-analyze`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ apiKey: account.apiKey, apiSecret: account.apiSecret, contract }),
-      });
-      const data = await res.json();
-      if (data?.score != null && data?.grade) {
-        setIctMap((m) => new Map(m).set(contract, {
-          score:  data.score,
-          grade:  data.grade,
-          signal: data.summary?.signal ?? null,
-          reason: data.summary?.reason ?? '',
-        }));
-      } else {
-        setIctMap((m) => { const nm = new Map(m); nm.delete(contract); return nm; });
-      }
-    } catch {
-      setIctMap((m) => { const nm = new Map(m); nm.delete(contract); return nm; });
-    }
-  }, [accounts, ictMap]);
+  const analyze = useCallback((contract: string) => {
+    router.push(`/(main)/analysis/ict/${encodeURIComponent(contract)}` as any);
+  }, []);
 
   return (
     <FadeTabView style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
@@ -446,40 +444,41 @@ export default function Analysis() {
             </Pressable>
           </Pressable>
 
-          {/* 잔고 카드 2열 */}
-          {balancesLoading ? (
-            <BalanceCardsSkeleton />
-          ) : (
-            <View style={st.balanceGrid}>
-              <View style={st.balanceCard}>
-                <Text style={st.balanceCardLabel}>원화</Text>
-                <AnimatedNumber value={krwAvail} formatter={formatKRW} fontSize={18} fontWeight="700" color="#191919" />
-              </View>
-              <View style={st.balanceCard}>
-                <Text style={st.balanceCardLabel}>달러</Text>
-                <AnimatedNumber
-                  value={usdTotal}
-                  formatter={(v) => `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                  fontSize={18}
-                  fontWeight="700"
-                  color="#191919"
-                />
-              </View>
-            </View>
-          )}
+          {/* 승률 / 손익비 / 반 Kelly 카드 */}
+          <View style={st.statsGrid}>
+            {tradesLoading ? (
+              [1, 2, 3].map((i) => (
+                <View key={i} style={st.statCard}>
+                  <Skeleton width={36} height={11} radius={4} style={{ marginBottom: 8 }} />
+                  <Skeleton width={52} height={22} radius={6} />
+                </View>
+              ))
+            ) : (
+              <>
+                <View style={st.statCard}>
+                  <Text style={st.statLabel}>승률</Text>
+                  <Text style={st.statValue}>
+                    {kelly ? `${(kelly.winRate * 100).toFixed(1)}%` : '--'}
+                  </Text>
+                </View>
+                <View style={st.statCard}>
+                  <Text style={st.statLabel}>손익비</Text>
+                  <Text style={st.statValue}>
+                    {kelly ? kelly.ratio.toFixed(2) : '--'}
+                  </Text>
+                </View>
+                <View style={st.statCard}>
+                  <Text style={st.statLabel}>반 Kelly</Text>
+                  <Text style={[st.statValue, { color: kelly && kelly.halfKelly > 0 ? '#246CF9' : colors.text.primary }]}>
+                    {kelly ? `${(kelly.halfKelly * 100).toFixed(1)}%` : '--'}
+                  </Text>
+                </View>
+              </>
+            )}
+          </View>
 
-          {/* 메뉴: 거래 내역 + PnL (Kelly 통계) */}
+          {/* 메뉴: PnL (Kelly 통계) */}
           <View style={st.menuSection}>
-            <Pressable
-              style={({ pressed }) => [st.menuRow, pressed && { backgroundColor: '#F8F8F8' }]}
-              onPress={() => router.push('/history')}
-            >
-              <Text style={st.menuText}>거래 내역</Text>
-              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                <Path d="M9 18l6-6-6-6" stroke="#C4C4C4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </Svg>
-            </Pressable>
-            <View style={st.menuDivider} />
             <Pressable
               style={({ pressed }) => [st.menuRow, pressed && { backgroundColor: '#F8F8F8' }]}
               onPress={() => router.push('/(main)/analysis/kelly')}
@@ -552,7 +551,6 @@ export default function Analysis() {
                       key={ticker.contract}
                       ticker={ticker}
                       idx={idx}
-                      ict={ictMap.get(ticker.contract)}
                       onPress={() => analyze(ticker.contract)}
                       isLast={idx === filtered.length - 1}
                     />
@@ -589,9 +587,10 @@ const st = StyleSheet.create({
   accountLabel:   { fontSize: 15, fontWeight: '600', color: '#191919' },
   accountViewAll: { fontSize: 14, color: colors.text.tertiary },
 
-  balanceGrid:      { flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingVertical: 16 },
-  balanceCard:      { flex: 1, backgroundColor: '#F5F5F5', borderRadius: 16, paddingVertical: 18, paddingHorizontal: 16 },
-  balanceCardLabel: { fontSize: 13, color: colors.text.tertiary, marginBottom: 8 },
+  statsGrid:  { flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingVertical: 16 },
+  statCard:   { flex: 1, backgroundColor: '#F5F5F5', borderRadius: 16, paddingVertical: 16, paddingHorizontal: 14 },
+  statLabel:  { fontSize: 12, color: colors.text.tertiary, marginBottom: 6 },
+  statValue:  { fontSize: 20, fontWeight: '700', color: '#191919' },
 
   menuSection: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8 },
   menuRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 20 },
@@ -608,7 +607,7 @@ const st = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    fontSize: 14,
+    fontSize: 16,
     color: colors.text.primary,
     borderWidth: 1,
     borderColor: colors.border.default,

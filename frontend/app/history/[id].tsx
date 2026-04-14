@@ -34,6 +34,7 @@ export default function TradeDetail() {
   );
 
   const [ictAnalysis, setIctAnalysis] = useState<IctAnalysis | null>(null);
+  const [ictChecked, setIctChecked] = useState(false);
   const [pricePoints, setPricePoints] = useState<PricePoint[]>([]);
 
   useEffect(() => {
@@ -43,6 +44,7 @@ export default function TradeDetail() {
     const entryTsForSnap = trade.entryAt ? Math.floor(Date.parse(trade.entryAt) / 1000) : 0;
     const stored = loadIctSnapshotByEntryTs(contract, entryTsForSnap);
     if (stored?.analysis) setIctAnalysis(stored.analysis as IctAnalysis);
+    setIctChecked(true);
 
     const hist = loadPriceHistory(contract);
     if (hist?.points.length) {
@@ -109,7 +111,7 @@ export default function TradeDetail() {
       pricePoints={pricePoints.length >= 2 ? pricePoints : undefined}
       entryAtTs={entryAtTs}
       ictAnalysis={ictAnalysis}
-      ictPending={!ictAnalysis}
+      ictPending={!ictChecked}
       rows={!trade ? [] : [
         {
           leftLabel:  '수량',

@@ -82,13 +82,16 @@ function buildChartFromSnapshots(
     return keys.map(k => ({ value: byDay.get(k)!, date: fmt(k) }));
   }
 
-  // 각 버킷 이전 최신 스냅샷 값을 취함 (없으면 carry-forward)
+  // 각 버킷 이전 최신 스냅샷 값을 취함 — 스냅샷 없는 초기 버킷은 제외 (역방향 추정 방지)
   const result: { value: number; date: string }[] = [];
-  let lastValue = snapshots[0].total;
+  let si = 0;
+  let lastValue: number | null = null;
   for (const bucket of buckets) {
-    const candidates = snapshots.filter(s => s.ts <= bucket.ts);
-    if (candidates.length) lastValue = candidates[candidates.length - 1].total;
-    result.push({ value: lastValue, date: bucket.label });
+    while (si < snapshots.length && snapshots[si].ts <= bucket.ts) {
+      lastValue = snapshots[si].total;
+      si++;
+    }
+    if (lastValue !== null) result.push({ value: lastValue, date: bucket.label });
   }
   return result;
 }
@@ -410,8 +413,9 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
 
   const n = barsData.length;
   // '전체' 기간에서 lineData는 bars보다 base point 1개 많음
-  const aligned = lineData.length === n + 1 ? lineData.slice(1) : lineData;
-  const vals    = aligned.map((d) => d.value).filter((v) => Number.isFinite(v));
+  const aligned     = lineData.length === n + 1 ? lineData.slice(1) : lineData;
+  const lineOffset  = Math.max(0, n - aligned.length);  // 선 데이터 없는 초기 버킷 수
+  const vals        = aligned.map((d) => d.value).filter((v) => Number.isFinite(v));
 
   if (n < 2) {
     return (
@@ -428,8 +432,8 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
   const lc     = positive ? colors.market.rise : colors.market.fall;
 
   const toLineY = (v: number) => C_PAD_T + (1 - (v - vMin) / vRange) * (LINE_H - C_PAD_T - 6);
-  // 선 포인트와 막대 중심을 같은 X에 정렬: (i + 0.5) / n
-  const toLineX = (i: number) => ((i + 0.5) / n) * cw;
+  // lineOffset만큼 오른쪽으로 밀어 막대와 X 정렬 (초기 버킷에 선 데이터 없을 때)
+  const toLineX = (i: number) => ((i + lineOffset + 0.5) / n) * cw;
 
   const linePts = vals.map((v, i) => `${toLineX(i)},${toLineY(v)}`);
   // fill 폴리곤은 좌우 가장자리까지 확장
@@ -441,8 +445,10 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
   const barW    = Math.max((cw / n) * 0.52, 4);
   const toBarX  = (i: number) => (i / n) * cw + (cw / n - barW) / 2;
 
-  const tipX = tipIdx !== null ? toLineX(tipIdx) : null;
-  const tipY = tipIdx !== null ? toLineY(vals[tipIdx]) : null;
+  const tipAlignedIdx = tipIdx !== null ? tipIdx - lineOffset : null;
+  const tipX = tipIdx !== null ? ((tipIdx + 0.5) / n) * cw : null;
+  const tipY = tipAlignedIdx !== null && tipAlignedIdx >= 0 && tipAlignedIdx < vals.length
+    ? toLineY(vals[tipAlignedIdx]) : null;
 
   const handleTouch = (e: any) => {
     const x = e.nativeEvent.locationX;
@@ -491,7 +497,8 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
   const curTotal   = balance?.total ?? 0;
   const curProfit  = balance?.profitTotal ?? 0;
   const curRate    = balance?.profitRate ?? 0;
-  const tipLineVal = hasLine && tipIdx !== null ? (aligned[tipIdx]?.value ?? curTotal) : curTotal;
+  const tipLineVal = hasLine && tipAlignedIdx !== null && tipAlignedIdx >= 0
+    ? (aligned[tipAlignedIdx]?.value ?? curTotal) : curTotal;
   const tipBarVal  = tipIdx !== null ? (barsData[tipIdx]?.value ?? 0)        : curProfit;
   const tipBarRate = tipIdx !== null ? (barsData[tipIdx]?.rate  ?? 0)        : curRate;
 
@@ -853,10 +860,9 @@ export default function Home() {
   }, [allTrades, selectedAccountId]);
 
   const chartData  = useMemo(() => {
-    // 실제 잔고 스냅샷 이력만 사용 — 추정값으로 역산하지 않음
-    const snaps = loadBalanceHistory();
+    const snaps = loadBalanceHistory(selectedAccountId ?? undefined);
     return buildChartFromSnapshots(snaps, period);
-  }, [period]);
+  }, [period, selectedAccountId]);
   const barsData   = useMemo(
     () => buildPeriodBarsFromTrades(chartTrades, balance ?? null, period),
     [chartTrades, balance, period],

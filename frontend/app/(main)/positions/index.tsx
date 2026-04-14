@@ -369,7 +369,7 @@ export default function Trading() {
               <View style={st.balanceCard}>
                 <Text style={st.balanceCardLabel}>{showUsd ? '총 자산' : '달러'}</Text>
                 <AnimatedNumber
-                  value={showUsd ? usdTotal : usdTotal}
+                  value={usdTotal}
                   formatter={(v) => `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                   fontSize={18}
                   fontWeight="700"

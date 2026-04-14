@@ -351,8 +351,12 @@ export function TpSlPathChart({
   compact?: boolean;
   entryAtTs?: number;
 }) {
-  // entryAtTs가 있으면 차트 시작을 진입가에 맞춤 (compact/full 모두 동일 적용)
+  // entryAtTs가 있고, 진입~첫 기록 간격이 기록 전체 구간 이하일 때만 앞에 삽입
+  // (간격이 너무 길면 긴 평선이 생겨 이상해 보임)
+  const span = points.length > 1 ? points[points.length - 1].t - points[0].t : 0;
+  const gap  = points.length && entryAtTs ? points[0].t - entryAtTs : 0;
   const allPts: PricePoint[] = entryAtTs && points.length && entryAtTs < points[0].t
+    && (!span || gap <= span)
     ? [{ t: entryAtTs, p: entry }, ...points]
     : points;
 

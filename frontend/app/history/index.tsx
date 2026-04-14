@@ -623,22 +623,25 @@ export default function History() {
               onChange={(p) => fade(() => { setPeriod(p as Period); setOffset(0); })}
             />
 
-            {/* ── 기간 내비게이션 ── */}
-            {period !== '전체' ? (
-              <NavRow
-                label={periodLabel}
-                canNext={offset > 0}
-                onPrev={() => fade(() => setOffset((v) => v + 1))}
-                onNext={() => fade(() => setOffset((v) => Math.max(0, v - 1)))}
-              />
-            ) : (
-              <View style={{ paddingVertical: 14, paddingHorizontal: 20 }}>
-                <Text style={{ fontSize: 15, fontWeight: '700', color: '#191919' }}>전체 기간</Text>
+            {/* ── 기간 내비게이션 + 필터 드롭다운 (같은 행) ── */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, paddingHorizontal: 20 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+                {period !== '전체' && (
+                  <Pressable style={{ padding: 6 }} onPress={() => fade(() => setOffset((v) => v + 1))} hitSlop={10}>
+                    <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                      <Path d="M15 18l-6-6 6-6" stroke="#444" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                    </Svg>
+                  </Pressable>
+                )}
+                <Text style={{ fontSize: 15, fontWeight: '700', color: '#191919' }}>{periodLabel}</Text>
+                {period !== '전체' && (
+                  <Pressable style={[{ padding: 6 }, offset === 0 && { opacity: 0.25 }]} onPress={() => fade(() => setOffset((v) => Math.max(0, v - 1)))} disabled={offset === 0} hitSlop={10}>
+                    <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                      <Path d="M9 18l6-6-6-6" stroke="#444" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                    </Svg>
+                  </Pressable>
+                )}
               </View>
-            )}
-
-            {/* ── 필터 드롭다운 ── */}
-            <View style={{ paddingHorizontal: 20, paddingVertical: 10, flexDirection: 'row', justifyContent: 'flex-end' }}>
               <Pressable
                 ref={filterBtnRef}
                 style={st.filterBtn}

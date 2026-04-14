@@ -18,6 +18,7 @@ export interface PositionSnapshot {
 }
 
 const key = (contract: string) => `pos_snap_${contract}`;
+const histKey = (contract: string) => `pos_snap_hist_${contract}`;
 
 export function savePositionSnapshot(snap: PositionSnapshot): void {
   if (Platform.OS !== 'web') return;
@@ -30,4 +31,51 @@ export function loadPositionSnapshot(contract: string): PositionSnapshot | null 
     const raw = localStorage.getItem(key(contract));
     return raw ? (JSON.parse(raw) as PositionSnapshot) : null;
   } catch { return null; }
+}
+
+/**
+ * 포지션 스냅샷을 거래별 영구 이력에도 저장
+ * entryTs: 진입 시각 Unix 초 (UTC)
+ */
+export function savePositionSnapshotWithHistory(snap: PositionSnapshot, entryTs: number): void {
+  savePositionSnapshot(snap);
+  if (Platform.OS !== 'web' || entryTs <= 0) return;
+  try {
+    const raw  = localStorage.getItem(histKey(snap.contract));
+    const hist: Array<{ ts: number; snap: PositionSnapshot }> = raw ? JSON.parse(raw) : [];
+    const idx  = hist.findIndex((e) => Math.abs(e.ts - entryTs) < 120);
+    if (idx >= 0) { hist[idx] = { ts: entryTs, snap }; }
+    else          { hist.push({ ts: entryTs, snap });   }
+    if (hist.length > 20) hist.splice(0, hist.length - 20);
+    localStorage.setItem(histKey(snap.contract), JSON.stringify(hist));
+  } catch {}
+}
+
+/**
+ * 거래별 영구 이력에서 진입 시각으로 스냅샷 조회
+ * entryTs: trade.entryAt에서 파싱한 Unix 초 (UTC)
+ * toleranceSec: 오차 허용 범위 (기본 120초)
+ */
+export function loadPositionSnapshotByEntryTs(
+  contract: string,
+  entryTs: number,
+  toleranceSec = 120,
+): PositionSnapshot | null {
+  if (Platform.OS !== 'web') return null;
+  try {
+    if (entryTs > 0) {
+      const raw = localStorage.getItem(histKey(contract));
+      if (raw) {
+        const hist: Array<{ ts: number; snap: PositionSnapshot }> = JSON.parse(raw);
+        let best: PositionSnapshot | null = null;
+        let bestDelta = toleranceSec + 1;
+        for (const e of hist) {
+          const delta = Math.abs(e.ts - entryTs);
+          if (delta < bestDelta) { bestDelta = delta; best = e.snap; }
+        }
+        if (best) return best;
+      }
+    }
+  } catch {}
+  return loadPositionSnapshot(contract);
 }

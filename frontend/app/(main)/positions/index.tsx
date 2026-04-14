@@ -12,7 +12,7 @@ import Animated, {
   useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS,
 } from 'react-native-reanimated';
 import Svg, { Path, Polygon, Rect, Text as SvgText, Circle } from 'react-native-svg';
-import { Text, FadeTabView, PressableScale, BalanceCardsSkeleton, AnimatedNumber } from '@/design-system';
+import { Text, FadeTabView, PressableScale, BalanceCardsSkeleton, AnimatedNumber, CurrencyToggle } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType, ExchangeAccount } from '@/store/accounts';
@@ -225,9 +225,16 @@ const bs = StyleSheet.create({
 });
 
 // ── 포지션 미리보기 행 ─────────────────────────────────────────────────────────
-function PositionRow({ pos, isLast }: { pos: any; isLast: boolean }) {
+function PositionRow({ pos, isLast, showUsd, rate }: { pos: any; isLast: boolean; showUsd: boolean; rate: number }) {
   const up = pos.profit >= 0;
   const pnlColor = up ? colors.market.rise : colors.market.fall;
+  const profitVal = showUsd && rate > 0 ? pos.profit / rate : pos.profit;
+  const fmtProfit = showUsd
+    ? (v: number) => `${v >= 0 ? '+' : ''}$${Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : formatKRWSigned;
+  const amountSub = showUsd && rate > 0
+    ? `$${(pos.amount / rate).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} 투자`
+    : `${formatKRW(pos.amount)} 투자`;
   return (
     <PressableScale
       style={[!isLast && pr.border]}
@@ -246,12 +253,12 @@ function PositionRow({ pos, isLast }: { pos: any; isLast: boolean }) {
             </Text>
           </View>
         </View>
-        <Text style={pr.sub}>{formatKRW(pos.amount)} 투자</Text>
+        <Text style={pr.sub}>{amountSub}</Text>
       </View>
       <View style={{ alignItems: 'flex-end' }}>
         <AnimatedNumber
-          value={pos.profit}
-          formatter={formatKRWSigned}
+          value={profitVal}
+          formatter={fmtProfit}
           fontSize={15}
           fontWeight="700"
           color={pnlColor}
@@ -287,6 +294,7 @@ export default function Trading() {
   const [showSheet, setShowSheet]           = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [posExpanded, setPosExpanded]       = useState(true);
+  const [showUsd, setShowUsd]               = useState(false);
   const { accounts, balances, totalBalance, balancesLoading, positions: allPositions } = useAccounts();
 
   const positions = selectedAccountId
@@ -304,6 +312,7 @@ export default function Trading() {
       ? (accounts[0].name || EXCHANGE_LABELS[accounts[0].exchange])
       : '모든 계좌';
 
+  const rate     = totalBalance?.usdtKrw ?? 1350;
   const krwAvail = displayBalance?.available ?? 0;
   const usdTotal = displayBalance?.totalUsd  ?? 0;
   const posCount = positions?.length ?? 0;
@@ -315,6 +324,7 @@ export default function Trading() {
         {/* ── 헤더 ── */}
         <View style={st.header}>
           <Text style={st.headerTitle}>트레이딩</Text>
+          <CurrencyToggle showUsd={showUsd} onToggle={() => setShowUsd((v) => !v)} />
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false}>
@@ -347,19 +357,19 @@ export default function Trading() {
           ) : (
             <View style={st.balanceGrid}>
               <View style={st.balanceCard}>
-                <Text style={st.balanceCardLabel}>원화</Text>
+                <Text style={st.balanceCardLabel}>{showUsd ? '가용 잔고' : '원화'}</Text>
                 <AnimatedNumber
-                  value={krwAvail}
-                  formatter={formatKRW}
+                  value={showUsd && rate > 0 ? krwAvail / rate : krwAvail}
+                  formatter={showUsd ? (v) => `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : formatKRW}
                   fontSize={18}
                   fontWeight="700"
                   color="#191919"
                 />
               </View>
               <View style={st.balanceCard}>
-                <Text style={st.balanceCardLabel}>달러</Text>
+                <Text style={st.balanceCardLabel}>{showUsd ? '총 자산' : '달러'}</Text>
                 <AnimatedNumber
-                  value={usdTotal}
+                  value={showUsd ? usdTotal : usdTotal}
                   formatter={(v) => `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                   fontSize={18}
                   fontWeight="700"
@@ -430,7 +440,7 @@ export default function Trading() {
               const multiGroup = accounts.length >= 2 && !selectedAccountId;
               if (!multiGroup) {
                 return positions.map((pos, i) => (
-                  <PositionRow key={pos.id} pos={pos} isLast={i === positions.length - 1} />
+                  <PositionRow key={pos.id} pos={pos} isLast={i === positions.length - 1} showUsd={showUsd} rate={rate} />
                 ));
               }
               // 계좌별로 그룹화
@@ -453,7 +463,7 @@ export default function Trading() {
                     </View>
                   </View>
                   {group.items.map((pos, i) => (
-                    <PositionRow key={pos.id} pos={pos} isLast={i === group.items.length - 1} />
+                    <PositionRow key={pos.id} pos={pos} isLast={i === group.items.length - 1} showUsd={showUsd} rate={rate} />
                   ))}
                   {/* 그룹 사이 구분선 (마지막 그룹 제외) */}
                   {gi < groups.length - 1 && <View style={st.groupDivider} />}
@@ -482,7 +492,7 @@ export default function Trading() {
 
 const st = StyleSheet.create({
   // 헤더
-  header:      { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16 },
+  header:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16 },
   headerTitle: { fontSize: 24, fontWeight: '700', color: '#191919' },
 
   // 계좌 선택 행

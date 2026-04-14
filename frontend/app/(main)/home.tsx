@@ -413,7 +413,7 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
   const aligned = lineData.length === n + 1 ? lineData.slice(1) : lineData;
   const vals    = aligned.map((d) => d.value).filter((v) => Number.isFinite(v));
 
-  if (n < 2 || vals.length < 2) {
+  if (n < 2) {
     return (
       <View style={{ height: TOT_H, alignItems: 'center', justifyContent: 'center' }}>
         <Text variant="caption1" color={colors.text.disabled}>데이터 없음</Text>
@@ -421,8 +421,9 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
     );
   }
 
-  const vMin   = Math.min(...vals);
-  const vMax   = Math.max(...vals);
+  const hasLine = vals.length >= 2;
+  const vMin   = hasLine ? Math.min(...vals) : 0;
+  const vMax   = hasLine ? Math.max(...vals) : 0;
   const vRange = (vMax - vMin) || Math.abs(vMax) * 0.02 || 1;
   const lc     = positive ? colors.market.rise : colors.market.fall;
 
@@ -490,7 +491,7 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
   const curTotal   = balance?.total ?? 0;
   const curProfit  = balance?.profitTotal ?? 0;
   const curRate    = balance?.profitRate ?? 0;
-  const tipLineVal = tipIdx !== null ? (aligned[tipIdx]?.value ?? curTotal)  : curTotal;
+  const tipLineVal = hasLine && tipIdx !== null ? (aligned[tipIdx]?.value ?? curTotal) : curTotal;
   const tipBarVal  = tipIdx !== null ? (barsData[tipIdx]?.value ?? 0)        : curProfit;
   const tipBarRate = tipIdx !== null ? (barsData[tipIdx]?.rate  ?? 0)        : curRate;
 
@@ -523,8 +524,8 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
               </LinearGradient>
             </Defs>
 
-            {/* 선 차트 격자선 */}
-            {lineGrid.map((gv, gi) => (
+            {/* 선 차트 격자선 (라인 데이터 있을 때만) */}
+            {hasLine && lineGrid.map((gv, gi) => (
               <Line key={`lg${gi}`}
                 x1="0" y1={toLineY(gv)} x2={cw} y2={toLineY(gv)}
                 stroke={colors.border.default} strokeWidth="0.7" strokeDasharray="3,3"
@@ -535,16 +536,18 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
             <Line x1="0" y1={barMidY} x2={cw} y2={barMidY}
               stroke={colors.border.default} strokeWidth="0.8" />
 
-            {/* 선 채우기 */}
-            <Polygon points={fillPts} fill="url(#cbFill)" />
+            {/* 선 채우기 (라인 데이터 있을 때만) */}
+            {hasLine && <Polygon points={fillPts} fill="url(#cbFill)" />}
 
-            {/* 선 */}
-            <Polyline points={linePts.join(' ')} fill="none"
-              stroke={lc} strokeWidth="2"
-              strokeLinejoin="round" strokeLinecap="round" />
+            {/* 선 (라인 데이터 있을 때만) */}
+            {hasLine && (
+              <Polyline points={linePts.join(' ')} fill="none"
+                stroke={lc} strokeWidth="2"
+                strokeLinejoin="round" strokeLinecap="round" />
+            )}
 
-            {/* 빈 원 포인트 */}
-            {vals.map((v, i) => (
+            {/* 빈 원 포인트 (라인 데이터 있을 때만) */}
+            {hasLine && vals.map((v, i) => (
               <Circle key={`lp${i}`}
                 cx={toLineX(i)} cy={toLineY(v)}
                 r="3.5" fill="white" stroke={lc} strokeWidth="1.5" />
@@ -565,19 +568,23 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
             })}
 
             {/* 크로스헤어 */}
-            {tipX !== null && tipY !== null && (
+            {tipX !== null && (
               <>
                 <Line x1={tipX} y1={C_PAD_T / 2} x2={tipX} y2={TOT_H - 5}
                   stroke="#555" strokeWidth="0.8" />
-                <Circle cx={tipX} cy={tipY} r="5" fill={lc} />
-                <Circle cx={tipX} cy={tipY} r="9" fill={lc} fillOpacity="0.15" />
+                {hasLine && tipY !== null && (
+                  <>
+                    <Circle cx={tipX} cy={tipY} r="5" fill={lc} />
+                    <Circle cx={tipX} cy={tipY} r="9" fill={lc} fillOpacity="0.15" />
+                  </>
+                )}
                 <Circle cx={tipX} cy={TOT_H - 6} r="3.5" fill="#555" />
               </>
             )}
           </Svg>
 
-          {/* Y 라벨 — 선 차트 절대 위치 */}
-          {lineGrid.map((gv, gi) => (
+          {/* Y 라벨 — 선 차트 절대 위치 (라인 데이터 있을 때만) */}
+          {hasLine && lineGrid.map((gv, gi) => (
             <View key={`lyv${gi}`} style={{ position: 'absolute', top: toLineY(gv) - 9, left: 2 }}>
               <Text style={cbSt.yLabel}>{fmtLineLabel(gv)}</Text>
             </View>
@@ -846,12 +853,10 @@ export default function Home() {
   }, [allTrades, selectedAccountId]);
 
   const chartData  = useMemo(() => {
-    // 실제 잔고 이력 우선, 부족하면 거래 내역 기반 추정으로 fallback
+    // 실제 잔고 스냅샷 이력만 사용 — 추정값으로 역산하지 않음
     const snaps = loadBalanceHistory();
-    const fromSnaps = buildChartFromSnapshots(snaps, period);
-    if (fromSnaps.length >= 2) return fromSnaps;
-    return buildChartFromTrades(chartTrades, balance ?? null, period);
-  }, [chartTrades, balance, period]);
+    return buildChartFromSnapshots(snaps, period);
+  }, [period]);
   const barsData   = useMemo(
     () => buildPeriodBarsFromTrades(chartTrades, balance ?? null, period),
     [chartTrades, balance, period],

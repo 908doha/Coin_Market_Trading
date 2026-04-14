@@ -700,6 +700,9 @@ export default function ProfitAnalysis() {
   const [showUsd,    setShowUsd]    = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(accountId ?? null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [resultOpen, setResultOpen] = useState(false);
+  const [resultPos,  setResultPos]  = useState({ top: 0, right: 0 });
+  const resultBtnRef = React.useRef<View>(null);
 
   const { accounts, totalBalance } = useAccounts();
   const rate         = totalBalance?.usdtKrw ?? 1350;
@@ -816,6 +819,30 @@ export default function ProfitAnalysis() {
         onClose={() => setPickerOpen(false)}
       />
 
+      {/* 결과 필터 드롭다운 */}
+      <Modal visible={resultOpen} transparent animationType="none" onRequestClose={() => setResultOpen(false)}>
+        <Pressable style={{ flex: 1 }} onPress={() => setResultOpen(false)}>
+          <View style={{ position: 'absolute', top: resultPos.top, right: 20, minWidth: 120, backgroundColor: '#FFF', borderRadius: 14, paddingVertical: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.14, shadowRadius: 20, elevation: 12 }}>
+            {(['전체', '수익', '손실'] as ResultFilter[]).map((opt, i, arr) => (
+              <Pressable
+                key={opt}
+                style={[{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 13 }, i < arr.length - 1 && { borderBottomWidth: 1, borderBottomColor: '#F2F2F7' }]}
+                onPress={() => { setResult(opt); setResultOpen(false); fade(() => {}); }}
+              >
+                <View style={{ width: 20, alignItems: 'center', marginRight: 8 }}>
+                  {result === opt && (
+                    <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
+                      <Path d="M5 13l4 4L19 7" stroke="#246CF9" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                    </Svg>
+                  )}
+                </View>
+                <Text style={{ fontSize: 15, fontWeight: '500', color: '#191919' }}>{opt}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </Pressable>
+      </Modal>
+
       <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }}>
 
         {/* 계좌 선택 드롭다운 */}
@@ -824,19 +851,41 @@ export default function ProfitAnalysis() {
         {/* ③ 기간 탭 */}
         <PeriodTabs period={period} onChange={(p) => fade(() => { setPeriod(p); setOffset(0); })} />
 
-        {/* ④ 기간 내비게이션 */}
-        {period !== '전체' ? (
-          <NavRow
-            label={periodLabel}
-            canNext={offset > 0}
-            onPrev={() => fade(() => setOffset((v) => v + 1))}
-            onNext={() => fade(() => setOffset((v) => Math.max(0, v - 1)))}
-          />
-        ) : (
-          <View style={{ paddingVertical: 14, paddingHorizontal: 20 }}>
-            <Text style={{ fontSize: 15, fontWeight: '700', color: C.text }}>전체 기간</Text>
+        {/* ④ 기간 내비게이션 + 결과 필터 드롭다운 (같은 행) */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, paddingHorizontal: 20 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+            {period !== '전체' && (
+              <Pressable style={{ padding: 6 }} onPress={() => fade(() => setOffset((v) => v + 1))} hitSlop={10}>
+                <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                  <Path d="M15 18l-6-6 6-6" stroke="#444" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                </Svg>
+              </Pressable>
+            )}
+            <Text style={{ fontSize: 15, fontWeight: '700', color: C.text }}>{periodLabel}</Text>
+            {period !== '전체' && (
+              <Pressable style={[{ padding: 6 }, offset === 0 && { opacity: 0.25 }]} onPress={() => fade(() => setOffset((v) => Math.max(0, v - 1)))} disabled={offset === 0} hitSlop={10}>
+                <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                  <Path d="M9 18l6-6-6-6" stroke="#444" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                </Svg>
+              </Pressable>
+            )}
           </View>
-        )}
+          <Pressable
+            ref={resultBtnRef}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#F0F0F5', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 }}
+            onPress={() => {
+              resultBtnRef.current?.measureInWindow((x, y, w, h) => {
+                setResultPos({ top: y + h + 6, right: 0 });
+                setResultOpen(true);
+              });
+            }}
+          >
+            <Text style={{ fontSize: 13, fontWeight: '600', color: '#555' }}>{result}</Text>
+            <Svg width={11} height={11} viewBox="0 0 24 24" fill="none">
+              <Path d="M6 9l6 6 6-6" stroke="#555" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </Svg>
+          </Pressable>
+        </View>
 
         {/* ⑤ 대형 손익 금액 */}
         <HeroAmount value={periodStats.totalPnl} hasData={periodStats.total > 0} showUsd={showUsd} rate={rate} />
@@ -850,8 +899,6 @@ export default function ProfitAnalysis() {
         {/* ⑦ 서브탭 (실현손익 | 롱 | 숏) */}
         <SubTabs active={subTab} onChange={(t) => fade(() => { setSubTab(t); setResult('전체'); })} />
 
-        {/* ⑧ 결과 필터 칩 (전체 | 수익 | 손실) */}
-        <ResultChips active={result} onChange={(r) => fade(() => setResult(r))} />
 
         {/* ⑨ 금액 바 */}
         <AmountBar

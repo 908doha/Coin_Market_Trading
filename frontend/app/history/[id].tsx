@@ -7,8 +7,8 @@ import { useApi } from '@/hooks/useApi';
 import { useAccounts } from '@/store/accounts';
 import { PositionDetailView } from '@/components/PositionDetailView';
 import type { IctAnalysis } from '@/components/IctAnalysisCard';
-import { loadIctSnapshot } from '@/utils/ictSnapshot';
-import { loadPositionSnapshot } from '@/utils/positionSnapshot';
+import { loadIctSnapshotByEntryTs } from '@/utils/ictSnapshot';
+import { loadPositionSnapshotByEntryTs } from '@/utils/positionSnapshot';
 import { loadPriceHistory } from '@/utils/priceHistory';
 import type { PricePoint } from '@/utils/priceHistory';
 
@@ -40,7 +40,8 @@ export default function TradeDetail() {
     if (!trade) return;
     const contract = trade.symbol.replace('/', '_');
 
-    const stored = loadIctSnapshot(contract);
+    const entryTsForSnap = trade.entryAt ? Math.floor(Date.parse(trade.entryAt) / 1000) : 0;
+    const stored = loadIctSnapshotByEntryTs(contract, entryTsForSnap);
     if (stored?.analysis) setIctAnalysis(stored.analysis as IctAnalysis);
 
     const hist = loadPriceHistory(contract);
@@ -67,7 +68,8 @@ export default function TradeDetail() {
 
   const isProfit = (trade?.profit ?? 0) >= 0;
   const pnlColor = isProfit ? colors.market.rise : colors.market.fall;
-  const posSnap  = trade ? loadPositionSnapshot(trade.symbol.replace('/', '_')) : null;
+  const entryTsForPos = trade?.entryAt ? Math.floor(Date.parse(trade.entryAt) / 1000) : 0;
+  const posSnap  = trade ? loadPositionSnapshotByEntryTs(trade.symbol.replace('/', '_'), entryTsForPos) : null;
   const entryAtTs = trade?.entryAt
     ? Math.floor(Date.parse(trade.entryAt) / 1000) || undefined
     : undefined;

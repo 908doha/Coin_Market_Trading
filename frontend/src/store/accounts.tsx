@@ -12,8 +12,8 @@ import { exchangeService } from '../services/exchange.service';
 import { positionsService } from '../services/positions.service';
 import type { Balance } from '../services/account.service';
 import type { Position } from '../services/positions.service';
-import { saveIctSnapshot, loadIctSnapshot } from '../utils/ictSnapshot';
-import { savePositionSnapshot } from '../utils/positionSnapshot';
+import { saveIctSnapshot, saveIctSnapshotWithHistory, loadIctSnapshot } from '../utils/ictSnapshot';
+import { savePositionSnapshotWithHistory } from '../utils/positionSnapshot';
 import { appendPricePoint } from '../utils/priceHistory';
 import { appendBalanceSnapshot } from '../utils/balanceHistory';
 
@@ -263,23 +263,30 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
         appendPricePoint(contract, entryAt, markPrice);
       }
 
-      // 신규 포지션(또는 재진입) 감지 → ICT + 포지션 스냅샷 자동 캡처
+      // 모든 활성 포지션 스냅샷 저장 (매 폴링 — TP/SL 변경 즉시 반영)
       for (const p of pos) {
         const contract = p.symbol.replace('/', '_');
         const entryAt  = (p as any).entryAt ?? '';
-        const sessionKey = `${contract}_${entryAt}`;
+        const usdtKrw  = (p as any).usdtKrw ?? 1350;
 
-        // 이번 세션에 이미 처리했으면 스킵
-        if (capturedContracts.current.has(sessionKey)) continue;
-        capturedContracts.current.add(sessionKey);
+        // KST 형식 "2025.01.19 (일) 18:07" → UTC Unix 초
+        const parseEntryTs = (s: string): number => {
+          if (!s || s === '-') return 0;
+          const ts = Date.parse(s);
+          if (!isNaN(ts)) return Math.floor(ts / 1000);
+          const m = s.match(/(\d{4})\.(\d{2})\.(\d{2})\s+\([^)]+\)\s+(\d{2}):(\d{2})/);
+          if (m) {
+            const utcMs = new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00+09:00`).getTime();
+            return isNaN(utcMs) ? 0 : Math.floor(utcMs / 1000);
+          }
+          return 0;
+        };
+        const entryTs = parseEntryTs(entryAt);
 
-        // 포지션 스냅샷 저장 (항상, 최신 TP/SL 갱신)
-        const usdtKrw    = (p as any).usdtKrw ?? 1350;
-        const marginUsdt = p.amount / usdtKrw;
-        const notionalUsdt = marginUsdt * p.leverage;
-        const qty        = p.entryPrice > 0 ? notionalUsdt / p.entryPrice : 0;
-        const coinQtyStr = qty <= 0 ? '-' : qty < 0.001 ? qty.toFixed(6) : qty < 1 ? qty.toFixed(4) : qty.toFixed(3);
-        savePositionSnapshot({
+        const notionalUsdt = (p.amount / usdtKrw) * p.leverage;
+        const qty          = p.entryPrice > 0 ? notionalUsdt / p.entryPrice : 0;
+        const coinQtyStr   = qty <= 0 ? '-' : qty < 0.001 ? qty.toFixed(6) : qty < 1 ? qty.toFixed(4) : qty.toFixed(3);
+        savePositionSnapshotWithHistory({
           contract,
           entryAt,
           coinQty:     coinQtyStr !== '-' ? `${coinQtyStr} ${p.coin}` : '-',
@@ -290,7 +297,17 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
           usdtKrw,
           stopLoss:    p.stopLoss    ?? undefined,
           targetPrice: p.targetPrice ?? undefined,
-        });
+        }, entryTs);
+      }
+
+      // 신규 포지션(또는 재진입) 감지 → ICT 스냅샷 자동 캡처 (한 번만)
+      for (const p of pos) {
+        const contract   = p.symbol.replace('/', '_');
+        const entryAt    = (p as any).entryAt ?? '';
+        const sessionKey = `${contract}_${entryAt}`;
+
+        if (capturedContracts.current.has(sessionKey)) continue;
+        capturedContracts.current.add(sessionKey);
 
         // 저장된 ICT 스냅샷이 같은 진입 시간이면 재사용
         const stored = loadIctSnapshot(contract);
@@ -300,6 +317,20 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
         const account = list.find((a) => a.id === (p as any).accountId) ?? list[0];
         if (!account?.apiKey || !account?.apiSecret) continue;
 
+        const usdtKrw  = (p as any).usdtKrw ?? 1350;
+        const parseTs  = (s: string): number => {
+          if (!s || s === '-') return 0;
+          const ts = Date.parse(s);
+          if (!isNaN(ts)) return Math.floor(ts / 1000);
+          const m = s.match(/(\d{4})\.(\d{2})\.(\d{2})\s+\([^)]+\)\s+(\d{2}):(\d{2})/);
+          if (m) {
+            const utcMs = new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00+09:00`).getTime();
+            return isNaN(utcMs) ? 0 : Math.floor(utcMs / 1000);
+          }
+          return 0;
+        };
+        const entryTs = parseTs(entryAt);
+
         fetch('/api/ict-analyze', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -307,7 +338,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
         })
           .then((r) => r.json())
           .then((data) => {
-            if (data?.htf !== undefined) saveIctSnapshot(contract, entryAt, data);
+            if (data?.htf !== undefined) saveIctSnapshotWithHistory(contract, entryAt, entryTs, data);
           })
           .catch(() => {});
       }

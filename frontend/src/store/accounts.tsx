@@ -163,6 +163,19 @@ function sumBalances(bals: (Balance | null)[]): Balance | null {
   );
 }
 
+// KST 형식 "2025.01.19 (일) 18:07" → UTC Unix 초
+function parseKstEntryTs(s: string): number {
+  if (!s || s === '-') return 0;
+  const ts = Date.parse(s);
+  if (!isNaN(ts)) return Math.floor(ts / 1000);
+  const m = s.match(/(\d{4})\.(\d{2})\.(\d{2})\s+\([^)]+\)\s+(\d{2}):(\d{2})/);
+  if (m) {
+    const utcMs = new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00+09:00`).getTime();
+    return isNaN(utcMs) ? 0 : Math.floor(utcMs / 1000);
+  }
+  return 0;
+}
+
 export function AccountsProvider({ children }: { children: React.ReactNode }) {
   const [accounts, setAccounts]          = useState<ExchangeAccount[]>([]);
   const [isLoading, setIsLoading]        = useState(true);
@@ -245,6 +258,10 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     // 총 자산 스냅샷 저장 (5분 간격 — 홈 차트 실제 잔고 이력용)
     const snap = sumBalances(Object.values(map));
     if (snap?.total) appendBalanceSnapshot(snap.total);
+    // 계좌별 스냅샷도 별도 저장 (계좌 선택 필터용)
+    for (const [accId, bal] of Object.entries(map)) {
+      if (bal?.total) appendBalanceSnapshot(bal.total, accId);
+    }
   }, []);
 
   // 포지션 silent refresh (로딩 표시 없이 갱신) + 신규 포지션 ICT 스냅샷 자동 캡처
@@ -268,20 +285,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
         const contract = p.symbol.replace('/', '_');
         const entryAt  = (p as any).entryAt ?? '';
         const usdtKrw  = (p as any).usdtKrw ?? 1350;
-
-        // KST 형식 "2025.01.19 (일) 18:07" → UTC Unix 초
-        const parseEntryTs = (s: string): number => {
-          if (!s || s === '-') return 0;
-          const ts = Date.parse(s);
-          if (!isNaN(ts)) return Math.floor(ts / 1000);
-          const m = s.match(/(\d{4})\.(\d{2})\.(\d{2})\s+\([^)]+\)\s+(\d{2}):(\d{2})/);
-          if (m) {
-            const utcMs = new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00+09:00`).getTime();
-            return isNaN(utcMs) ? 0 : Math.floor(utcMs / 1000);
-          }
-          return 0;
-        };
-        const entryTs = parseEntryTs(entryAt);
+        const entryTs  = parseKstEntryTs(entryAt);
 
         const notionalUsdt = (p.amount / usdtKrw) * p.leverage;
         const qty          = p.entryPrice > 0 ? notionalUsdt / p.entryPrice : 0;
@@ -317,19 +321,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
         const account = list.find((a) => a.id === (p as any).accountId) ?? list[0];
         if (!account?.apiKey || !account?.apiSecret) continue;
 
-        const usdtKrw  = (p as any).usdtKrw ?? 1350;
-        const parseTs  = (s: string): number => {
-          if (!s || s === '-') return 0;
-          const ts = Date.parse(s);
-          if (!isNaN(ts)) return Math.floor(ts / 1000);
-          const m = s.match(/(\d{4})\.(\d{2})\.(\d{2})\s+\([^)]+\)\s+(\d{2}):(\d{2})/);
-          if (m) {
-            const utcMs = new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00+09:00`).getTime();
-            return isNaN(utcMs) ? 0 : Math.floor(utcMs / 1000);
-          }
-          return 0;
-        };
-        const entryTs = parseTs(entryAt);
+        const entryTs = parseKstEntryTs(entryAt);
 
         fetch('/api/ict-analyze', {
           method:  'POST',

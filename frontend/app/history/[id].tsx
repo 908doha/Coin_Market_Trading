@@ -11,6 +11,7 @@ import { loadIctSnapshotByEntryTs } from '@/utils/ictSnapshot';
 import { loadPositionSnapshotByEntryTs } from '@/utils/positionSnapshot';
 import { loadPriceHistory } from '@/utils/priceHistory';
 import type { PricePoint } from '@/utils/priceHistory';
+import { formatKRW } from '@/utils/format';
 
 const fmt$ = (v: number) =>
   `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -114,21 +115,32 @@ export default function TradeDetail() {
       ictPending={!ictChecked}
       rows={!trade ? [] : [
         {
-          leftLabel:  '수량',
-          leftValue:  posSnap?.coinQty ?? '-',
-          rightLabel: '증거금',
-          rightValue: posSnap?.amount != null
-            ? `₩${Math.round(posSnap.amount).toLocaleString('ko-KR')}`
-            : (trade.amount != null ? `₩${Math.round(trade.amount).toLocaleString('ko-KR')}` : '-'),
+          leftLabel:  '수량',    leftValue:  posSnap?.coinQty ?? '-',
+          rightLabel: '증거금',  rightValue: posSnap?.amount != null
+            ? formatKRW(Math.round(posSnap.amount))
+            : (trade.amount != null ? formatKRW(Math.round(trade.amount)) : '-'),
         },
         {
-          leftLabel:  '진입가', leftValue:  fmt$(trade.entryPrice ?? 0),
-          rightLabel: '청산가', rightValue: fmt$(trade.exitPrice  ?? 0),
+          leftLabel:  '진입가',  leftValue:  fmt$(trade.entryPrice ?? 0),
+          rightLabel: '현재가',  rightValue: fmt$(trade.exitPrice ?? 0),
           rightColor: pnlColor,
         },
         {
-          leftLabel:  '진입일시', leftValue:  entryAtKST,
-          rightLabel: '보유기간', rightValue: trade.holdingDays != null ? `${trade.holdingDays}일` : '-',
+          leftLabel:  '청산가',
+          leftValue:  posSnap?.liqPrice && posSnap.liqPrice > 0 ? fmt$(posSnap.liqPrice) : '-',
+          leftColor:  posSnap?.liqPrice && posSnap.liqPrice > 0 ? colors.negative.text : undefined,
+          rightLabel: '평가금액',
+          rightValue: posSnap?.amount != null
+            ? formatKRW(Math.round(posSnap.amount + trade.profit))
+            : '-',
+        },
+        {
+          leftLabel:  '손절가',
+          leftValue:  posSnap?.stopLoss && posSnap.stopLoss > 0 ? fmt$(posSnap.stopLoss) : '설정 안됨',
+          leftColor:  posSnap?.stopLoss && posSnap.stopLoss > 0 ? colors.negative.text : colors.text.tertiary,
+          rightLabel: '목표가',
+          rightValue: posSnap?.targetPrice && posSnap.targetPrice > 0 ? fmt$(posSnap.targetPrice) : '설정 안됨',
+          rightColor: posSnap?.targetPrice && posSnap.targetPrice > 0 ? colors.positive.text : undefined,
         },
       ]}
     />

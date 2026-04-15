@@ -15,7 +15,7 @@ import type { Position } from '../services/positions.service';
 import { saveIctSnapshot, saveIctSnapshotWithHistory, loadIctSnapshot } from '../utils/ictSnapshot';
 import { savePositionSnapshotWithHistory } from '../utils/positionSnapshot';
 import { appendPricePoint } from '../utils/priceHistory';
-import { appendBalanceSnapshot } from '../utils/balanceHistory';
+import { appendBalanceSnapshot, syncBalanceHistory, pushBalanceHistory } from '../utils/balanceHistory';
 
 export type ExchangeType = 'binance' | 'upbit' | 'bybit' | 'okx' | 'gate' | 'custom';
 
@@ -135,6 +135,7 @@ interface AccountsContextValue {
   balancesLoading: boolean;
   isLoading:       boolean;
   positions:       Position[];
+  historyVersion:  number;  // 원격 잔고 이력 sync 완료 시 증가 → home.tsx 차트 갱신 트리거
   addAccount:      (input: Omit<ExchangeAccount, 'id' | 'createdAt'>) => Promise<ExchangeAccount>;
   updateAccount:   (id: string, updates: Partial<Omit<ExchangeAccount, 'id' | 'createdAt'>>) => Promise<void>;
   removeAccount:   (id: string) => Promise<void>;
@@ -183,9 +184,11 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
   const [balanceErrors, setBalErrors]    = useState<Record<string, string | null>>({});
   const [balancesLoading, setBalLoading] = useState(false);
   const [positions, setPositions]        = useState<Position[]>([]);
-  const accountsRef       = useRef(accounts);
-  const firstBalLoad      = useRef(true);   // skeleton은 최초 1회만
-  const capturedContracts = useRef<Set<string>>(new Set()); // 이번 세션에 ICT 캡처 시도한 계약
+  const [historyVersion, setHistoryVersion] = useState(0);
+  const accountsRef        = useRef(accounts);
+  const firstBalLoad       = useRef(true);   // skeleton은 최초 1회만
+  const capturedContracts  = useRef<Set<string>>(new Set()); // 이번 세션에 ICT 캡처 시도한 계약
+  const lastRemotePushRef  = useRef<number>(0);  // 마지막 Supabase push 시각 (ms)
   accountsRef.current = accounts;
 
   // 앱 시작 + 토큰 변경 시: 로컬 → 백엔드 순서로 로드
@@ -195,6 +198,8 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     setIsLoading(false);
 
     const remote = await backendLoad();
+    const resolvedAccounts = remote && remote.length > 0 ? remote : local;
+
     if (remote && remote.length > 0) {
       setAccounts(remote);
       await localSave(remote);
@@ -202,6 +207,20 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     } else if (local.length > 0 && remote !== null) {
       await backendSave(local);
       console.log('[accounts] uploaded local accounts to backend');
+    }
+
+    // 잔고 이력 원격 동기화 (백그라운드 — 완료 시 historyVersion 증가 → 홈 차트 갱신)
+    if (resolvedAccounts.length > 0) {
+      const syncs = [
+        syncBalanceHistory(),                            // 전체 합산
+        ...resolvedAccounts.map((a) => syncBalanceHistory(a.id)),  // 계좌별
+      ];
+      Promise.all(syncs).then((results) => {
+        if (results.some(Boolean)) {
+          setHistoryVersion((v) => v + 1);
+          console.log('[balance-history] remote sync 완료 — 홈 차트 갱신');
+        }
+      }).catch(() => {});
     }
   }, []);
 
@@ -261,6 +280,17 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     // 계좌별 스냅샷도 별도 저장 (계좌 선택 필터용)
     for (const [accId, bal] of Object.entries(map)) {
       if (bal?.total) appendBalanceSnapshot(bal.total, accId);
+    }
+
+    // 30분마다 Supabase로 신규 스냅샷 push (백그라운드)
+    const now = Date.now();
+    if (now - lastRemotePushRef.current > 30 * 60 * 1000) {
+      lastRemotePushRef.current = now;
+      const accIds = Object.keys(map);
+      Promise.all([
+        pushBalanceHistory(),
+        ...accIds.map((id) => pushBalanceHistory(id)),
+      ]).catch(() => {});
     }
   }, []);
 
@@ -400,6 +430,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
       accounts, isLoading,
       balances, balanceErrors, totalBalance, balancesLoading,
       positions,
+      historyVersion,
       addAccount, updateAccount, removeAccount, refreshBalances, refreshPositions,
     }}>
       {children}

@@ -1,7 +1,7 @@
 /**
  * 포지션 상세 / 거래 상세 공통 UI 컴포넌트
  * - 코인 헤더 카드 (아이콘 + 심볼 + 방향 + 레버리지)
- * - 손익 + 차트 카드 (PNL + PriceChart + 그리드 행)
+ * - 손익 + 차트 카드 (PNL + TpSlPathChart + 그리드 행)
  * - TpSlPathChart: 시간축 기반 TP/SL 구간 가격 흐름 차트
  */
 import React from 'react';
@@ -11,7 +11,7 @@ import { colors } from '@/design-system/tokens';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 import type { PricePoint } from '@/utils/priceHistory';
 
-// ─── PriceChart ───────────────────────────────────────────────────────────────
+// ─── PriceChart (ICT 분석 카드 전용 — 포지션 상세 fallback에서는 사용 안 함) ──
 
 export function PriceChart({
   entry, current, tp, sl, direction, currentLabel = '현재',
@@ -262,8 +262,8 @@ export function PnlCard({
           </View>
         </View>
 
-        {/* 우측: 시계열 차트(compact) 또는 수직 바 차트 */}
-        {hasPath ? (
+        {/* 우측: 시계열 차트(compact) — 이력 없으면 빈 공간 */}
+        {hasPath && (
           <View style={{ width: 150 }}>
             <TpSlPathChart
               compact
@@ -274,17 +274,6 @@ export function PnlCard({
               direction={direction}
               height={118}
               entryAtTs={entryAtTs}
-            />
-          </View>
-        ) : (
-          <View style={{ width: 140 }}>
-            <PriceChart
-              entry={entryPrice}
-              current={currentOrExitPrice}
-              tp={targetPrice}
-              sl={stopLoss}
-              direction={direction}
-              currentLabel={currentLabel}
             />
           </View>
         )}

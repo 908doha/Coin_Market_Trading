@@ -1,15 +1,19 @@
 /**
  * 총 자산(KRW) 이력 스냅샷 저장 유틸
  *
+ * 저장 정책 (계층적 압축)
+ *   - 최근 24시간: 5분 간격 원본 그대로 보존
+ *   - 24시간 이전: 하루 1개 (해당 날의 마지막 스냅샷)로 압축
+ *   → 저장 용량: 최대 288(24h) + 수천(일별) ≈ 수년치 이력을 수KB로 보존
+ *
  * localStorage (로컬)
  *   - 5초 폴링마다 호출되지만 5분 간격으로만 저장
- *   - 최대 26,000개 유지 ≈ 90일 (5분 × 26,000)
- *   - accountId 지정 시 해당 계좌 전용 키에 저장
+ *   - appendBalanceSnapshot / syncBalanceHistory 시 자동 압축
  *
  * Supabase (원격)
- *   - syncBalanceHistory(): 앱 시작 시 원격 이력 → localStorage 머지
+ *   - syncBalanceHistory(): 앱 시작 시 원격 이력 → localStorage 머지 후 압축
  *   - pushBalanceHistory(): 30분마다 신규 스냅샷을 원격으로 업로드
- *   - 토큰 없거나 서버 미설정이면 자동으로 localStorage만 사용 (graceful fallback)
+ *   - 토큰 없거나 서버 미설정이면 localStorage만 사용 (graceful fallback)
  */
 
 export interface BalanceSnapshot {
@@ -20,7 +24,37 @@ export interface BalanceSnapshot {
 const KEY           = (accountId?: string) => accountId ? `balance_hist_v1_${accountId}` : 'balance_hist_v1';
 const LAST_PUSH_KEY = (accountId?: string) => accountId ? `balance_hist_push_${accountId}` : 'balance_hist_push';
 const MIN_INTERVAL  = 5 * 60;     // 최소 저장 간격: 5분
-const MAX_SNAPSHOTS = 26_000;     // 약 90일 (5분 간격)
+const MAX_SNAPSHOTS = 10_000;     // 안전 상한 (압축 후 실제 크기는 수백~수천 개)
+const COMPACT_AFTER = 24 * 3600;  // 24시간 이전 데이터는 일별 압축
+
+// ── 압축 ──────────────────────────────────────────────────────────────────────
+/**
+ * 24시간 이전 스냅샷을 하루 1개(해당 날의 마지막 값)로 압축.
+ * 최근 24시간 데이터는 5분 간격 원본 그대로 유지.
+ */
+function compactSnapshots(list: BalanceSnapshot[]): BalanceSnapshot[] {
+  const cutoff = Math.floor(Date.now() / 1000) - COMPACT_AFTER;
+
+  const recent = list.filter((s) => s.ts >= cutoff);
+  const old    = list.filter((s) => s.ts <  cutoff);
+
+  // 오래된 데이터: 로컬 날짜(YYYY-MM-DD) 기준으로 그룹화, 각 날의 마지막 값만 보존
+  const byDay = new Map<string, BalanceSnapshot>();
+  for (const s of old) {
+    const d   = new Date(s.ts * 1000);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    // 같은 날 후순 스냅샷이 덮어씀 → 하루의 마지막 값 유지
+    byDay.set(key, s);
+  }
+
+  const compacted = Array.from(byDay.values()).sort((a, b) => a.ts - b.ts);
+  const merged    = [...compacted, ...recent];
+
+  // 안전 상한 초과 시 오래된 것 제거 (일반적으로 발생하지 않음)
+  return merged.length > MAX_SNAPSHOTS
+    ? merged.slice(merged.length - MAX_SNAPSHOTS)
+    : merged;
+}
 
 // ── 로컬 저장 / 로드 ──────────────────────────────────────────────────────────
 
@@ -34,8 +68,7 @@ export function appendBalanceSnapshot(totalKrw: number, accountId?: string): voi
     const last = list[list.length - 1];
     if (last && ts - last.ts < MIN_INTERVAL) return;   // 너무 이른 저장 스킵
     list.push({ ts, total: totalKrw });
-    if (list.length > MAX_SNAPSHOTS) list.splice(0, list.length - MAX_SNAPSHOTS);
-    localStorage.setItem(key, JSON.stringify(list));
+    localStorage.setItem(key, JSON.stringify(compactSnapshots(list)));
   } catch { /* 스토리지 없는 환경 무시 */ }
 }
 
@@ -88,23 +121,21 @@ async function remotePush(snapshots: BalanceSnapshot[], accountId?: string): Pro
   } catch { return false; }
 }
 
-/** local + remote 스냅샷을 ts 기준 합집합 후 정렬, MAX_SNAPSHOTS 유지 */
-function mergeSnapshots(local: BalanceSnapshot[], remote: BalanceSnapshot[]): BalanceSnapshot[] {
+/** local + remote 스냅샷을 ts 기준 합집합 후 압축 */
+function mergeAndCompact(local: BalanceSnapshot[], remote: BalanceSnapshot[]): BalanceSnapshot[] {
   const map = new Map<number, number>();
   for (const s of local)  map.set(s.ts, s.total);
   for (const s of remote) map.set(s.ts, s.total);  // 원격이 로컬을 덮어씀
   const merged = Array.from(map.entries())
     .map(([ts, total]) => ({ ts, total }))
     .sort((a, b) => a.ts - b.ts);
-  return merged.length > MAX_SNAPSHOTS
-    ? merged.slice(merged.length - MAX_SNAPSHOTS)
-    : merged;
+  return compactSnapshots(merged);
 }
 
 // ── 공개 원격 동기화 API ──────────────────────────────────────────────────────
 
 /**
- * Supabase에서 이력을 로드해 localStorage와 머지.
+ * Supabase에서 이력을 로드해 localStorage와 머지 후 압축.
  * 앱 시작 시 (계좌 로드 완료 후) 호출.
  * @returns 원격 데이터가 있었으면 true
  */
@@ -113,9 +144,9 @@ export async function syncBalanceHistory(accountId?: string): Promise<boolean> {
     const remote = await remoteLoad(accountId);
     if (!remote.length) return false;
 
-    const local  = loadBalanceHistory(accountId);
-    const merged = mergeSnapshots(local, remote);
-    localStorage.setItem(KEY(accountId), JSON.stringify(merged));
+    const local   = loadBalanceHistory(accountId);
+    const compacted = mergeAndCompact(local, remote);
+    localStorage.setItem(KEY(accountId), JSON.stringify(compacted));
     return true;
   } catch { return false; }
 }
@@ -123,16 +154,18 @@ export async function syncBalanceHistory(accountId?: string): Promise<boolean> {
 /**
  * 마지막 push 이후 신규 스냅샷만 Supabase로 업로드.
  * 30분 주기 폴링에서 호출.
+ * - 24시간 이내 데이터: 원본(5분 간격) 업로드
+ * - 24시간 이전 데이터: 압축(일별) 상태로 업로드 → 서버 저장 공간 절약
  */
 export async function pushBalanceHistory(accountId?: string): Promise<void> {
   try {
-    const pushKey   = LAST_PUSH_KEY(accountId);
+    const pushKey    = LAST_PUSH_KEY(accountId);
     const lastPushTs = parseInt(
       (typeof localStorage !== 'undefined' ? localStorage.getItem(pushKey) : null) ?? '0',
       10,
     );
 
-    const all     = loadBalanceHistory(accountId);
+    const all      = loadBalanceHistory(accountId);  // 이미 압축된 상태
     const newSnaps = lastPushTs > 0
       ? all.filter((s) => s.ts > lastPushTs)
       : all;

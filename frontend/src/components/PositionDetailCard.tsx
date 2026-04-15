@@ -340,13 +340,14 @@ export function TpSlPathChart({
   compact?: boolean;
   entryAtTs?: number;
 }) {
-  // entryAtTs가 있고, 진입~첫 기록 간격이 기록 전체 구간 이하일 때만 앞에 삽입
-  // (간격이 너무 길면 긴 평선이 생겨 이상해 보임)
+  // entryAtTs(초) → PricePoint.t(밀리초) 단위로 변환 후 비교
+  // 진입~첫 기록 간격이 기록 전체 구간 이하일 때만 앞에 삽입 (간격이 너무 길면 긴 평선이 생김)
+  const entryAtMs = entryAtTs ? entryAtTs * 1000 : undefined;
   const span = points.length > 1 ? points[points.length - 1].t - points[0].t : 0;
-  const gap  = points.length && entryAtTs ? points[0].t - entryAtTs : 0;
-  const allPts: PricePoint[] = entryAtTs && points.length && entryAtTs < points[0].t
+  const gap  = points.length && entryAtMs ? points[0].t - entryAtMs : 0;
+  const allPts: PricePoint[] = entryAtMs && points.length && entryAtMs < points[0].t
     && (!span || gap <= span)
-    ? [{ t: entryAtTs, p: entry }, ...points]
+    ? [{ t: entryAtMs, p: entry }, ...points]
     : points;
 
   if (!allPts || allPts.length < 2) return null;
@@ -378,8 +379,8 @@ export function TpSlPathChart({
   const fmt = (v: number) =>
     `$${v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
   const fmtTime = (ts: number) => {
-    // KST = UTC+9 (브라우저 로케일에 무관하게 항상 한국 시간)
-    const d  = new Date((ts + 9 * 3600) * 1000);
+    // ts = PricePoint.t = Date.now() 밀리초; UTC+9(KST) 변환
+    const d  = new Date(ts + 9 * 3_600_000);
     const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
     const dd = String(d.getUTCDate()).padStart(2, '0');
     const hh = String(d.getUTCHours()).padStart(2, '0');

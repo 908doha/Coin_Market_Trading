@@ -57,59 +57,79 @@ async function gateGet(apiKey: string, apiSecret: string, path: string, query: s
   return res.json();
 }
 
-// ── Gate.io TP/SL 조건부 주문 조회 ───────────────────────────────────────────
-// /api/v4/futures/usdt/price_orders (trigger orders) 에서 reduce-only 주문으로 TP/SL 판별
+// ── Gate.io 청산 트리거 가격 수집 ─────────────────────────────────────────────
+// price_orders(조건부) + orders(지정가 reduce_only) 두 엔드포인트에서 트리거 가격을 모두 수집.
+// TP/SL 분류는 여기서 하지 않고 fetchGatePositions에서 진입가+방향 기준으로 처리.
 
-async function fetchGatePriceOrders(apiKey: string, apiSecret: string): Promise<Map<string, { tp: number | null; sl: number | null }>> {
-  const result = new Map<string, { tp: number | null; sl: number | null }>();
-  try {
-    const orders: any[] = await gateGet(apiKey, apiSecret, '/api/v4/futures/usdt/price_orders', 'status=open');
-    for (const o of orders) {
-      const contract = o.initial?.contract ?? o.contract as string;
-      if (!contract) continue;
-      // reduce_only 또는 close 플래그가 있는 주문만 TP/SL
-      if (!o.initial?.reduce_only && !o.initial?.close && !o.initial?.auto_size) continue;
-      const triggerPrice = parseFloat(o.trigger?.price ?? '0');
-      if (!triggerPrice) continue;
+async function fetchClosePrices(
+  apiKey: string,
+  apiSecret: string,
+): Promise<Map<string, number[]>> {
+  const result = new Map<string, number[]>();
 
-      if (!result.has(contract)) result.set(contract, { tp: null, sl: null });
-      const entry = result.get(contract)!;
-      // auto_size: "close_long" → Long포지션 청산 주문; rule 1(>=) → TP, 2(<=) → SL
-      // auto_size: "close_short" → Short포지션 청산 주문; rule 2(<=) → TP, 1(>=) → SL
-      const rule      = o.trigger?.rule as number;  // 1 = >=, 2 = <=
-      const autoSize  = o.initial?.auto_size as string ?? '';
+  const add = (contract: string, price: number) => {
+    if (!price || !contract) return;
+    if (!result.has(contract)) result.set(contract, []);
+    result.get(contract)!.push(price);
+  };
 
-      if (autoSize === 'close_long') {
-        // Long 포지션 청산: rule=1(>=) 이면 위에서 청산 → TP, rule=2(<=) 이면 아래서 청산 → SL
-        if (rule === 1) { if (!entry.tp || triggerPrice > entry.tp) entry.tp = triggerPrice; }
-        else            { if (!entry.sl || triggerPrice > entry.sl) entry.sl = triggerPrice; }
-      } else if (autoSize === 'close_short') {
-        // Short 포지션 청산: rule=2(<=) 이면 아래서 청산 → TP, rule=1(>=) 이면 위에서 청산 → SL
-        if (rule === 2) { if (!entry.tp || triggerPrice < entry.tp) entry.tp = triggerPrice; }
-        else            { if (!entry.sl || triggerPrice < entry.sl) entry.sl = triggerPrice; }
-      } else {
-        // auto_size 없을 때: size 부호로 판별
-        const size = Number(o.initial?.size ?? 0);
-        if (size < 0) {  // sell = Long 청산
-          if (rule === 1) { if (!entry.tp || triggerPrice > entry.tp) entry.tp = triggerPrice; }
-          else            { if (!entry.sl || triggerPrice > entry.sl) entry.sl = triggerPrice; }
-        } else {  // buy = Short 청산
-          if (rule === 2) { if (!entry.tp || triggerPrice < entry.tp) entry.tp = triggerPrice; }
-          else            { if (!entry.sl || triggerPrice < entry.sl) entry.sl = triggerPrice; }
+  await Promise.all([
+    // ① 조건부 주문 (price_orders) — 모든 open 주문 수집, 플래그 필터 없음
+    gateGet(apiKey, apiSecret, '/api/v4/futures/usdt/price_orders', 'status=open')
+      .then((orders: any[]) => {
+        for (const o of orders) {
+          const contract     = o.initial?.contract ?? (o.contract as string);
+          const triggerPrice = parseFloat(o.trigger?.price ?? '0');
+          add(contract, triggerPrice);
         }
-      }
-    }
-  } catch { /* TP/SL 조회 실패시 빈 Map 반환 */ }
+      })
+      .catch(() => {}),
+
+    // ② 일반 지정가/시장가 주문 중 reduce_only=true (포지션 청산용 limit 주문)
+    gateGet(apiKey, apiSecret, '/api/v4/futures/usdt/orders', 'status=open')
+      .then((orders: any[]) => {
+        for (const o of orders) {
+          if (!o.reduce_only && !o.close) continue;
+          const contract = o.contract as string;
+          const price    = parseFloat(o.price ?? '0');
+          add(contract, price);
+        }
+      })
+      .catch(() => {}),
+  ]);
+
   return result;
+}
+
+// 트리거 가격 목록과 진입가+방향으로 TP/SL 분류
+function classifyTpSl(
+  prices: number[],
+  entryPrice: number,
+  isLong: boolean,
+): { tp: number | null; sl: number | null } {
+  let tp: number | null = null;
+  let sl: number | null = null;
+  for (const p of prices) {
+    if (isLong) {
+      // 롱: 진입가 위 → TP, 진입가 아래 → SL (가장 가까운 값)
+      if (p > entryPrice) { if (!tp || p < tp) tp = p; }
+      else                { if (!sl || p > sl) sl = p; }
+    } else {
+      // 숏: 진입가 아래 → TP, 진입가 위 → SL (가장 가까운 값)
+      if (p < entryPrice) { if (!tp || p > tp) tp = p; }
+      else                { if (!sl || p < sl) sl = p; }
+    }
+  }
+  return { tp, sl };
 }
 
 // ── Gate.io 선물 포지션 조회 ───────────────────────────────────────────────────
 
 async function fetchGatePositions(apiKey: string, apiSecret: string): Promise<Position[]> {
-  // 포지션, TP/SL 주문, USDT 환율 병렬 조회
-  const [data, priceOrders, usdtKrwRaw] = await Promise.all([
+  // 포지션, 청산 트리거 가격, USDT 환율 병렬 조회
+  const [data, closePrices, usdtKrwRaw] = await Promise.all([
     gateGet(apiKey, apiSecret, '/api/v4/futures/usdt/positions', ''),
-    fetchGatePriceOrders(apiKey, apiSecret),
+    fetchClosePrices(apiKey, apiSecret),
     fetch('https://api.upbit.com/v1/ticker?markets=KRW-USDT')
       .then(r => r.json()).then(([t]: any) => t.trade_price as number)
       .catch(() => 1350),
@@ -167,13 +187,25 @@ async function fetchGatePositions(apiKey: string, apiSecret: string): Promise<Po
         ? `${kst.getUTCFullYear()}.${String(kst.getUTCMonth()+1).padStart(2,'0')}.${String(kst.getUTCDate()).padStart(2,'0')} (${DOW[kst.getUTCDay()]}) ${String(kst.getUTCHours()).padStart(2,'0')}:${String(kst.getUTCMinutes()).padStart(2,'0')}`
         : '-';
 
-      const tpsl = priceOrders.get(contract);
+      const isLong = size > 0;
+
+      // 수집된 트리거 가격을 진입가+방향 기준으로 TP/SL 분류
+      const rawPrices  = closePrices.get(contract) ?? [];
+      const fromOrders = classifyTpSl(rawPrices, entryPrice, isLong);
+
+      // 포지션 레벨 TP/SL (Gate.io가 직접 포지션 응답에 포함하는 필드)
+      const posLvlTp = parseFloat(p.take_profit || '0') || null;
+      const posLvlSl = parseFloat(p.stop_loss   || '0') || null;
+
+      // 우선순위: 주문 기반 → 포지션 레벨 → 없음
+      const finalTp = fromOrders.tp ?? posLvlTp;
+      const finalSl = fromOrders.sl ?? posLvlSl;
 
       return {
         id:           p.contract + '_' + (p.update_time || Date.now()),
         symbol:       contract.replace('_', '/'),
         coin,
-        direction:    size > 0 ? 'Long' : 'Short',
+        direction:    isLong ? 'Long' : 'Short',
         amount:       marginKrw,           // 실제 증거금 (KRW)
         profit:       profitKrw,
         profitRate:   parseFloat(profitRate.toFixed(2)),
@@ -189,16 +221,8 @@ async function fetchGatePositions(apiKey: string, apiSecret: string): Promise<Po
         liqPrice:     parseFloat(p.liq_price || '0'),
         size:         Math.abs(size),
         usdtKrw,
-        ...((() => {
-          const posLvlTp = parseFloat(p.take_profit || '0') || null;
-          const posLvlSl = parseFloat(p.stop_loss   || '0') || null;
-          const finalTp  = tpsl?.tp ?? posLvlTp;
-          const finalSl  = tpsl?.sl ?? posLvlSl;
-          return {
-            ...(finalTp ? { targetPrice: finalTp } : {}),
-            ...(finalSl ? { stopLoss:    finalSl } : {}),
-          };
-        })()),
+        ...(finalTp ? { targetPrice: finalTp } : {}),
+        ...(finalSl ? { stopLoss:    finalSl } : {}),
       };
     });
 }

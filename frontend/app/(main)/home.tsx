@@ -860,9 +860,13 @@ export default function Home() {
   }, [allTrades, selectedAccountId]);
 
   const chartData  = useMemo(() => {
-    const snaps = loadBalanceHistory(selectedAccountId ?? undefined);
-    return buildChartFromSnapshots(snaps, period);
-  }, [period, selectedAccountId, historyVersion]);
+    const snaps     = loadBalanceHistory(selectedAccountId ?? undefined);
+    const fromSnaps = buildChartFromSnapshots(snaps, period);
+    // 스냅샷 데이터가 2개 미만이면 거래 이력 기반 차트로 대체
+    return fromSnaps.length >= 2
+      ? fromSnaps
+      : buildChartFromTrades(chartTrades, balance ?? null, period);
+  }, [period, selectedAccountId, historyVersion, chartTrades, balance]);
   const barsData   = useMemo(
     () => buildPeriodBarsFromTrades(chartTrades, balance ?? null, period),
     [chartTrades, balance, period],

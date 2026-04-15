@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useLocalSearchParams } from 'expo-router';
 import { PositionDetailSkeleton, AnimatedNumber } from '@/design-system';
 import { colors } from '@/design-system/tokens';
@@ -9,7 +9,6 @@ import { useAccounts } from '@/store/accounts';
 import { PositionDetailView } from '@/components/PositionDetailView';
 import type { IctAnalysis } from '@/components/IctAnalysisCard';
 import { loadIctSnapshot } from '@/utils/ictSnapshot';
-import { loadPriceHistory } from '@/utils/priceHistory';
 import type { PricePoint } from '@/utils/priceHistory';
 
 // entryAt 문자열 → Unix 초
@@ -45,6 +44,7 @@ export default function PositionDetail() {
   const [ictAnalysis, setIctAnalysis] = useState<IctAnalysis | null>(null);
   const [snapPending, setSnapPending] = useState(false);
   const [pricePoints, setPricePoints] = useState<PricePoint[]>([]);
+  const lastAppendRef = useRef<number>(0);
 
   useEffect(() => {
     if (!position) return;
@@ -58,20 +58,33 @@ export default function PositionDetail() {
     }
   }, [position?.symbol]);
 
+  // Gate.io 캔들 이력 fetch — 진입 시각부터 현재까지 (브라우저 무관)
   useEffect(() => {
     if (!position) return;
     const contract = (position.symbol ?? '').replace('/', '_');
-    if (!contract) return;
-    const hist = loadPriceHistory(contract);
-    if (hist?.points.length) {
-      setPricePoints(prev => {
-        const lastNew  = hist.points[hist.points.length - 1];
-        const lastPrev = prev[prev.length - 1];
-        if (lastPrev && lastNew && lastPrev.t === lastNew.t) return prev;
-        return hist.points;
-      });
-    }
-  }, [position?.markPrice, position?.symbol]);
+    const entryTs  = parseEntryAtTs((position as any).entryAt);
+    if (!contract || !entryTs) return;
+
+    fetch(`/api/candlesticks?contract=${contract}&from=${entryTs}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((pts: PricePoint[]) => { if (pts.length) setPricePoints(pts); })
+      .catch(() => {});
+  }, [position?.symbol, (position as any)?.entryAt]);
+
+  // 실시간 현재가 append (30초 간격)
+  useEffect(() => {
+    const price = (position as any)?.markPrice ?? (position as any)?.currentPrice;
+    if (!price || price <= 0) return;
+    const now = Date.now();
+    if (now - lastAppendRef.current < 30_000) return;
+    lastAppendRef.current = now;
+    setPricePoints((prev) => {
+      if (!prev.length) return prev;
+      const last = prev[prev.length - 1];
+      if (last && now - last.t < 30_000) return prev;
+      return [...prev, { t: now, p: price }];
+    });
+  }, [(position as any)?.markPrice]);
 
   const isProfit = (position?.profit ?? 0) >= 0;
   const pnlColor = isProfit ? colors.market.rise : colors.market.fall;

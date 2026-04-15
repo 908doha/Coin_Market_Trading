@@ -9,7 +9,6 @@ import { PositionDetailView } from '@/components/PositionDetailView';
 import type { IctAnalysis } from '@/components/IctAnalysisCard';
 import { loadIctSnapshotByEntryTs } from '@/utils/ictSnapshot';
 import { loadPositionSnapshotByEntryTs } from '@/utils/positionSnapshot';
-import { loadPriceHistory } from '@/utils/priceHistory';
 import type { PricePoint } from '@/utils/priceHistory';
 import { formatKRW } from '@/utils/format';
 
@@ -47,25 +46,13 @@ export default function TradeDetail() {
     if (stored?.analysis) setIctAnalysis(stored.analysis as IctAnalysis);
     setIctChecked(true);
 
-    const hist = loadPriceHistory(contract);
-    if (hist?.points.length) {
-      setPricePoints(hist.points);
-      return;
-    }
-
-    const account = accounts[0];
-    if (!account?.apiKey || !account?.apiSecret) return;
-    const from = trade.entryAt ? Math.floor(new Date(trade.entryAt).getTime() / 1000) : 0;
-    const to   = trade.exitAt  ? Math.floor(new Date(trade.exitAt).getTime()  / 1000) : 0;
-    if (!from || !to || from >= to) return;
-
-    fetch('/api/price-history', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ apiKey: account.apiKey, apiSecret: account.apiSecret, contract, from, to }),
-    })
-      .then((r) => r.json())
-      .then((d) => { if (d?.points?.length) setPricePoints(d.points); })
+    const from = trade.entryAt ? Math.floor(Date.parse(trade.entryAt) / 1000) : 0;
+    const to   = trade.exitAt  ? Math.floor(Date.parse(trade.exitAt)  / 1000) : 0;
+    if (!from) return;
+    const toParam = to > 0 ? `&to=${to}` : '';
+    fetch(`/api/candlesticks?contract=${contract}&from=${from}${toParam}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((pts: PricePoint[]) => { if (pts.length) setPricePoints(pts); })
       .catch(() => {});
   }, [trade?.symbol]);
 

@@ -362,10 +362,24 @@ export function TpSlPathChart({
   const cH = H - PT - PB;
 
   const prices = allPts.map((p) => p.p);
-  const minP   = Math.min(...prices, ...(sl && sl > 0 ? [sl] : []));
-  const maxP   = Math.max(...prices, ...(tp && tp > 0 ? [tp] : []));
-  const lo     = Math.min(minP, entry) * 0.9985;
-  const hi     = Math.max(maxP, entry) * 1.0015;
+  // TP/SL 고정 Y축: TP를 천장, SL을 바닥으로 고정해 손익비를 일관되게 표시
+  const hasTp  = !!(tp && tp > 0);
+  const hasSl  = !!(sl && sl > 0);
+  let hi: number;
+  let lo: number;
+  if (hasTp && hasSl) {
+    hi = tp! * 1.003;
+    lo = sl! * 0.997;
+  } else if (hasTp) {
+    hi = tp! * 1.003;
+    lo = Math.min(...prices, entry) * 0.997;
+  } else if (hasSl) {
+    hi = Math.max(...prices, entry) * 1.003;
+    lo = sl! * 0.997;
+  } else {
+    hi = Math.max(...prices, entry) * 1.0015;
+    lo = Math.min(...prices, entry) * 0.9985;
+  }
   const range  = hi - lo;
   if (range <= 0) return null;
 

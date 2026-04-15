@@ -65,6 +65,7 @@ const gateClient = {
         leverageMax: body.leverageMax,
         markPrice: parseFloat(body.markPrice),
         orderSizeMin: body.orderSizeMin,
+        orderPriceRound: parseFloat(body.orderPriceRound), // tick size (가격 최소 단위)
       };
     } catch (err) {
       logger.error(`계약 정보 조회 실패: ${err.message}`);
@@ -290,6 +291,27 @@ const gateClient = {
       logger.warn(`[${contract}] 포지션 mode 확인 실패, single 가정: ${err.message}`);
     }
 
+    // tick size (orderPriceRound) 로 SL/TP 가격 반올림
+    //   Gate.io는 trigger.price가 tick의 정수 배수가 아니면 400 (AUTO_INVALID_PARAM_TRIGGER_PRICE) 반환
+    let tick = 0.01; // 폴백
+    try {
+      const info = await this.getContract(contract);
+      if (info.orderPriceRound && info.orderPriceRound > 0) {
+        tick = info.orderPriceRound;
+      }
+    } catch (err) {
+      logger.warn(`[${contract}] tick size 조회 실패, 폴백 ${tick} 사용: ${err.message}`);
+    }
+
+    const decimals = (tick.toString().split('.')[1] || '').length;
+    const roundToTick = (price) => parseFloat((Math.round(price / tick) * tick).toFixed(decimals));
+    const slRounded = roundToTick(sl);
+    const tpRounded = roundToTick(tp);
+
+    if (slRounded !== sl || tpRounded !== tp) {
+      logger.info(`[${contract}] tick=${tick} | SL ${sl} → ${slRounded} | TP ${tp} → ${tpRounded}`);
+    }
+
     // Dual 모드: close-long-position / close-short-position
     // Single 모드: close-long-order / close-short-order
     const suffix = isDual ? 'position' : 'order';
@@ -299,17 +321,17 @@ const gateClient = {
 
     if (direction === 'long') {
       // SL: mark price <= sl 도달 시 청산 (rule=2)
-      results.slOrder = await this._createTriggerOrder(contract, sl, 2, orderType, modeOpts);
+      results.slOrder = await this._createTriggerOrder(contract, slRounded, 2, orderType, modeOpts);
       // TP: mark price >= tp 도달 시 청산 (rule=1)
-      results.tpOrder = await this._createTriggerOrder(contract, tp, 1, orderType, modeOpts);
+      results.tpOrder = await this._createTriggerOrder(contract, tpRounded, 1, orderType, modeOpts);
     } else {
       // SL: mark price >= sl 도달 시 청산 (rule=1)
-      results.slOrder = await this._createTriggerOrder(contract, sl, 1, orderType, modeOpts);
+      results.slOrder = await this._createTriggerOrder(contract, slRounded, 1, orderType, modeOpts);
       // TP: mark price <= tp 도달 시 청산 (rule=2)
-      results.tpOrder = await this._createTriggerOrder(contract, tp, 2, orderType, modeOpts);
+      results.tpOrder = await this._createTriggerOrder(contract, tpRounded, 2, orderType, modeOpts);
     }
 
-    logger.info(`SL/TP 등록 완료: SL=${sl} TP=${tp} (mode=${isDual ? 'dual' : 'single'})`);
+    logger.info(`SL/TP 등록 완료: SL=${slRounded} TP=${tpRounded} (mode=${isDual ? 'dual' : 'single'})`);
     return results;
   },
 

@@ -35,6 +35,8 @@ const styles = StyleSheet.create({
   backBtn: {
     position:       'absolute',
     left:           20,
+    top:            0,
+    bottom:         0,
     width:          40,
     alignItems:     'flex-start',
     justifyContent: 'center',
@@ -42,6 +44,8 @@ const styles = StyleSheet.create({
   rightSlot: {
     position:       'absolute',
     right:          20,
+    top:            0,
+    bottom:         0,
     alignItems:     'flex-end',
     justifyContent: 'center',
   },

@@ -826,7 +826,7 @@ export default function Home() {
   const [showAccPicker, setShowAccPicker]         = useState(false);
   const [dropPos, setDropPos]                     = useState({ top: 0, right: 0 });
   const dropBtnRef                                = useRef<View>(null);
-  const { accounts, balances, balanceErrors, totalBalance, balancesLoading, positions } = useAccounts();
+  const { accounts, balances, balanceErrors, totalBalance, balancesLoading, positions, historyVersion } = useAccounts();
 
   const { data: singleBalance, isLoading: singleLoading } = useApi(
     () => accounts.length === 0 ? accountService.getBalance() : Promise.resolve(null),
@@ -862,7 +862,7 @@ export default function Home() {
   const chartData  = useMemo(() => {
     const snaps = loadBalanceHistory(selectedAccountId ?? undefined);
     return buildChartFromSnapshots(snaps, period);
-  }, [period, selectedAccountId]);
+  }, [period, selectedAccountId, historyVersion]);
   const barsData   = useMemo(
     () => buildPeriodBarsFromTrades(chartTrades, balance ?? null, period),
     [chartTrades, balance, period],

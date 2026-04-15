@@ -197,9 +197,10 @@ async function fetchGatePositions(apiKey: string, apiSecret: string): Promise<Po
       const posLvlTp = parseFloat(p.take_profit || '0') || null;
       const posLvlSl = parseFloat(p.stop_loss   || '0') || null;
 
-      // 우선순위: 주문 기반 → 포지션 레벨 → 없음
-      const finalTp = fromOrders.tp ?? posLvlTp;
-      const finalSl = fromOrders.sl ?? posLvlSl;
+      // 우선순위: 포지션 레벨 → 주문 기반 → 없음
+      // 포지션 레벨 TP/SL이 더 직접적이므로 우선 적용
+      const finalTp = posLvlTp ?? fromOrders.tp;
+      const finalSl = posLvlSl ?? fromOrders.sl;
 
       return {
         id:           p.contract + '_' + (p.update_time || Date.now()),

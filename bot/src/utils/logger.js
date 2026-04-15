@@ -10,9 +10,9 @@ const logger = winston.createLogger({
     })
   ),
   transports: [
+    // Console 만 사용 — PM2가 stdout/stderr를 받아서 logs/pm2-out.log, pm2-error.log 에 저장
+    // PM2 logrotate가 자동 회전 처리하므로 winston 파일 transport는 중복이라 제거
     new winston.transports.Console(),
-    new winston.transports.File({ filename: 'logs/error.log', level: 'error' }),
-    new winston.transports.File({ filename: 'logs/combined.log' }),
   ],
 });
 

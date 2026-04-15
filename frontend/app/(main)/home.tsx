@@ -425,7 +425,9 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
     );
   }
 
-  const hasLine = vals.length >= 2;
+  const hasLine  = vals.length >= 2;
+  // 선 데이터 없을 때 LINE_H 영역에 수집 중 안내
+  const noLineMsg = !hasLine;
   const vMin   = hasLine ? Math.min(...vals) : 0;
   const vMax   = hasLine ? Math.max(...vals) : 0;
   const vRange = (vMax - vMin) || Math.abs(vMax) * 0.02 || 1;
@@ -523,6 +525,16 @@ function CombinedChart({ lineData, barsData, positive, balance, showUsd }: Combi
           onResponderMove={handleTouch}
           onResponderRelease={() => setTipIdx(null)}
         >
+          {/* 실제 잔고 이력 없을 때 선차트 영역 안내 */}
+          {noLineMsg && (
+            <View style={{
+              position: 'absolute', top: 0, left: 0, right: 0, height: LINE_H,
+              alignItems: 'center', justifyContent: 'center', gap: 4,
+            }}>
+              <Text style={{ fontSize: 12, color: colors.text.disabled }}>잔고 이력 수집 중</Text>
+              <Text style={{ fontSize: 11, color: colors.text.disabled }}>앱 실행 중 5분마다 기록돼요</Text>
+            </View>
+          )}
           <Svg width={cw} height={TOT_H} viewBox={`0 0 ${cw} ${TOT_H}`}>
             <Defs>
               <LinearGradient id="cbFill" x1="0" y1="0" x2="0" y2="1">
@@ -859,14 +871,11 @@ export default function Home() {
     return trades.filter((t) => t.accountId === selectedAccountId);
   }, [allTrades, selectedAccountId]);
 
-  const chartData  = useMemo(() => {
-    const snaps     = loadBalanceHistory(selectedAccountId ?? undefined);
-    const fromSnaps = buildChartFromSnapshots(snaps, period);
-    // 스냅샷 데이터가 2개 미만이면 거래 이력 기반 차트로 대체
-    return fromSnaps.length >= 2
-      ? fromSnaps
-      : buildChartFromTrades(chartTrades, balance ?? null, period);
-  }, [period, selectedAccountId, historyVersion, chartTrades, balance]);
+  // 실제 잔고 스냅샷만 사용 — 거래 이력 역산은 입출금 반영 불가로 제외
+  const chartData = useMemo(() => {
+    const snaps = loadBalanceHistory(selectedAccountId ?? undefined);
+    return buildChartFromSnapshots(snaps, period);
+  }, [period, selectedAccountId, historyVersion]);
   const barsData   = useMemo(
     () => buildPeriodBarsFromTrades(chartTrades, balance ?? null, period),
     [chartTrades, balance, period],

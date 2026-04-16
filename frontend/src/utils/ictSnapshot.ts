@@ -127,6 +127,7 @@ export function loadIctSnapshotByEntryTs(
       }
     }
   } catch {}
-  return loadIctSnapshot(contract);
+  // 이력에 없으면 null 반환 — 현재 포지션의 스냅샷과 혼동 방지
+  return null;
 }
 

@@ -95,6 +95,50 @@ class OrderManager {
   }
 
   /**
+   * SL/TP 가격을 현재 mark price 기준으로 "올바른 방향"에 있는지 검증 & 필요 시 조정
+   *
+   *  - long  SL : mark 미만   | long  TP : mark 초과
+   *  - short SL : mark 초과   | short TP : mark 미만
+   *
+   * 이탈된 경우 (예: 진입 후 급등으로 폴백 TP 가 이미 mark 아래) 해당 쪽만
+   * mark × (1 ± pct) 로 재계산. Gate.io 가 "trigger 즉시 발동" 상태로 거부하는
+   * 400 에러 방지. (2026-04-16 XRP_USDT 사례)
+   *
+   * @returns {{sl: number, tp: number, adjusted: boolean}}
+   */
+  _adjustPricesToMark(direction, mark, sl, tp) {
+    if (!Number.isFinite(mark) || mark <= 0) return { sl, tp, adjusted: false };
+    const slPct = Math.max(config.stopLossPercent, 0) / 100;
+    const tpPct = Math.max(config.takeProfitPercent, 0) / 100;
+
+    let newSl = sl;
+    let newTp = tp;
+    let adjusted = false;
+
+    if (direction === 'long') {
+      if (Number.isFinite(sl) && sl >= mark) {
+        newSl = mark * (1 - slPct);
+        adjusted = true;
+      }
+      if (Number.isFinite(tp) && tp <= mark) {
+        newTp = mark * (1 + tpPct);
+        adjusted = true;
+      }
+    } else {
+      if (Number.isFinite(sl) && sl <= mark) {
+        newSl = mark * (1 + slPct);
+        adjusted = true;
+      }
+      if (Number.isFinite(tp) && tp >= mark) {
+        newTp = mark * (1 - tpPct);
+        adjusted = true;
+      }
+    }
+
+    return { sl: newSl, tp: newTp, adjusted };
+  }
+
+  /**
    * 저장된 Kelly 통계 + dailyPnl 복원
    */
   _loadPersistedStats() {
@@ -277,11 +321,20 @@ class OrderManager {
     // 트리거 하나도 없음 → 폴백 SL/TP 계산 & 등록
     const slPct = Math.max(config.stopLossPercent, 0) / 100;
     const tpPct = Math.max(config.takeProfitPercent, 0) / 100;
-    const sl = direction === 'long' ? entry * (1 - slPct) : entry * (1 + slPct);
-    const tp = direction === 'long' ? entry * (1 + tpPct) : entry * (1 - tpPct);
+    const slRaw = direction === 'long' ? entry * (1 - slPct) : entry * (1 + slPct);
+    const tpRaw = direction === 'long' ? entry * (1 + tpPct) : entry * (1 - tpPct);
+
+    // mark price 기준 검증 — 진입 후 변동으로 폴백가가 이탈했으면 조정
+    const mark = position.markPrice || entry;
+    const { sl, tp, adjusted } = this._adjustPricesToMark(direction, mark, slRaw, tpRaw);
+    if (adjusted) {
+      logger.warn(
+        `[${pair}] 폴백 SL/TP 가 현재가 이탈 — mark 기준 재계산: mark=${mark} | SL ${slRaw.toFixed(6)}→${sl.toFixed(6)} TP ${tpRaw.toFixed(6)}→${tp.toFixed(6)}`
+      );
+    }
 
     logger.warn(
-      `[${pair}] 기존 포지션에 SL/TP 없음 — 폴백 등록 시도: direction=${direction} entry=${entry} SL=${sl.toFixed(6)} TP=${tp.toFixed(6)}`
+      `[${pair}] 기존 포지션에 SL/TP 없음 — 폴백 등록 시도: direction=${direction} entry=${entry} mark=${mark} SL=${sl.toFixed(6)} TP=${tp.toFixed(6)}`
     );
 
     try {
@@ -617,41 +670,74 @@ class OrderManager {
   }
 
   /**
-   * (Phase C) 포지션 유지 중 SL/TP 조건부 주문이 실제로 Gate.io 에
-   * 존재하는지 확인하고, 사라졌으면 저장된 가격으로 재등록한다.
+   * (Phase C) 포지션 유지 중 SL/TP 가 Gate.io 에 둘 다 존재하는지 검증.
    *
-   * 정책:
-   *   - 트리거가 1건 이상 있으면 OK 로 간주 (부분 누락까지는 감지 안 함 - 과도한 자동 개입 방지)
-   *   - 0건인데 slPrices/tpPrices 가 있으면 → 재등록
-   *   - 0건인데 저장된 가격도 없으면 → 경고만 (원본 전략값을 모르므로 수동 개입)
+   * 정책 (강화판):
+   *   1. 오픈 트리거를 SL/TP 로 분류
+   *   2. 둘 다 존재 → IDs/가격 갱신만 수행 (사용자가 UI 에서 수동 설정했을 경우 자동 캡처)
+   *   3. 한 쪽 또는 둘 다 누락 → 저장된 가격(slPrices/tpPrices) 또는 발견된 트리거
+   *      가격을 조합해 재등록 가격 결정 → mark 기준 조정 → orphan 취소 후 원자적 재등록
+   *   4. 재등록 가격을 얻을 수 없으면 경고만 (수동 개입 필요)
+   *
+   * 이전 "트리거 ≥ 1건이면 OK" 정책의 부분 누락 맹점을 제거.
    */
   async _verifySLTPExists(contract, position) {
+    const direction = position.size > 0 ? 'long' : 'short';
+    const known = this.lastKnownPositions.get(contract);
+    const entry = (known && known.entryPrice) || position.entryPrice || 0;
+    const mark = position.markPrice || entry;
+
     const triggers = await gateClient.listTriggerOrders(contract, 'open');
-    if (triggers.length > 0) {
-      logger.debug(`[${contract}] SL/TP 검증 OK (open ${triggers.length}건)`);
-      return;
-    }
+    const { sl: foundSl, tp: foundTp } = this._classifyTriggers(triggers, direction, entry);
 
-    const slPrice = this.slPrices.get(contract);
-    const tpPrice = this.tpPrices.get(contract);
-
-    if (!Number.isFinite(slPrice) || !Number.isFinite(tpPrice) || slPrice <= 0 || tpPrice <= 0) {
-      logger.warn(
-        `[${contract}] SL/TP 사라짐 감지 & 저장된 가격 없음 — 수동 조치 필요 (slPrice=${slPrice} tpPrice=${tpPrice})`
+    // 케이스 1: 둘 다 존재 → IDs/가격 갱신 후 종료
+    if (foundSl && foundTp) {
+      this.slOrderIds.set(contract, foundSl.id);
+      this.slPrices.set(contract, foundSl.price);
+      this.tpOrderIds.set(contract, foundTp.id);
+      this.tpPrices.set(contract, foundTp.price);
+      logger.debug(
+        `[${contract}] SL/TP 검증 OK (SL=${foundSl.price} TP=${foundTp.price}, triggers=${triggers.length})`
       );
       return;
     }
 
-    const size = Math.abs(position.size);
-    const actualDirection = position.size > 0 ? 'long' : 'short';
+    // 케이스 2/3: 부분 또는 전체 누락 → 재등록 가격 결정
+    //   발견된 쪽은 그 가격을 유지 (UI 에서 수동으로 조정했을 수 있음)
+    //   누락된 쪽은 저장된 가격 사용, 없으면 null
+    const rawSl = foundSl ? foundSl.price : this.slPrices.get(contract);
+    const rawTp = foundTp ? foundTp.price : this.tpPrices.get(contract);
+
+    if (!Number.isFinite(rawSl) || !Number.isFinite(rawTp) || rawSl <= 0 || rawTp <= 0) {
+      logger.warn(
+        `[${contract}] SL/TP 누락 감지 & 재등록 가격 부족 — 수동 조치 필요 | found=SL:${!!foundSl}/TP:${!!foundTp} stored=SL:${this.slPrices.get(contract)}/TP:${this.tpPrices.get(contract)}`
+      );
+      return;
+    }
+
+    // mark 기준 검증 & 필요 시 조정
+    const { sl, tp, adjusted } = this._adjustPricesToMark(direction, mark, rawSl, rawTp);
+    if (adjusted) {
+      logger.warn(
+        `[${contract}] 재등록 SL/TP 가 mark 이탈 — 조정: mark=${mark} | SL ${rawSl}→${sl} TP ${rawTp}→${tp}`
+      );
+    }
 
     logger.warn(
-      `[${contract}] SL/TP 사라짐 감지 — 재등록 시도: SL=${slPrice} TP=${tpPrice} dir=${actualDirection} size=${size}`
+      `[${contract}] SL/TP 부분 누락 감지 — 재등록 시도: foundSL=${!!foundSl} foundTP=${!!foundTp} → SL=${sl} TP=${tp} dir=${direction}`
     );
 
+    // 기존 orphan 트리거 정리 (Phase D 안전 버전) → 원자적 재등록
     try {
-      const result = await gateClient.placeSLTP(contract, size, actualDirection, slPrice, tpPrice);
-      this._storeSLTP(contract, result.slOrder, result.tpOrder, slPrice, tpPrice);
+      await gateClient.cancelAllTriggerOrders(contract);
+    } catch (err) {
+      logger.warn(`[${contract}] 재등록 전 orphan 정리 실패 (계속 진행): ${err.message}`);
+    }
+
+    try {
+      const size = Math.abs(position.size);
+      const result = await gateClient.placeSLTP(contract, size, direction, sl, tp);
+      this._storeSLTP(contract, result.slOrder, result.tpOrder, sl, tp);
       logger.info(`[${contract}] SL/TP 재등록 완료`);
     } catch (err) {
       logger.error(`[${contract}] SL/TP 재등록 실패 — 수동 조치 필요: ${err.message}`);

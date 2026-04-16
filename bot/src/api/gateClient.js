@@ -319,16 +319,33 @@ const gateClient = {
     const autoSize = direction === 'long' ? 'close_long' : 'close_short';
     const modeOpts = { isDual, autoSize };
 
-    if (direction === 'long') {
-      // SL: mark price <= sl 도달 시 청산 (rule=2)
-      results.slOrder = await this._createTriggerOrder(contract, slRounded, 2, orderType, modeOpts);
-      // TP: mark price >= tp 도달 시 청산 (rule=1)
-      results.tpOrder = await this._createTriggerOrder(contract, tpRounded, 1, orderType, modeOpts);
-    } else {
-      // SL: mark price >= sl 도달 시 청산 (rule=1)
-      results.slOrder = await this._createTriggerOrder(contract, slRounded, 1, orderType, modeOpts);
-      // TP: mark price <= tp 도달 시 청산 (rule=2)
-      results.tpOrder = await this._createTriggerOrder(contract, tpRounded, 2, orderType, modeOpts);
+    // long:  SL rule=2 (<=), TP rule=1 (>=)
+    // short: SL rule=1 (>=), TP rule=2 (<=)
+    const slRule = direction === 'long' ? 2 : 1;
+    const tpRule = direction === 'long' ? 1 : 2;
+
+    // 1) SL 먼저 등록
+    results.slOrder = await this._createTriggerOrder(contract, slRounded, slRule, orderType, modeOpts);
+
+    // 2) TP 등록 시도 — 실패 시 이미 등록된 SL 을 롤백해 orphan 방지 (원자성 보장)
+    try {
+      results.tpOrder = await this._createTriggerOrder(contract, tpRounded, tpRule, orderType, modeOpts);
+    } catch (tpErr) {
+      if (results.slOrder && results.slOrder.id) {
+        logger.warn(
+          `[${contract}] TP 등록 실패 → 이미 등록된 SL 롤백 시도 (id=${results.slOrder.id}): ${tpErr.message}`
+        );
+        const rollback = await this.cancelTriggerOrder(results.slOrder.id);
+        if (rollback) {
+          logger.info(`[${contract}] SL 롤백 완료 (orphan 방지)`);
+          results.slOrder = null;
+        } else {
+          logger.error(
+            `[${contract}] SL 롤백 실패 — orphan SL 수동 정리 필요 (id=${results.slOrder.id})`
+          );
+        }
+      }
+      throw tpErr;
     }
 
     logger.info(`SL/TP 등록 완료: SL=${slRounded} TP=${tpRounded} (mode=${isDual ? 'dual' : 'single'})`);

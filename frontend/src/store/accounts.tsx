@@ -12,7 +12,7 @@ import { exchangeService } from '../services/exchange.service';
 import { positionsService } from '../services/positions.service';
 import type { Balance } from '../services/account.service';
 import type { Position } from '../services/positions.service';
-import { saveIctSnapshot, saveIctSnapshotWithHistory, loadIctSnapshot } from '../utils/ictSnapshot';
+import { saveIctSnapshot, saveIctSnapshotWithHistory, loadIctSnapshot, pushIctSnapshotRemote } from '../utils/ictSnapshot';
 import { savePositionSnapshotWithHistory } from '../utils/positionSnapshot';
 import { appendPricePoint } from '../utils/priceHistory';
 import { appendBalanceSnapshot, syncBalanceHistory, pushBalanceHistory } from '../utils/balanceHistory';
@@ -360,7 +360,10 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
         })
           .then((r) => r.json())
           .then((data) => {
-            if (data?.htf !== undefined) saveIctSnapshotWithHistory(contract, entryAt, entryTs, data);
+            if (data?.htf !== undefined) {
+              saveIctSnapshotWithHistory(contract, entryAt, entryTs, data);
+              pushIctSnapshotRemote(contract, entryTs, entryAt, data);
+            }
           })
           .catch(() => {});
       }

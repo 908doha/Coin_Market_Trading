@@ -34,6 +34,52 @@ export function loadIctSnapshot(contract: string): StoredIctSnapshot | null {
   } catch { return null; }
 }
 
+// ── 원격 동기화 ───────────────────────────────────────────────────────────────
+
+function getToken(): string | null {
+  try {
+    return typeof localStorage !== 'undefined' ? localStorage.getItem('jwt_access') : null;
+  } catch { return null; }
+}
+
+/**
+ * ICT 스냅샷을 Supabase에 업로드 (fire-and-forget)
+ */
+export function pushIctSnapshotRemote(
+  contract: string,
+  entryTs: number,
+  entryAt: string,
+  analysis: any,
+): void {
+  const token = getToken();
+  if (!token || entryTs <= 0) return;
+  fetch('/api/ict-snapshot', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body:    JSON.stringify({ contract, entryTs, entryAt, analysis }),
+  }).catch(() => {});
+}
+
+/**
+ * Supabase에서 ICT 스냅샷 조회 (로컬 미스 시 fallback)
+ */
+export async function fetchIctSnapshotRemote(
+  contract: string,
+  entryTs: number,
+): Promise<StoredIctSnapshot | null> {
+  const token = getToken();
+  if (!token || entryTs <= 0) return null;
+  try {
+    const res = await fetch(
+      `/api/ict-snapshot?contract=${encodeURIComponent(contract)}&entryTs=${entryTs}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (res.status === 204) return null;  // Supabase 미설정
+    if (!res.ok) return null;
+    return await res.json();  // { entryAt, analysis } | null
+  } catch { return null; }
+}
+
 /**
  * ICT 스냅샷을 거래별 영구 이력에도 저장
  * entryTs: 진입 시각 Unix 초 (UTC)

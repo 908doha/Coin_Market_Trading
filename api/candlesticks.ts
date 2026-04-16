@@ -61,14 +61,18 @@ export default async function handler(req: any, res: any) {
 
     const r = await fetch(url, { headers: { Accept: 'application/json' } });
     if (!r.ok) {
-      // Gate.io 오류는 빈 배열로 graceful 처리 (502 전파 방지)
-      console.error('[candlesticks] Gate.io error', r.status, contract, from);
-      res.status(200).json([]);
+      const body = await r.text().catch(() => '');
+      res.status(200).json({ _debug: true, error: `Gate.io ${r.status}`, url, body });
       return;
     }
 
-    const data: any[] = await r.json();
-    const points = (Array.isArray(data) ? data : [])
+    const data = await r.json();
+    if (!Array.isArray(data) || data.length === 0) {
+      res.status(200).json({ _debug: true, raw: Array.isArray(data) ? '[]' : JSON.stringify(data).slice(0, 200), url });
+      return;
+    }
+
+    const points = data
       .filter((d: any) => d.t && d.c)
       .map((d: any) => ({
         t: Number(d.t) * 1000,   // Gate.io seconds → ms

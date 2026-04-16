@@ -48,11 +48,11 @@ async function gateGet(apiKey: string, apiSecret: string, path: string, query: s
 }
 
 async function fetchGateTrades(apiKey: string, apiSecret: string): Promise<Trade[]> {
-  // ① position_close: 포지션 단위 PnL + 청산 이유 + 진입가(long_price/short_price)
-  // ② my_trades?close_position=true: fill 가격 취득용
-  const [closeData, fillData]: [any[], any[]] = await Promise.all([
+  // ① position_close: 포지션 단위 PnL + 청산 이유 + 진입가
+  // ② my_trades (전체): 청산 fill 가격 + 진입 체결 시각 취득
+  const [closeData, allTrades]: [any[], any[]] = await Promise.all([
     gateGet(apiKey, apiSecret, '/api/v4/futures/usdt/position_close', 'limit=100'),
-    gateGet(apiKey, apiSecret, '/api/v4/futures/usdt/my_trades',      'limit=200&close_position=true'),
+    gateGet(apiKey, apiSecret, '/api/v4/futures/usdt/my_trades',      'limit=500'),
   ]);
 
   // USDT/KRW 환율
@@ -62,21 +62,50 @@ async function fetchGateTrades(apiKey: string, apiSecret: string): Promise<Trade
     usdtKrw = t.trade_price;
   } catch { /* fallback */ }
 
-  // my_trades를 contract + 시간 기준으로 인덱싱 (가장 가까운 fill 매칭용)
-  const fillMap = new Map<string, any[]>();
-  for (const f of fillData) {
-    const k = f.contract as string;
-    if (!fillMap.has(k)) fillMap.set(k, []);
-    fillMap.get(k)!.push(f);
+  // my_trades 분류: 오픈 체결(진입 시각용) / 청산 체결(fill 가격용)
+  const openTsByContract  = new Map<string, number[]>();   // contract → 진입 체결 시각 목록 (오름차순)
+  const fillMap           = new Map<string, any[]>();       // contract → 청산 체결 목록
+
+  for (const f of allTrades) {
+    const contract = f.contract as string;
+    if (f.close_position) {
+      if (!fillMap.has(contract)) fillMap.set(contract, []);
+      fillMap.get(contract)!.push(f);
+    } else {
+      if (!openTsByContract.has(contract)) openTsByContract.set(contract, []);
+      openTsByContract.get(contract)!.push(Number(f.create_time));
+    }
   }
+  for (const [, arr] of openTsByContract) arr.sort((a, b) => a - b);
+
+  // position_close 를 contract별 청산 시각 목록으로 인덱싱 (세션 구분용)
+  const closeTimesByContract = new Map<string, number[]>();
+  for (const c of closeData) {
+    const contract = c.contract as string;
+    const ts = Number(c.time);
+    if (!closeTimesByContract.has(contract)) closeTimesByContract.set(contract, []);
+    closeTimesByContract.get(contract)!.push(ts);
+  }
+  for (const [, arr] of closeTimesByContract) arr.sort((a, b) => a - b);
 
   return closeData.map((t: any): Trade => {
-    const pnl      = parseFloat(t.pnl  || '0');
-    const contract = t.contract as string;
-    const side     = (t.side  as string) ?? '';
-    const text     = (t.text  as string) ?? '';
+    const pnl       = parseFloat(t.pnl  || '0');
+    const contract  = t.contract as string;
+    const side      = (t.side  as string) ?? '';
+    const text      = (t.text  as string) ?? '';
     const closeTime = Number(t.time ?? 0);
-    const exitAt   = closeTime ? new Date(closeTime * 1000).toISOString() : new Date().toISOString();
+    const exitAt    = closeTime ? new Date(closeTime * 1000).toISOString() : new Date().toISOString();
+
+    // ── 진입 시각 계산 ────────────────────────────────────────────────────────
+    // 이 청산 직전에 발생한 이전 청산 시각을 구해 "세션" 시작점을 추정.
+    // 해당 세션 안의 첫 번째 오픈 체결 시각 = 진입 시각.
+    const allCloses   = closeTimesByContract.get(contract) ?? [];
+    const prevClose   = [...allCloses].filter(ct => ct < closeTime).at(-1) ?? 0;
+    const opens       = openTsByContract.get(contract) ?? [];
+    const sessionOpen = opens.find(ts => ts > prevClose && ts <= closeTime);
+    const entryAt     = sessionOpen
+      ? new Date(sessionOpen * 1000).toISOString()
+      : exitAt;  // 오픈 체결 데이터가 없으면 청산 시각으로 fallback
 
     // 청산 이유 분류
     const isLiq = text.includes('liq_');
@@ -93,7 +122,7 @@ async function fetchGateTrades(apiKey: string, apiSecret: string): Promise<Trade
       (side === 'long' ? t.long_price : t.short_price) || '0',
     );
 
-    // fill 가격: my_trades에서 동일 contract + 시간 가장 가까운 건 선택
+    // fill 가격: 청산 체결 중 시간이 가장 가까운 것
     let fillPrice = 0;
     const fills = fillMap.get(contract) ?? [];
     if (fills.length) {
@@ -103,17 +132,18 @@ async function fetchGateTrades(apiKey: string, apiSecret: string): Promise<Trade
       fillPrice = parseFloat(best.price || '0');
     }
 
-    // 수익률 계산
-    // 1순위: entryPrice + fillPrice 모두 있을 때 가격 변화율 (방향 반영)
-    // 2순위: pnl 부호만이라도 반영 (0.01% * sign)
+    // 수익률: 진입가 + fill 가격 기준 / 없으면 pnl 부호만
     let profitRate = 0;
     if (entryPrice > 0 && fillPrice > 0) {
       const diff = side === 'long' ? fillPrice - entryPrice : entryPrice - fillPrice;
       profitRate  = parseFloat(((diff / entryPrice) * 100).toFixed(2));
     } else if (pnl !== 0) {
-      // 가격 데이터 없음 → 부호만 표시
       profitRate = pnl < 0 ? -0.01 : 0.01;
     }
+
+    // 보유 기간
+    const holdingMs   = sessionOpen ? (closeTime - sessionOpen) * 1000 : 0;
+    const holdingDays = Math.floor(holdingMs / 86_400_000);
 
     return {
       id:         `${closeTime}_${contract}`,
@@ -122,8 +152,8 @@ async function fetchGateTrades(apiKey: string, apiSecret: string): Promise<Trade
       type,
       profit:     pnl * usdtKrw,
       profitRate,
-      holdingDays: 0,
-      entryAt:    exitAt,
+      holdingDays,
+      entryAt,
       exitAt,
       entryPrice,
       exitPrice:  fillPrice > 0 ? fillPrice : entryPrice,

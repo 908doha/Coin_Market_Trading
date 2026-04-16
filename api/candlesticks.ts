@@ -4,6 +4,7 @@
  *   → Gate.io 선물 캔들스틱을 PricePoint[] 형태로 반환
  *
  * Gate.io 캔들 API는 공개 데이터 — 인증 불필요
+ * 주의: Gate.io는 from과 to를 동시에 지원하지 않음 → from만 사용
  *
  * 보유 기간별 자동 interval 선택:
  *   ≤ 1h  → 1m   (~60개)
@@ -42,10 +43,8 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  // to가 from보다 앞서도록 보정 (클라이언트/서버 시계 차이 대비)
   const safeTo = Math.max(to, from + 60);
 
-  // 범위가 1분 미만이면 아직 캔들 없음 → 빈 배열 반환 (Gate.io 오류 방지)
   if (safeTo - from < 60) {
     res.status(200).json([]);
     return;
@@ -53,26 +52,23 @@ export default async function handler(req: any, res: any) {
 
   const interval = pickInterval(from, safeTo);
 
-  try {
-    const url =
-      `https://api.gateio.ws/api/v4/futures/usdt/candlesticks` +
-      `?contract=${encodeURIComponent(contract)}` +
-      `&from=${from}&to=${safeTo}&interval=${interval}&limit=1000`;
+  // Gate.io는 from과 to를 동시에 사용할 수 없음
+  // from만 사용하고 limit으로 개수 제한
+  const url =
+    `https://api.gateio.ws/api/v4/futures/usdt/candlesticks` +
+    `?contract=${encodeURIComponent(contract)}` +
+    `&from=${from}&interval=${interval}&limit=1000`;
 
+  try {
     const r = await fetch(url, { headers: { Accept: 'application/json' } });
     if (!r.ok) {
-      const body = await r.text().catch(() => '');
-      res.status(200).json({ _debug: true, error: `Gate.io ${r.status}`, url, body });
+      console.error('[candlesticks] Gate.io error', r.status, contract, from);
+      res.status(200).json([]);
       return;
     }
 
     const data = await r.json();
-    if (!Array.isArray(data) || data.length === 0) {
-      res.status(200).json({ _debug: true, raw: Array.isArray(data) ? '[]' : JSON.stringify(data).slice(0, 200), url });
-      return;
-    }
-
-    const points = data
+    const points = (Array.isArray(data) ? data : [])
       .filter((d: any) => d.t && d.c)
       .map((d: any) => ({
         t: Number(d.t) * 1000,   // Gate.io seconds → ms
@@ -82,6 +78,6 @@ export default async function handler(req: any, res: any) {
     res.status(200).json(points);
   } catch (err: any) {
     console.error('[candlesticks] fetch error', err?.message, contract);
-    res.status(200).json([]);  // 네트워크 오류도 빈 배열로 graceful 처리
+    res.status(200).json([]);
   }
 }

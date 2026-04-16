@@ -63,9 +63,11 @@ export default function PositionDetail() {
     if (!position) return;
     const contract = (position.symbol ?? '').replace('/', '_');
     const entryTs  = parseEntryAtTs((position as any).entryAt);
-    if (!contract || !entryTs) return;
+    if (!contract) return;
+    // entryAt 파싱 실패 시 최근 1시간 캔들로 fallback
+    const from = entryTs || Math.floor(Date.now() / 1000) - 3600;
 
-    fetch(`/api/candlesticks?contract=${contract}&from=${entryTs}`)
+    fetch(`/api/candlesticks?contract=${contract}&from=${from}`)
       .then((r) => (r.ok ? r.json() : []))
       .then((pts: PricePoint[]) => { if (pts.length) setPricePoints(pts); })
       .catch(() => {});

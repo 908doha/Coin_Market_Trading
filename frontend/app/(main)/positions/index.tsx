@@ -12,7 +12,7 @@ import Animated, {
   useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS,
 } from 'react-native-reanimated';
 import Svg, { Path, Polygon, Rect, Text as SvgText, Circle } from 'react-native-svg';
-import { Text, FadeTabView, PressableScale, BalanceCardsSkeleton, AnimatedNumber, CurrencyToggle } from '@/design-system';
+import { Text, FadeTabView, PressableScale, BalanceCardsSkeleton, PositionRowSkeleton, AnimatedNumber, CurrencyToggle } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType, ExchangeAccount } from '@/store/accounts';
@@ -430,6 +430,14 @@ export default function Trading() {
 
             {posExpanded && (() => {
               if (!positions || positions.length === 0) {
+                if (balancesLoading) {
+                  return (
+                    <View>
+                      <PositionRowSkeleton />
+                      <PositionRowSkeleton />
+                    </View>
+                  );
+                }
                 return (
                   <View style={st.emptyPos}>
                     <Text style={st.emptyPosText}>활성 포지션이 없어요</Text>

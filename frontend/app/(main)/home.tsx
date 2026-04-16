@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Svg, { Polyline, Defs, LinearGradient, Stop, Polygon, Path, Rect, Text as SvgText, Line, Circle } from 'react-native-svg';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
-import { Text, GlassCard, PressableScale, FadeTabView, AssetCardSkeleton, PageHeader, CurrencyToggle, AnimatedNumber } from '@/design-system';
+import { Text, GlassCard, PressableScale, FadeTabView, AssetCardSkeleton, PositionRowSkeleton, StatRowSkeleton, PageHeader, CurrencyToggle, AnimatedNumber } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { accountService, tradesService } from '@/services';
 import type { Trade } from '@/services';
@@ -983,10 +983,14 @@ export default function Home() {
           </GlassCard>
 
           {/* ── 자산 분배 ── */}
-          <View style={styles.statsRow}>
-            <StatCard label="가용 자산" krw={balance?.available ?? 0} showUsd={showUsd} rate={balance?.usdtKrw ?? 1350} />
-            <StatCard label="투자 중"   krw={balance?.invested ?? 0} showUsd={showUsd} rate={balance?.usdtKrw ?? 1350} />
-          </View>
+          {balLoading && !balance ? (
+            <StatRowSkeleton />
+          ) : (
+            <View style={styles.statsRow}>
+              <StatCard label="가용 자산" krw={balance?.available ?? 0} showUsd={showUsd} rate={balance?.usdtKrw ?? 1350} />
+              <StatCard label="투자 중"   krw={balance?.invested ?? 0} showUsd={showUsd} rate={balance?.usdtKrw ?? 1350} />
+            </View>
+          )}
 
           {/* ── 연결된 계좌 ── */}
           <View style={styles.sectionHeader}>
@@ -1035,9 +1039,16 @@ export default function Home() {
             </PressableScale>
 
             {!positions?.length ? (
-              <View style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 20, alignItems: 'center' }}>
-                <Text style={styles.emptyText}>현재 활성 포지션이 없어요</Text>
-              </View>
+              balLoading ? (
+                <View style={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8 }}>
+                  <PositionRowSkeleton />
+                  <PositionRowSkeleton />
+                </View>
+              ) : (
+                <View style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 20, alignItems: 'center' }}>
+                  <Text style={styles.emptyText}>현재 활성 포지션이 없어요</Text>
+                </View>
+              )
             ) : (() => {
               // 계정이 2개 이상이면 계정별 그룹 헤더 표시
               const multiAccount = accounts.length >= 2;

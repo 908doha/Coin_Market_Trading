@@ -1,6 +1,5 @@
 {
   "dependencies": {
-    "jsonwebtoken": "^9.0.2",
     "pg": "^8.13.3"
   }
 }

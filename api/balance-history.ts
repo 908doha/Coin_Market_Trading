@@ -28,31 +28,11 @@
  *   SUPABASE_SERVICE_ROLE_KEY — service_role 키
  */
 
-import jwt from 'jsonwebtoken';
 import { createClient } from '@supabase/supabase-js';
+import { getUserIdFromRequest } from './_jwt';
 
-// ── JWT 검증 후 user_id 추출 ──────────────────────────────────────────────────
 function getUserId(req: any): string | null {
-  try {
-    const auth  = (req.headers?.authorization ?? req.headers?.Authorization ?? '') as string;
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-    if (!token) return null;
-
-    const secret = process.env.JWT_SIGNING_KEY;
-    if (secret) {
-      const payload = jwt.verify(token, secret) as any;
-      const id = payload.user_id ?? payload.id ?? payload.sub;
-      return id != null ? String(id) : null;
-    }
-
-    console.warn('[balance-history] JWT_SIGNING_KEY not set — skipping signature verification');
-    const parts = token.split('.');
-    if (parts.length < 2) return null;
-    const pad     = (s: string) => s + '='.repeat((4 - s.length % 4) % 4);
-    const payload = JSON.parse(Buffer.from(pad(parts[1]), 'base64url').toString('utf8'));
-    const id      = payload.user_id ?? payload.id ?? payload.sub;
-    return id != null ? String(id) : null;
-  } catch { return null; }
+  return getUserIdFromRequest(req, 'balance-history');
 }
 
 // ── Supabase 클라이언트 (service_role — RLS 우회, 서버 전용) ─────────────────

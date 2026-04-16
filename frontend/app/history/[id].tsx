@@ -7,7 +7,7 @@ import { useApi } from '@/hooks/useApi';
 import { useAccounts } from '@/store/accounts';
 import { PositionDetailView } from '@/components/PositionDetailView';
 import type { IctAnalysis } from '@/components/IctAnalysisCard';
-import { loadIctSnapshotByEntryTs } from '@/utils/ictSnapshot';
+import { loadIctSnapshotByEntryTs, fetchIctSnapshotRemote } from '@/utils/ictSnapshot';
 import { loadPositionSnapshotByEntryTs } from '@/utils/positionSnapshot';
 import type { PricePoint } from '@/utils/priceHistory';
 import { formatKRW } from '@/utils/format';
@@ -43,8 +43,15 @@ export default function TradeDetail() {
 
     const entryTsForSnap = trade.entryAt ? Math.floor(Date.parse(trade.entryAt) / 1000) : 0;
     const stored = loadIctSnapshotByEntryTs(contract, entryTsForSnap);
-    if (stored?.analysis) setIctAnalysis(stored.analysis as IctAnalysis);
-    setIctChecked(true);
+    if (stored?.analysis) {
+      setIctAnalysis(stored.analysis as IctAnalysis);
+      setIctChecked(true);
+    } else {
+      // localStorage 미스 → Supabase fallback
+      fetchIctSnapshotRemote(contract, entryTsForSnap)
+        .then((remote) => { if (remote?.analysis) setIctAnalysis(remote.analysis as IctAnalysis); })
+        .finally(() => setIctChecked(true));
+    }
 
     const from = trade.entryAt ? Math.floor(Date.parse(trade.entryAt) / 1000) : 0;
     const to   = trade.exitAt  ? Math.floor(Date.parse(trade.exitAt)  / 1000) : 0;

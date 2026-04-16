@@ -384,7 +384,7 @@ function TradeRow({
     <AnimatedRow index={globalIndex}>
       <Pressable
         style={({ pressed }) => [tr.wrap, !isLast && tr.border, pressed && { backgroundColor: '#F8F8F8' }]}
-        onPress={() => router.push(`/history/${trade.id}`)}
+        onPress={() => router.push(`/(main)/history/${trade.id}`)}
       >
         <Text style={tr.date}>{showDate ? fmtDate(trade.exitAt) : ''}</Text>
         <View style={tr.middle}>

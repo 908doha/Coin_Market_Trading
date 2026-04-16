@@ -381,7 +381,7 @@ export default function Trading() {
 
           {/* ── 메뉴: 거래 내역 + 수익 분석 ── */}
           <View style={st.menuSection}>
-            <PressableScale onPress={() => router.push('/history')}>
+            <PressableScale onPress={() => router.push('/(main)/history')}>
               <View style={st.menuRow}>
                 <Text style={st.menuText}>거래 내역</Text>
                 <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">

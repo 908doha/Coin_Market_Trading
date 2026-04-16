@@ -42,22 +42,33 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  const interval = pickInterval(from, to);
+  // to가 from보다 앞서도록 보정 (클라이언트/서버 시계 차이 대비)
+  const safeTo = Math.max(to, from + 60);
+
+  // 범위가 1분 미만이면 아직 캔들 없음 → 빈 배열 반환 (Gate.io 오류 방지)
+  if (safeTo - from < 60) {
+    res.status(200).json([]);
+    return;
+  }
+
+  const interval = pickInterval(from, safeTo);
 
   try {
     const url =
       `https://api.gateio.ws/api/v4/futures/usdt/candlesticks` +
       `?contract=${encodeURIComponent(contract)}` +
-      `&from=${from}&to=${to}&interval=${interval}&limit=1000`;
+      `&from=${from}&to=${safeTo}&interval=${interval}&limit=1000`;
 
     const r = await fetch(url, { headers: { Accept: 'application/json' } });
     if (!r.ok) {
-      res.status(502).json({ error: `Gate.io ${r.status}` });
+      // Gate.io 오류는 빈 배열로 graceful 처리 (502 전파 방지)
+      console.error('[candlesticks] Gate.io error', r.status, contract, from);
+      res.status(200).json([]);
       return;
     }
 
     const data: any[] = await r.json();
-    const points = data
+    const points = (Array.isArray(data) ? data : [])
       .filter((d: any) => d.t && d.c)
       .map((d: any) => ({
         t: Number(d.t) * 1000,   // Gate.io seconds → ms
@@ -66,6 +77,7 @@ export default async function handler(req: any, res: any) {
 
     res.status(200).json(points);
   } catch (err: any) {
-    res.status(502).json({ error: err?.message ?? 'fetch failed' });
+    console.error('[candlesticks] fetch error', err?.message, contract);
+    res.status(200).json([]);  // 네트워크 오류도 빈 배열로 graceful 처리
   }
 }

@@ -73,6 +73,24 @@ class TelegramService {
     return pair.split('_')[0] + '.P';
   }
 
+  /**
+   * SL/TP 표시용 값 해석
+   *  - bot.activePositions.sl/tp 우선 (신규 진입 시 전략 계산값)
+   *  - 없으면 orderManager.slPrices/tpPrices (Phase B/C 에서 감지/저장한 실제 값)
+   *  - 둘 다 없으면 null (호출부에서 '(수동)' 등으로 표기)
+   */
+  _resolveSLTP(pair, active) {
+    const om = this.tradingBot && this.tradingBot.orderManager;
+    const activeSl = active && active.sl != null ? active.sl : null;
+    const activeTp = active && active.tp != null ? active.tp : null;
+    const storedSl = om ? om.slPrices.get(pair) : null;
+    const storedTp = om ? om.tpPrices.get(pair) : null;
+    return {
+      sl: activeSl != null ? activeSl : (storedSl != null ? storedSl : null),
+      tp: activeTp != null ? activeTp : (storedTp != null ? storedTp : null),
+    };
+  }
+
   _registerCommands() {
     const chatId = config.telegramChatId;
 
@@ -101,8 +119,9 @@ class TelegramService {
 
       if (activePositions.size > 0) {
         for (const [pair, pos] of activePositions.entries()) {
-          const slTp = pos.sl != null && pos.tp != null
-            ? `SL: ${pos.sl} / TP: ${pos.tp}`
+          const { sl, tp } = this._resolveSLTP(pair, pos);
+          const slTp = (sl != null && tp != null)
+            ? `SL: ${sl} / TP: ${tp}`
             : '(수동 SL/TP 또는 미등록)';
           lines.push(`  • [${this._displayName(pair)}] ${pos.direction.toUpperCase()} ${slTp}`);
         }
@@ -146,8 +165,9 @@ class TelegramService {
             const contractInfo = await gateClient.getContract(pair);
             const baseCoin = pair.split('_')[0];
             const coinAmount = Math.abs(pos.size) * Math.abs(contractInfo.quantoMultiplier);
-            const slText = active.sl != null ? active.sl : '(수동)';
-            const tpText = active.tp != null ? active.tp : '(수동)';
+            const { sl, tp } = this._resolveSLTP(pair, active);
+            const slText = sl != null ? sl : '(수동)';
+            const tpText = tp != null ? tp : '(수동)';
             const pnlSign = pos.unrealisedPnl >= 0 ? '+' : '';
 
             lines.push('');
@@ -187,8 +207,9 @@ class TelegramService {
         const baseCoin = pair.split('_')[0];
         const coinAmount = Math.abs(pos.size) * Math.abs(contractInfo.quantoMultiplier);
         const active = this.tradingBot.activePositions.get(pair);
-        const slText = active && active.sl != null ? active.sl : '(수동)';
-        const tpText = active && active.tp != null ? active.tp : '(수동)';
+        const { sl, tp } = this._resolveSLTP(pair, active);
+        const slText = sl != null ? sl : '(수동)';
+        const tpText = tp != null ? tp : '(수동)';
         const pnlSign = pos.unrealisedPnl >= 0 ? '+' : '';
 
         await this.bot.sendMessage(chatId, [

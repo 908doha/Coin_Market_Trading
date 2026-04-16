@@ -38,7 +38,7 @@ export function loadIctSnapshot(contract: string): StoredIctSnapshot | null {
 
 function getToken(): string | null {
   try {
-    return typeof localStorage !== 'undefined' ? localStorage.getItem('jwt_access') : null;
+    return typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('jwt_access') : null;
   } catch { return null; }
 }
 

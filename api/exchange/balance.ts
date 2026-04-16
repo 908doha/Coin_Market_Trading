@@ -151,21 +151,24 @@ async function fetchBinanceBalance(apiKey: string, apiSecret: string): Promise<B
   );
 
   if (otherBalances.length) {
-    const pricePromises = otherBalances.map(async (b) => {
-      try {
-        const pr = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${b.asset}USDT`);
-        const pd: any = await pr.json();
-        const price  = parseFloat(pd.price ?? '0');
-        const amount = parseFloat(b.free) + parseFloat(b.locked);
-        return amount * price;
-      } catch {
-        return 0;
+    try {
+      const symbols   = '[' + otherBalances.map((b) => `"${b.asset}USDT"`).join(',') + ']';
+      const priceRes  = await fetch(
+        `https://api.binance.com/api/v3/ticker/price?symbols=${encodeURIComponent(symbols)}`,
+      );
+      if (priceRes.ok) {
+        const prices: any[] = await priceRes.json();
+        const priceMap = new Map(prices.map((p: any) => [p.symbol, parseFloat(p.price ?? '0')]));
+        let otherTotal = 0;
+        for (const b of otherBalances) {
+          const price  = priceMap.get(`${b.asset}USDT`) ?? 0;
+          const amount = parseFloat(b.free) + parseFloat(b.locked);
+          otherTotal  += amount * price;
+        }
+        lockedUsdt += otherTotal;
+        totalUsdt  += otherTotal;
       }
-    });
-    const values = await Promise.all(pricePromises);
-    const otherTotal = values.reduce((s, v) => s + v, 0);
-    lockedUsdt += otherTotal;
-    totalUsdt  += otherTotal;
+    } catch { /* 가격 조회 실패 시 other assets 0으로 처리 */ }
   }
 
   const totalKrw     = Math.round(totalUsdt     * usdtKrw);

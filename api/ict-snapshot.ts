@@ -25,17 +25,21 @@
  * ────────────────────────────────────────────────────────────────────────────
  */
 
+import jwt from 'jsonwebtoken';
 import { createClient } from '@supabase/supabase-js';
 
+// ── JWT 서명 검증 후 user_id 추출 ─────────────────────────────────────────────
 function getUserId(req: any): string | null {
   try {
     const auth  = (req.headers?.authorization ?? req.headers?.Authorization ?? '') as string;
     const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
     if (!token) return null;
-    const parts = token.split('.');
-    if (parts.length < 2) return null;
-    const pad     = (s: string) => s + '='.repeat((4 - s.length % 4) % 4);
-    const payload = JSON.parse(Buffer.from(pad(parts[1]), 'base64url').toString('utf8'));
+    const secret = process.env.SUPABASE_JWT_SECRET;
+    if (!secret) {
+      console.error('[ict-snapshot] SUPABASE_JWT_SECRET is not configured');
+      return null;
+    }
+    const payload = jwt.verify(token, secret) as any;
     const id      = payload.user_id ?? payload.id ?? payload.sub;
     return id != null ? String(id) : null;
   } catch { return null; }
@@ -48,14 +52,26 @@ function getSupabase() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
-function setCors(res: any) {
-  res.setHeader('Access-Control-Allow-Origin',  '*');
+// ── CORS (허용 Origin 제한) ───────────────────────────────────────────────────
+function setCors(req: any, res: any) {
+  const origin  = (req.headers?.origin ?? '') as string;
+  const allowed = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean)
+    : [];
+  if (allowed.length > 0) {
+    if (allowed.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+    }
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Authorization,Content-Type');
 }
 
 export default async function handler(req: any, res: any) {
-  setCors(res);
+  setCors(req, res);
   if (req.method === 'OPTIONS') { res.status(200).end(); return; }
 
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {

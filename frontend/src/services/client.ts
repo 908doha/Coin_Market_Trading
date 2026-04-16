@@ -18,25 +18,25 @@ const REFRESH_KEY = 'jwt_refresh';
 
 export const tokenStorage = {
   async getAccess(): Promise<string | null> {
-    if (Platform.OS === 'web') return localStorage.getItem(TOKEN_KEY);
+    if (Platform.OS === 'web') return sessionStorage.getItem(TOKEN_KEY);
     return SecureStore.getItemAsync(TOKEN_KEY);
   },
   async setAccess(token: string): Promise<void> {
-    if (Platform.OS === 'web') { localStorage.setItem(TOKEN_KEY, token); return; }
+    if (Platform.OS === 'web') { sessionStorage.setItem(TOKEN_KEY, token); return; }
     await SecureStore.setItemAsync(TOKEN_KEY, token);
   },
   async getRefresh(): Promise<string | null> {
-    if (Platform.OS === 'web') return localStorage.getItem(REFRESH_KEY);
+    if (Platform.OS === 'web') return sessionStorage.getItem(REFRESH_KEY);
     return SecureStore.getItemAsync(REFRESH_KEY);
   },
   async setRefresh(token: string): Promise<void> {
-    if (Platform.OS === 'web') { localStorage.setItem(REFRESH_KEY, token); return; }
+    if (Platform.OS === 'web') { sessionStorage.setItem(REFRESH_KEY, token); return; }
     await SecureStore.setItemAsync(REFRESH_KEY, token);
   },
   async clear(): Promise<void> {
     if (Platform.OS === 'web') {
-      localStorage.removeItem(TOKEN_KEY);
-      localStorage.removeItem(REFRESH_KEY);
+      sessionStorage.removeItem(TOKEN_KEY);
+      sessionStorage.removeItem(REFRESH_KEY);
       return;
     }
     await Promise.all([

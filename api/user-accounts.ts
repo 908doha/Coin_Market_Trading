@@ -13,34 +13,32 @@
  */
 
 import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
 import { createClient } from '@supabase/supabase-js';
 
-// ── JWT payload decode (검증 없이 userId 추출) ────────────────────────────────
-function decodeJwtPayload(token: string): { user_id?: number; id?: number; sub?: string } | null {
+// ── JWT 서명 검증 후 userId 추출 ──────────────────────────────────────────────
+function getUserId(req: any): string | null {
   try {
-    const parts = token.split('.');
-    if (parts.length < 2) return null;
-    const pad     = (s: string) => s + '='.repeat((4 - s.length % 4) % 4);
-    const decoded = Buffer.from(pad(parts[1]), 'base64url').toString('utf8');
-    return JSON.parse(decoded);
+    const auth  = (req.headers?.authorization ?? req.headers?.Authorization ?? '') as string;
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+    if (!token) return null;
+    const secret = process.env.SUPABASE_JWT_SECRET;
+    if (!secret) {
+      console.error('[user-accounts] SUPABASE_JWT_SECRET is not configured');
+      return null;
+    }
+    const payload = jwt.verify(token, secret) as any;
+    const id = payload.user_id ?? payload.id ?? payload.sub;
+    return id != null ? String(id) : null;
   } catch {
     return null;
   }
 }
 
-function getUserId(req: any): string | null {
-  const auth = req.headers?.authorization ?? req.headers?.Authorization ?? '';
-  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-  if (!token) return null;
-  const payload = decodeJwtPayload(token);
-  if (!payload) return null;
-  const id = payload.user_id ?? payload.id ?? payload.sub;
-  return id != null ? String(id) : null;
-}
-
 // ── AES-256-GCM 암호화 ────────────────────────────────────────────────────────
 function getKey(): Buffer {
-  const secret = process.env.ACCOUNTS_ENCRYPTION_KEY ?? 'default_dev_key_change_in_prod!!';
+  const secret = process.env.ACCOUNTS_ENCRYPTION_KEY;
+  if (!secret) throw new Error('ACCOUNTS_ENCRYPTION_KEY environment variable is required');
   return crypto.scryptSync(secret, 'accounts_salt_v1', 32);
 }
 
@@ -95,16 +93,27 @@ async function dbUpsert(userId: string, enc: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
-// ── CORS 헤더 ─────────────────────────────────────────────────────────────────
-function setCors(res: any) {
-  res.setHeader('Access-Control-Allow-Origin',  '*');
+// ── CORS 헤더 (허용 Origin 제한) ──────────────────────────────────────────────
+function setCors(req: any, res: any) {
+  const origin  = (req.headers?.origin ?? '') as string;
+  const allowed = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean)
+    : [];
+  if (allowed.length > 0) {
+    if (allowed.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+    }
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Authorization,Content-Type');
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────
 export default async function handler(req: any, res: any) {
-  setCors(res);
+  setCors(req, res);
   if (req.method === 'OPTIONS') { res.status(200).end(); return; }
 
   const userId = getUserId(req);

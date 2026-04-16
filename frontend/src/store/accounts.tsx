@@ -69,7 +69,7 @@ function makeId(): string {
 
 function getToken(): string | null {
   if (Platform.OS !== 'web') return null;
-  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
+  try { return sessionStorage.getItem(TOKEN_KEY); } catch { return null; }
 }
 
 async function backendLoad(): Promise<ExchangeAccount[] | null> {
@@ -148,20 +148,28 @@ const AccountsContext = createContext<AccountsContextValue | null>(null);
 function sumBalances(bals: (Balance | null)[]): Balance | null {
   const valid = bals.filter((b): b is Balance => b !== null);
   if (!valid.length) return null;
-  return valid.reduce<Balance>(
+  const result = valid.reduce<Balance>(
     (acc, b) => ({
       total:           acc.total           + b.total,
       invested:        acc.invested        + b.invested,
       available:       acc.available       + b.available,
       profitTotal:     acc.profitTotal     + b.profitTotal,
-      profitRate:      acc.profitRate      + b.profitRate,
+      profitRate:      0,  // 아래에서 가중 평균으로 계산
       profitToday:     acc.profitToday     + b.profitToday,
-      profitTodayRate: acc.profitTodayRate + b.profitTodayRate,
+      profitTodayRate: 0,  // 아래에서 가중 평균으로 계산
       totalUsd:        (acc.totalUsd ?? 0) + (b.totalUsd ?? 0),
       usdtKrw:         b.usdtKrw ?? acc.usdtKrw,
     }),
     { total: 0, invested: 0, available: 0, profitTotal: 0, profitRate: 0, profitToday: 0, profitTodayRate: 0 },
   );
+  // 수익률: 단순 합산이 아니라 투자금 기준 가중 평균
+  result.profitRate      = result.invested > 0
+    ? parseFloat(((result.profitTotal / result.invested) * 100).toFixed(2))
+    : 0;
+  result.profitTodayRate = result.invested > 0
+    ? parseFloat(((result.profitToday  / result.invested) * 100).toFixed(2))
+    : 0;
+  return result;
 }
 
 // KST 형식 "2025.01.19 (일) 18:07" → UTC Unix 초
@@ -231,10 +239,10 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
   // 로그인 후 토큰이 생기면 재동기화 (토큰 없이 마운트된 경우 대비)
   useEffect(() => {
     if (Platform.OS !== 'web') return;
-    let lastToken = localStorage.getItem(TOKEN_KEY);
+    let lastToken = sessionStorage.getItem(TOKEN_KEY);
 
     const interval = setInterval(() => {
-      const current = localStorage.getItem(TOKEN_KEY);
+      const current = sessionStorage.getItem(TOKEN_KEY);
       if (current && current !== lastToken) {
         lastToken = current;
         console.log('[accounts] 토큰 감지 → 백엔드 재동기화');

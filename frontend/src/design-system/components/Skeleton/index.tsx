@@ -334,6 +334,21 @@ export function BalanceCardsSkeleton() {
   );
 }
 
+// ─── 홈: 가용 자산 / 투자 중 통계 행 ─────────────────────────────────────────
+
+export function StatRowSkeleton() {
+  return (
+    <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
+      {[1, 2].map((i) => (
+        <View key={i} style={{ flex: 1, backgroundColor: '#F5F5F5', borderRadius: 20, padding: 16, gap: 8 }}>
+          <Skeleton width={48} height={12} radius={5} />
+          <Skeleton width="70%" height={20} radius={6} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
 // ─── 에이전트 설정 ────────────────────────────────────────────────────────────
 
 export function AgentSettingsSkeleton() {

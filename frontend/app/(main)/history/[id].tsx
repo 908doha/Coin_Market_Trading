@@ -91,7 +91,7 @@ export default function TradeDetail() {
       direction={(trade?.direction ?? 'Long') as 'Long' | 'Short'}
       leverage={trade?.leverage}
       entryAt={entryAtKST}
-      holdingLabel={trade?.holdingDays != null ? `${trade.holdingDays}일 보유` : undefined}
+      holdingLabel={trade?.holdingPeriod ? `${trade.holdingPeriod} 보유` : trade?.holdingDays != null ? `${trade.holdingDays}일 보유` : undefined}
       profit={trade?.profit ?? 0}
       profitRate={leveragedRate}
       pnlLabel="실현손익"

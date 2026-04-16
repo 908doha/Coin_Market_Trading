@@ -25,6 +25,7 @@ interface Trade {
   profit:            number;    // KRW
   profitRate:        number;    // %
   holdingDays:       number;
+  holdingPeriod:     string;    // "3일 2시간 15분" 등
   entryAt:           string;    // ISO
   exitAt:            string;    // ISO
   entryPrice:        number;    // USD
@@ -93,9 +94,16 @@ async function fetchGateTrades(apiKey: string, apiSecret: string): Promise<Trade
     const exitAt  = closeTime ? new Date(closeTime * 1000).toISOString() : new Date().toISOString();
     const entryAt = openTime  ? new Date(openTime  * 1000).toISOString() : exitAt;
 
-    // 보유 일수
-    const holdingMs   = openTime && closeTime ? (closeTime - openTime) * 1000 : 0;
-    const holdingDays = Math.floor(holdingMs / (1000 * 60 * 60 * 24));
+    // 보유 기간
+    const holdingMs    = openTime && closeTime ? (closeTime - openTime) * 1000 : 0;
+    const holdingDays  = Math.floor(holdingMs / (1000 * 60 * 60 * 24));
+    const holdingHours = Math.floor((holdingMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const holdingMins  = Math.floor((holdingMs % (1000 * 60 * 60)) / (1000 * 60));
+    const holdingPeriod = holdingDays > 0
+      ? `${holdingDays}일 ${holdingHours}시간 ${holdingMins}분`
+      : holdingHours > 0
+        ? `${holdingHours}시간 ${holdingMins}분`
+        : holdingMins > 0 ? `${holdingMins}분` : '1분 미만';
 
     // 청산 이유 분류
     const isLiq = text.includes('liq_');
@@ -145,6 +153,7 @@ async function fetchGateTrades(apiKey: string, apiSecret: string): Promise<Trade
       profit:      pnl * usdtKrw,
       profitRate,
       holdingDays,
+      holdingPeriod,
       entryAt,
       exitAt,
       entryPrice,

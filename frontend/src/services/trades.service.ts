@@ -9,6 +9,7 @@ export interface Trade {
   profit:      number;
   profitRate:  number;
   holdingDays: number;
+  holdingPeriod?: string;
   entryAt:     string;
   exitAt:      string;
   accountId?:        string;   // getAllByAccounts 에서 주입

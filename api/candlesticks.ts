@@ -36,7 +36,8 @@ export default async function handler(req: any, res: any) {
 
   const contract = (req.query?.contract as string ?? '').trim();
   const from     = parseInt(req.query?.from as string, 10);
-  const to       = parseInt(req.query?.to   as string, 10) || Math.floor(Date.now() / 1000);
+  const rawTo    = parseInt(req.query?.to   as string, 10) || 0;
+  const to       = rawTo || Math.floor(Date.now() / 1000);
 
   if (!contract || !from || from <= 0) {
     res.status(400).json({ error: 'contract, from 파라미터 필요' });
@@ -73,7 +74,9 @@ export default async function handler(req: any, res: any) {
       .map((d: any) => ({
         t: Number(d.t) * 1000,   // Gate.io seconds → ms
         p: parseFloat(d.c),      // close price
-      }));
+      }))
+      // to가 명시적으로 지정된 경우 (과거 거래), 해당 시점까지만 자르기
+      .filter((pt: any) => rawTo ? pt.t <= rawTo * 1000 : true);
 
     res.status(200).json(points);
   } catch (err: any) {

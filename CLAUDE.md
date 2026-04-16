@@ -207,7 +207,10 @@ cd frontend && npm install --legacy-peer-deps && npx expo start --web
 # API는 Vercel에서만 동작 (로컬에서는 vercel dev 필요)
 ```
 
-## Git Branch
+## Git Workflow
 
-- 개발 브랜치: `claude/design-system-setup-x3KQF`
 - GitHub: `openclaw4286-code/coin_market_trading`
+- **항상 `main` 브랜치에서 직접 작업** — feature branch 최소화
+- 작업 시작 전 반드시 `git checkout main && git pull origin main`
+- feature branch 필요 시 반드시 **최신 `main`에서 분기**하고, 작업 완료 즉시 main에 머지
+- 오래된 feature branch를 재사용하지 말 것 — main의 최근 수정이 빠져서 버그가 재발함

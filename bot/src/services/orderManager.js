@@ -23,6 +23,14 @@ class OrderManager {
     this.tradeStatsByPair = new Map();
     this.openExposureUsdt = new Map();
 
+    // Phase B/C: SL/TP 트리거 가격 저장 (복원/재등록용)
+    // 주문 ID만 있으면 취소는 가능하지만 재등록하려면 가격이 필요하다.
+    this.slPrices = new Map();
+    this.tpPrices = new Map();
+
+    // Phase C: 주기적 SL/TP 존재 검증 카운터 (페어별)
+    this.sltpCheckCounter = new Map();
+
     // race condition 방지: 포지션 조회 empty 연속 횟수
     // 1-2회 null은 Gate.io 일시 장애/eventual consistency로 보고 무시,
     // 3회 연속이면 진짜 청산으로 판단
@@ -30,6 +38,60 @@ class OrderManager {
 
     // 영구 저장에서 복원
     this._loadPersistedStats();
+  }
+
+  // ===== Phase B/C 공통 헬퍼: SL/TP 상태 저장/정리 =====
+
+  /**
+   * SL/TP 주문 결과를 내부 Map에 기록
+   * @param {string} contract
+   * @param {object|null} slOrder placeSLTP 결과의 slOrder
+   * @param {object|null} tpOrder placeSLTP 결과의 tpOrder
+   * @param {number} slPrice 설정한 SL 가격
+   * @param {number} tpPrice 설정한 TP 가격
+   */
+  _storeSLTP(contract, slOrder, tpOrder, slPrice, tpPrice) {
+    this.slOrderIds.set(contract, slOrder ? slOrder.id : null);
+    this.tpOrderIds.set(contract, tpOrder ? tpOrder.id : null);
+    if (Number.isFinite(slPrice) && slPrice > 0) this.slPrices.set(contract, slPrice);
+    if (Number.isFinite(tpPrice) && tpPrice > 0) this.tpPrices.set(contract, tpPrice);
+  }
+
+  /**
+   * 포지션 종료/청산 시 해당 페어 관련 런타임 Map 전부 정리
+   */
+  _clearPairState(contract) {
+    this.slOrderIds.delete(contract);
+    this.tpOrderIds.delete(contract);
+    this.slPrices.delete(contract);
+    this.tpPrices.delete(contract);
+    this.sltpCheckCounter.delete(contract);
+    this.openExposureUsdt.delete(contract);
+  }
+
+  /**
+   * 트리거 주문을 SL/TP로 분류 (Phase B)
+   *  - long:  SL = rule 2 (<=) & price < entry,  TP = rule 1 (>=) & price > entry
+   *  - short: SL = rule 1 (>=) & price > entry,  TP = rule 2 (<=) & price < entry
+   * 첫 번째 매칭만 채택 (중복 시 가장 먼저 발견한 것 사용)
+   */
+  _classifyTriggers(orders, direction, entry) {
+    let sl = null;
+    let tp = null;
+    for (const order of orders) {
+      const price = parseFloat(order.trigger && order.trigger.price);
+      const rule = order.trigger && order.trigger.rule;
+      if (!Number.isFinite(price) || price <= 0) continue;
+
+      if (direction === 'long') {
+        if (rule === 2 && price < entry && !sl) sl = { id: order.id, price };
+        else if (rule === 1 && price > entry && !tp) tp = { id: order.id, price };
+      } else {
+        if (rule === 1 && price > entry && !sl) sl = { id: order.id, price };
+        else if (rule === 2 && price < entry && !tp) tp = { id: order.id, price };
+      }
+    }
+    return { sl, tp };
   }
 
   /**
@@ -144,6 +206,10 @@ class OrderManager {
 
   /**
    * 기존(봇 시작 전부터 존재하던) 포지션을 등록 — 모니터링/노출 관리에 포함
+   *
+   * Phase B: 봇 재시작 시 SL/TP 가 Gate.io 에 실제로 존재하는지 확인하고,
+   *          없으면 config 기본값(stopLossPercent/takeProfitPercent)으로 복원.
+   *          실패해도 봇 구동은 계속되며 수동 개입이 필요함을 로그로 경고.
    */
   async registerExistingPosition(pair, position) {
     this.lastKnownPositions.set(pair, {
@@ -159,6 +225,73 @@ class OrderManager {
       if (notional > 0) this.openExposureUsdt.set(pair, notional);
     } catch (err) {
       logger.debug(`[${pair}] 기존 포지션 노출 계산 실패: ${err.message}`);
+    }
+
+    // Phase B: SL/TP 검증 & 필요 시 복원
+    try {
+      await this._verifyAndRestoreSLTP(pair, position);
+    } catch (err) {
+      logger.error(`[${pair}] SL/TP 검증/복원 중 예외 (무시, 봇 계속): ${err.message}`);
+    }
+  }
+
+  /**
+   * (Phase B) 기존 포지션의 SL/TP 상태 점검 & 필요 시 복원
+   *
+   * 흐름:
+   *   1. Gate.io 에서 해당 페어의 open trigger 주문 조회
+   *   2. 있으면 → 분류해서 내부 Map 에만 저장 (재등록 금지 — 사용자 설정 존중)
+   *   3. 없으면 → config.stopLossPercent/takeProfitPercent 기반 폴백 SL/TP 등록
+   */
+  async _verifyAndRestoreSLTP(pair, position) {
+    const size = Math.abs(position.size);
+    const entry = position.entryPrice || position.markPrice || 0;
+    const direction = position.size > 0 ? 'long' : 'short';
+
+    if (size <= 0 || entry <= 0) {
+      logger.warn(`[${pair}] 기존 포지션 entry/size 부족 — SL/TP 복원 스킵`);
+      return;
+    }
+
+    const existing = await gateClient.listTriggerOrders(pair, 'open');
+
+    if (existing.length > 0) {
+      // 기존 트리거가 있으면 분류해서 저장만 함 (사용자가 수동 배치한 경우 존중)
+      const classified = this._classifyTriggers(existing, direction, entry);
+      if (classified.sl) {
+        this.slOrderIds.set(pair, classified.sl.id);
+        this.slPrices.set(pair, classified.sl.price);
+      }
+      if (classified.tp) {
+        this.tpOrderIds.set(pair, classified.tp.id);
+        this.tpPrices.set(pair, classified.tp.price);
+      }
+      const slTag = classified.sl ? classified.sl.price : 'NONE';
+      const tpTag = classified.tp ? classified.tp.price : 'NONE';
+      logger.info(
+        `[${pair}] 기존 SL/TP 감지 & 로드: SL=${slTag} TP=${tpTag} (open trigger ${existing.length}건)`
+      );
+      return;
+    }
+
+    // 트리거 하나도 없음 → 폴백 SL/TP 계산 & 등록
+    const slPct = Math.max(config.stopLossPercent, 0) / 100;
+    const tpPct = Math.max(config.takeProfitPercent, 0) / 100;
+    const sl = direction === 'long' ? entry * (1 - slPct) : entry * (1 + slPct);
+    const tp = direction === 'long' ? entry * (1 + tpPct) : entry * (1 - tpPct);
+
+    logger.warn(
+      `[${pair}] 기존 포지션에 SL/TP 없음 — 폴백 등록 시도: direction=${direction} entry=${entry} SL=${sl.toFixed(6)} TP=${tp.toFixed(6)}`
+    );
+
+    try {
+      const result = await gateClient.placeSLTP(pair, size, direction, sl, tp);
+      this._storeSLTP(pair, result.slOrder, result.tpOrder, sl, tp);
+      logger.info(`[${pair}] 폴백 SL/TP 등록 완료`);
+    } catch (err) {
+      logger.error(
+        `[${pair}] 폴백 SL/TP 등록 실패 — 수동 설정 필요: ${err.message}`
+      );
     }
   }
 
@@ -347,8 +480,8 @@ class OrderManager {
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         const sltpResult = await gateClient.placeSLTP(contract, actualSize, direction, sl, tp);
-        this.slOrderIds.set(contract, sltpResult.slOrder ? sltpResult.slOrder.id : null);
-        this.tpOrderIds.set(contract, sltpResult.tpOrder ? sltpResult.tpOrder.id : null);
+        // Phase B/C: ID 뿐 아니라 가격도 저장 — 재등록 시 필요
+        this._storeSLTP(contract, sltpResult.slOrder, sltpResult.tpOrder, sl, tp);
         logger.info(`[${contract}] SL 주문 ID: ${this.slOrderIds.get(contract)} | TP 주문 ID: ${this.tpOrderIds.get(contract)}`);
         sltpSuccess = true;
         break;
@@ -381,6 +514,9 @@ class OrderManager {
 
   /**
    * 페어별 포지션 모니터링
+   *
+   * Phase C: 포지션 유지 중일 때 5틱마다 Gate.io 에 실제 SL/TP 주문이
+   *          존재하는지 확인하고, 사라졌으면 저장된 가격으로 재등록.
    */
   async monitorPosition(contract, sl, tp, direction) {
     const position = await gateClient.getPosition(contract);
@@ -397,6 +533,18 @@ class OrderManager {
       logger.debug(
         `[${contract}] [포지션] ${direction} | 현재: ${currentPrice} | PnL: ${position.unrealisedPnl.toFixed(2)} USDT | SL: ${sl} | TP: ${tp}`
       );
+
+      // Phase C: 5틱마다 SL/TP 존재 검증 (1분 cron 기준 ≈ 5분 간격)
+      const nextCount = (this.sltpCheckCounter.get(contract) || 0) + 1;
+      this.sltpCheckCounter.set(contract, nextCount);
+      if (nextCount % 5 === 0) {
+        try {
+          await this._verifySLTPExists(contract, position);
+        } catch (err) {
+          logger.error(`[${contract}] SL/TP 존재 검증 실패 (무시): ${err.message}`);
+        }
+      }
+
       return { action: 'holding', price: currentPrice, pnl: position.unrealisedPnl };
     }
 
@@ -446,9 +594,7 @@ class OrderManager {
       try {
         await gateClient.cancelAllTriggerOrders(contract);
       } catch {}
-      this.slOrderIds.delete(contract);
-      this.tpOrderIds.delete(contract);
-      this.openExposureUsdt.delete(contract);
+      this._clearPairState(contract);
       return { action: 'failed', reason: '포지션 조회 실패' };
     }
 
@@ -464,12 +610,52 @@ class OrderManager {
 
     this.dailyPnl += pnl;
     this.recordTradeResult(contract, pnl);
-    this.slOrderIds.delete(contract);
-    this.tpOrderIds.delete(contract);
     this.lastKnownPositions.delete(contract);
-    this.openExposureUsdt.delete(contract);
+    this._clearPairState(contract);
 
     return { action, price: 0, pnl };
+  }
+
+  /**
+   * (Phase C) 포지션 유지 중 SL/TP 조건부 주문이 실제로 Gate.io 에
+   * 존재하는지 확인하고, 사라졌으면 저장된 가격으로 재등록한다.
+   *
+   * 정책:
+   *   - 트리거가 1건 이상 있으면 OK 로 간주 (부분 누락까지는 감지 안 함 - 과도한 자동 개입 방지)
+   *   - 0건인데 slPrices/tpPrices 가 있으면 → 재등록
+   *   - 0건인데 저장된 가격도 없으면 → 경고만 (원본 전략값을 모르므로 수동 개입)
+   */
+  async _verifySLTPExists(contract, position) {
+    const triggers = await gateClient.listTriggerOrders(contract, 'open');
+    if (triggers.length > 0) {
+      logger.debug(`[${contract}] SL/TP 검증 OK (open ${triggers.length}건)`);
+      return;
+    }
+
+    const slPrice = this.slPrices.get(contract);
+    const tpPrice = this.tpPrices.get(contract);
+
+    if (!Number.isFinite(slPrice) || !Number.isFinite(tpPrice) || slPrice <= 0 || tpPrice <= 0) {
+      logger.warn(
+        `[${contract}] SL/TP 사라짐 감지 & 저장된 가격 없음 — 수동 조치 필요 (slPrice=${slPrice} tpPrice=${tpPrice})`
+      );
+      return;
+    }
+
+    const size = Math.abs(position.size);
+    const actualDirection = position.size > 0 ? 'long' : 'short';
+
+    logger.warn(
+      `[${contract}] SL/TP 사라짐 감지 — 재등록 시도: SL=${slPrice} TP=${tpPrice} dir=${actualDirection} size=${size}`
+    );
+
+    try {
+      const result = await gateClient.placeSLTP(contract, size, actualDirection, slPrice, tpPrice);
+      this._storeSLTP(contract, result.slOrder, result.tpOrder, slPrice, tpPrice);
+      logger.info(`[${contract}] SL/TP 재등록 완료`);
+    } catch (err) {
+      logger.error(`[${contract}] SL/TP 재등록 실패 — 수동 조치 필요: ${err.message}`);
+    }
   }
 
   // ===== 수동 청산 =====
@@ -482,11 +668,9 @@ class OrderManager {
 
     const result = await gateClient.closePosition(contract);
 
-    this.slOrderIds.delete(contract);
-    this.tpOrderIds.delete(contract);
     this.lastKnownPositions.delete(contract);
-    this.openExposureUsdt.delete(contract);
     this.emptyReadCount.delete(contract);
+    this._clearPairState(contract);
 
     return result;
   }

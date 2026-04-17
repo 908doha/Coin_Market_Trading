@@ -15,7 +15,12 @@ import type { Position } from '../services/positions.service';
 import { saveIctSnapshot, saveIctSnapshotWithHistory, loadIctSnapshot, pushIctSnapshotRemote, fetchIctSnapshotRemote } from '../utils/ictSnapshot';
 import { savePositionSnapshotWithHistory } from '../utils/positionSnapshot';
 import { appendPricePoint } from '../utils/priceHistory';
-import { appendBalanceSnapshot, syncBalanceHistory, pushBalanceHistory } from '../utils/balanceHistory';
+import {
+  appendBalanceSnapshot,
+  syncBalanceHistory,
+  pushBalanceHistory,
+  claimOrphanBalanceHistory,
+} from '../utils/balanceHistory';
 
 export type ExchangeType = 'binance' | 'upbit' | 'bybit' | 'okx' | 'gate' | 'custom';
 
@@ -414,6 +419,16 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     await localSave(next);
     setAccounts(next);
     backendSave(next);   // background
+
+    // orphan balance_history 흡수 (exchange_accounts 초기화 후 재등록 케이스).
+    // 활성 account_id 전체를 keep 목록으로 보내 기존 계좌 이력은 건드리지 않음.
+    const keep = next.map((a) => a.id);
+    claimOrphanBalanceHistory(account.id, keep)
+      .then((n) => {
+        if (n > 0) console.log(`[accounts] orphan balance_history ${n}개를 신규 계좌로 흡수`);
+      })
+      .catch(() => {});
+
     return account;
   }, []);
 

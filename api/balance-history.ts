@@ -56,7 +56,7 @@ function getSupabase() {
 // ── CORS ─────────────────────────────────────────────────────────────────────
 function setCors(res: any) {
   res.setHeader('Access-Control-Allow-Origin',  '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Authorization,Content-Type');
 }
 
@@ -126,6 +126,86 @@ export default async function handler(req: any, res: any) {
       if (error) throw new Error(error.message);
 
       res.status(200).json({ ok: true, count: rows.length });
+
+    // ── PATCH: orphan account_id → 새 account_id로 재바인딩 ──────────────────
+    //  body: { newAccountId: string; keepAccountIds?: string[] }
+    //  동작: user의 balance_history 중 account_id 가 (''도 아니고
+    //  keepAccountIds 에도 없는) row 들을 newAccountId 로 UPDATE.
+    //  사용처: exchange_accounts 초기화 후 재등록 시 과거 계좌별 스냅샷을
+    //  신규 랜덤 ID로 흡수.
+    } else if (req.method === 'PATCH') {
+      const body             = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+      const newAccountId     = (body?.newAccountId ?? '').toString();
+      const keepAccountIdsIn = Array.isArray(body?.keepAccountIds) ? body.keepAccountIds : [];
+      if (!newAccountId) {
+        res.status(400).json({ error: 'newAccountId 가 필요해요' });
+        return;
+      }
+      // 현재 활성 계좌 + '' (총자산) 은 보존
+      const keepSet = new Set<string>(['', ...keepAccountIdsIn.map(String)]);
+
+      // 1) orphan account_id 후보 수집
+      const { data: rows, error: listErr } = await sb
+        .from('balance_history')
+        .select('account_id')
+        .eq('user_id', userId);
+      if (listErr) throw new Error(listErr.message);
+
+      const orphans = Array.from(
+        new Set((rows ?? []).map((r: any) => String(r.account_id ?? '')))
+      ).filter((id) => !keepSet.has(id));
+
+      if (!orphans.length) { res.status(200).json({ rebound: 0, orphans: [] }); return; }
+
+      // 2) orphan 전체를 newAccountId 로 rebind
+      //    UNIQUE (user_id, account_id, ts) 충돌을 피하기 위해 per-orphan 으로 반복.
+      //    기존 newAccountId 스냅샷과 ts 가 겹치면 insert 되지 않도록 upsert-merge 방식:
+      //    먼저 동일 ts row 제거 후 UPDATE.
+      let rebound = 0;
+      for (const oldId of orphans) {
+        const { data: oldRows, error: selErr } = await sb
+          .from('balance_history')
+          .select('ts, total')
+          .eq('user_id', userId)
+          .eq('account_id', oldId);
+        if (selErr) throw new Error(selErr.message);
+        if (!oldRows?.length) continue;
+
+        // 대상 newAccountId 쪽 기존 ts 수집
+        const tsList = oldRows.map((r: any) => Number(r.ts));
+        const { data: dupRows } = await sb
+          .from('balance_history')
+          .select('ts')
+          .eq('user_id', userId)
+          .eq('account_id', newAccountId)
+          .in('ts', tsList);
+        const dupSet = new Set<number>((dupRows ?? []).map((r: any) => Number(r.ts)));
+
+        // 중복 ts 는 old 에서 삭제, 나머지는 account_id 업데이트
+        const dupTs    = tsList.filter((t) => dupSet.has(t));
+        const uniqueTs = tsList.filter((t) => !dupSet.has(t));
+
+        if (dupTs.length) {
+          await sb
+            .from('balance_history')
+            .delete()
+            .eq('user_id', userId)
+            .eq('account_id', oldId)
+            .in('ts', dupTs);
+        }
+        if (uniqueTs.length) {
+          const { error: updErr } = await sb
+            .from('balance_history')
+            .update({ account_id: newAccountId })
+            .eq('user_id', userId)
+            .eq('account_id', oldId)
+            .in('ts', uniqueTs);
+          if (updErr) throw new Error(updErr.message);
+          rebound += uniqueTs.length;
+        }
+      }
+
+      res.status(200).json({ rebound, orphans });
 
     } else {
       res.status(405).json({ error: 'Method not allowed' });

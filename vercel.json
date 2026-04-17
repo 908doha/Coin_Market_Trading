@@ -5,8 +5,5 @@
   "framework": null,
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
-  ],
-  "crons": [
-    { "path": "/api/cron/positions", "schedule": "*/5 * * * *" }
   ]
 }

@@ -335,7 +335,7 @@ async function fetchGateBalance(apiKey: string, apiSecret: string): Promise<Bala
     }
   } catch {}
 
-  const totalUsdt  = spotTotalUsdt  + futuresTotalUsdt;
+  const totalUsdt  = spotTotalUsdt  + futuresTotalUsdt + futuresPnl;
   const availUsdt  = spotAvailUsdt  + futuresAvailUsdt;
   const investedUsdt = totalUsdt - availUsdt;
 

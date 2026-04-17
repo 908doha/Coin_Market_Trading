@@ -23,6 +23,7 @@ export {
   Skeleton, AssetCardSkeleton, PositionRowSkeleton, TradingListSkeleton, AccountSkeleton,
   TransactionListSkeleton, PositionDetailSkeleton, AgentSettingsSkeleton,
   TradeHistoryListSkeleton, TradeDetailSkeleton, BalanceCardsSkeleton, StatRowSkeleton,
+  AccountRowSkeleton,
 } from './components/Skeleton';
 
 // Types

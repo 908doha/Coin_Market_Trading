@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Svg, { Polyline, Defs, LinearGradient, Stop, Polygon, Path, Rect, Text as SvgText, Line, Circle } from 'react-native-svg';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
-import { Text, GlassCard, PressableScale, FadeTabView, AssetCardSkeleton, PositionRowSkeleton, StatRowSkeleton, PageHeader, CurrencyToggle, AnimatedNumber } from '@/design-system';
+import { Text, GlassCard, PressableScale, FadeTabView, AssetCardSkeleton, PositionRowSkeleton, StatRowSkeleton, PageHeader, CurrencyToggle, AnimatedNumber, Skeleton } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { accountService, tradesService } from '@/services';
 import type { Trade } from '@/services';
@@ -796,8 +796,10 @@ function AccountRow({
               color={colors.text.primary}
               letterSpacing={-0.3}
             />
+          ) : error ? (
+            <Text style={accRow.amount} numberOfLines={1}>조회 실패</Text>
           ) : (
-            <Text style={accRow.amount} numberOfLines={1}>{error ? '조회 실패' : '—'}</Text>
+            <Skeleton width={100} height={18} radius={6} />
           )}
           <Text style={accRow.name} numberOfLines={1}>
             {account.name || label} · {label}
@@ -807,7 +809,7 @@ function AccountRow({
           )}
         </View>
 
-        {balance && (
+        {balance ? (
           <View style={accRow.pnlCol}>
             <AnimatedNumber
               value={pnlValue}
@@ -825,7 +827,12 @@ function AccountRow({
               style={{ marginTop: 2 }}
             />
           </View>
-        )}
+        ) : !error ? (
+          <View style={accRow.pnlCol}>
+            <Skeleton width={72} height={14} radius={6} />
+            <Skeleton width={48} height={13} radius={5} style={{ marginTop: 4 }} />
+          </View>
+        ) : null}
       </View>
     </PressableScale>
   );
@@ -886,12 +893,17 @@ export default function Home() {
         <PageHeader
           title={
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Svg width={28} height={28} viewBox="0 0 24 24">
-                {/* 새 실루엣 — 날개 펼친 형태 */}
+              <Svg width={28} height={28} viewBox="0 0 100 100">
+                <Circle cx="50" cy="50" r="50" fill="#191919" />
                 <Path
-                  d="M12 3C10.5 3 9.2 3.8 8.5 5L3 8l3 1-2 2 4-1-1 3 3-2v4l2-3 2 3v-4l3 2-1-3 4 1-2-2 3-1-5.5-3C13.8 3.8 12.5 3 12 3z"
+                  d="M46 20 A30 30 0 1 0 46 80 A30 30 0 1 0 46 20 Z"
+                  fill="#FFFFFF"
+                />
+                <Path
+                  d="M46 50 L80 32 L80 68 Z"
                   fill="#191919"
                 />
+                <Circle cx="52" cy="38" r="4" fill="#191919" />
               </Svg>
               <Text style={{ fontSize: 22, fontWeight: '700', color: '#191919' }}>Osprey</Text>
             </View>
@@ -1075,11 +1087,12 @@ export default function Home() {
                         const up = pos.profit >= 0;
                         const pnlColor = up ? colors.market.rise : colors.market.fall;
                         return (
-                          <Pressable
+                          <PressableScale
                             key={pos.id}
-                            style={({ pressed }) => [styles.posRow, idx < group.items.length - 1 && styles.posRowBorder, pressed && { backgroundColor: '#F8F8F8' }]}
                             onPress={() => router.push(`/positions/${pos.id}`)}
+                            scaleTo={0.98}
                           >
+                          <View style={[styles.posRow, idx < group.items.length - 1 && styles.posRowBorder]}>
                             <View style={[styles.posIcon, { backgroundColor: up ? colors.market.riseSubtle : colors.market.fallSubtle }]}>
                               <Text style={[styles.posIconText, { color: pnlColor }]}>{pos.coin?.slice(0, 2) ?? '--'}</Text>
                             </View>
@@ -1098,7 +1111,8 @@ export default function Home() {
                               <AnimatedNumber value={pos.profit} formatter={formatKRWSigned} fontSize={15} fontWeight="700" color={pnlColor} />
                               <AnimatedNumber value={pos.profitRate} formatter={formatRate} fontSize={13} fontWeight="600" color={pnlColor} style={{ marginTop: 2 }} />
                             </View>
-                          </Pressable>
+                          </View>
+                          </PressableScale>
                         );
                       })}
                     </View>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { forwardRef, useState } from 'react';
 import {
   TextInput,
   TextInputProps,
@@ -29,7 +29,7 @@ const sizeConfig: Record<InputSize, { height: number; fontSize: number; paddingH
   lg: { height: 56, fontSize: textStyles.body1.fontSize,  paddingH: spacing[4] },
 };
 
-export function Input({
+export const Input = forwardRef<TextInput, InputProps>(function Input({
   label,
   hint,
   error,
@@ -39,7 +39,7 @@ export function Input({
   rightElement,
   disabled = false,
   ...props
-}: InputProps) {
+}, ref) {
   const [focused, setFocused] = useState(false);
   const sc = sizeConfig[size];
 
@@ -81,6 +81,7 @@ export function Input({
         {leftIcon && <View style={styles.leftIcon}>{leftIcon}</View>}
 
         <TextInput
+          ref={ref}
           style={[
             styles.input,
             {
@@ -115,7 +116,7 @@ export function Input({
       )}
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   wrapper: {

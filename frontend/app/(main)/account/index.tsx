@@ -3,7 +3,7 @@ import { View, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Svg, { Path } from 'react-native-svg';
-import { Text, FadeTabView } from '@/design-system';
+import { Text, FadeTabView, PressableScale } from '@/design-system';
 import { useAuth } from '@/store/auth';
 
 export default function Account() {
@@ -33,38 +33,32 @@ export default function Account() {
 
           {/* ── 메뉴 ── */}
           <View style={st.menuSection}>
-            <Pressable
-              style={({ pressed }) => [st.menuRow, pressed && { backgroundColor: '#F8F8F8' }]}
-              onPress={() => router.push('/(main)/account/api-accounts')}
-            >
-              <Text style={st.menuText}>계좌 연결</Text>
-              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                <Path d="M9 18l6-6-6-6" stroke="#C4C4C4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </Svg>
-            </Pressable>
+            <PressableScale onPress={() => router.push('/(main)/account/api-accounts')} scaleTo={0.98}>
+              <View style={st.menuRow}>
+                <Text style={st.menuText}>계좌 연결</Text>
+                <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                  <Path d="M9 18l6-6-6-6" stroke="#C4C4C4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </Svg>
+              </View>
+            </PressableScale>
             <View style={st.menuDivider} />
-            <Pressable
-              style={({ pressed }) => [st.menuRow, pressed && { backgroundColor: '#F8F8F8' }]}
-              onPress={() => router.push('/(main)/account/notifications')}
-            >
-              <Text style={st.menuText}>알림 설정</Text>
-              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                <Path d="M9 18l6-6-6-6" stroke="#C4C4C4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </Svg>
-            </Pressable>
+            <PressableScale onPress={() => router.push('/(main)/account/notifications')} scaleTo={0.98}>
+              <View style={st.menuRow}>
+                <Text style={st.menuText}>알림 설정</Text>
+                <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                  <Path d="M9 18l6-6-6-6" stroke="#C4C4C4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </Svg>
+              </View>
+            </PressableScale>
           </View>
 
           {/* ── 로그아웃 ── */}
           <View style={[st.menuSection, { marginTop: 8, borderTopWidth: 8, borderTopColor: '#F5F5F5' }]}>
-            <Pressable
-              style={({ pressed }) => [st.menuRow, pressed && { backgroundColor: '#FFF5F5' }]}
-              onPress={async () => {
-                await logout();
-                router.replace('/(auth)/login');
-              }}
-            >
-              <Text style={[st.menuText, { color: '#FF4747' }]}>로그아웃</Text>
-            </Pressable>
+            <PressableScale onPress={async () => { await logout(); router.replace('/(auth)/login'); }} scaleTo={0.98}>
+              <View style={st.menuRow}>
+                <Text style={[st.menuText, { color: '#FF4747' }]}>로그아웃</Text>
+              </View>
+            </PressableScale>
           </View>
 
           <View style={{ height: 120 }} />

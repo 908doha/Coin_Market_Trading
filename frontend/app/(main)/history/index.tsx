@@ -8,7 +8,7 @@ import Animated, {
   useSharedValue, useAnimatedStyle, withTiming, withSpring, Easing, runOnJS,
 } from 'react-native-reanimated';
 import Svg, { Path, Circle, Rect, Polygon, Text as SvgText } from 'react-native-svg';
-import { Text, CurrencyToggle, TradeHistoryListSkeleton } from '@/design-system';
+import { Text, CurrencyToggle, TradeHistoryListSkeleton, PressableScale } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
@@ -382,10 +382,8 @@ function TradeRow({
 
   return (
     <AnimatedRow index={globalIndex}>
-      <Pressable
-        style={({ pressed }) => [tr.wrap, !isLast && tr.border, pressed && { backgroundColor: '#F8F8F8' }]}
-        onPress={() => router.push(`/(main)/history/${trade.id}`)}
-      >
+      <PressableScale onPress={() => router.push(`/(main)/history/${trade.id}`)} scaleTo={0.98}>
+        <View style={[tr.wrap, !isLast && tr.border]}>
         <Text style={tr.date}>{showDate ? fmtDate(trade.exitAt) : ''}</Text>
         <View style={tr.middle}>
           <View style={tr.symbolRow}>
@@ -403,7 +401,8 @@ function TradeRow({
             <Text style={[tr.rate, { color }]}>{formatRate(trade.profitRate)}</Text>
           </View>
         )}
-      </Pressable>
+        </View>
+      </PressableScale>
     </AnimatedRow>
   );
 }

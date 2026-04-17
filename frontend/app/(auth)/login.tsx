@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -7,6 +7,7 @@ import {
   ScrollView,
   Pressable,
   Alert,
+  TextInput,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Text, Button, Input } from '@/design-system';
@@ -20,6 +21,7 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState('');
+  const passwordRef = useRef<TextInput>(null);
 
   const handleLogin = async () => {
     if (!email || !password) { setError('이메일과 비밀번호를 입력해주세요.'); return; }
@@ -61,9 +63,13 @@ export default function Login() {
             autoCorrect={false}
             value={email}
             onChangeText={(v) => { setEmail(v); setError(''); }}
+            returnKeyType="next"
+            onSubmitEditing={() => passwordRef.current?.focus()}
+            blurOnSubmit={false}
           />
           <View style={{ marginTop: spacing[4] }}>
             <Input
+              ref={passwordRef}
               label="비밀번호"
               placeholder="비밀번호 입력"
               secureTextEntry

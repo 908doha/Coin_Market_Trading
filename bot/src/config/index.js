@@ -92,6 +92,7 @@ const config = {
     structureShiftBars: 5,
     fvgCeThreshold: 0.0015,    // FVG CE 진입 허용 오차 (0.15%)
     iofedMinBars: 3,           // IOFED 최소 연속 봉 수
+    htfPoiTolerance: 0.003,    // HTF OB/FVG 근접 허용 오차 (activeOBs/FVGs 판정, ±0.3%)
   },
 };
 

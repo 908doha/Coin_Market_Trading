@@ -91,18 +91,18 @@ const indicators = {
     //            + 이후 recentLow 종가로 깨지지 않음 (구조 intact)
     if (recentLow.index > recentHigh.index) {
       const prevHigh = swingHighs[swingHighs.length - 1];
-      let broke = false;
+      let breakIndex = -1;
       for (let k = recentLow.index + 1; k < candles.length; k++) {
-        if (candles[k].close > prevHigh.price) { broke = true; break; }
+        if (candles[k].close > prevHigh.price) { breakIndex = k; break; }
       }
-      if (broke) {
+      if (breakIndex >= 0) {
         let lowIntact = true;
         for (let k = recentLow.index + 1; k < candles.length; k++) {
           if (candles[k].close < recentLow.price) { lowIntact = false; break; }
         }
         if (lowIntact) {
           const kind = priorTrend === 'bearish' ? 'CHoCH' : 'BOS';
-          return { direction: 'bullish', kind, label: `${kind} bullish` };
+          return { direction: 'bullish', kind, label: `${kind} bullish`, breakIndex };
         }
       }
     }
@@ -111,18 +111,18 @@ const indicators = {
     //            + 이후 recentHigh 종가로 깨지지 않음
     if (recentHigh.index > recentLow.index) {
       const prevLow = swingLows[swingLows.length - 1];
-      let broke = false;
+      let breakIndex = -1;
       for (let k = recentHigh.index + 1; k < candles.length; k++) {
-        if (candles[k].close < prevLow.price) { broke = true; break; }
+        if (candles[k].close < prevLow.price) { breakIndex = k; break; }
       }
-      if (broke) {
+      if (breakIndex >= 0) {
         let highIntact = true;
         for (let k = recentHigh.index + 1; k < candles.length; k++) {
           if (candles[k].close > recentHigh.price) { highIntact = false; break; }
         }
         if (highIntact) {
           const kind = priorTrend === 'bullish' ? 'CHoCH' : 'BOS';
-          return { direction: 'bearish', kind, label: `${kind} bearish` };
+          return { direction: 'bearish', kind, label: `${kind} bearish`, breakIndex };
         }
       }
     }

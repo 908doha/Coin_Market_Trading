@@ -168,30 +168,52 @@ class IctStrategy {
     let direction = null;
     let reason = '';
 
-    if (higherHigh && higherLow) {
+    // MSS 를 먼저 조회 — CHoCH (reversal) 는 HH/HL 보다 우선 (fresh 신호가 stale 구조 덮음).
+    const mss = indicators.detectMarketStructureShift(candles, swingHighs, swingLows);
+    const mssAge = mss ? candles.length - mss.breakIndex - 1 : null;
+
+    if (mss && mss.kind === 'CHoCH') {
+      direction = mss.direction;
+      reason = `HTF ${mss.label} (${mssAge}봉 전 돌파)`;
+    } else if (higherHigh && higherLow) {
       direction = 'bullish';
       reason = 'HH + HL';
     } else if (lowerHigh && lowerLow) {
       direction = 'bearish';
       reason = 'LH + LL';
-    } else {
-      const mss = indicators.detectMarketStructureShift(candles, swingHighs, swingLows);
-      if (mss) {
-        direction = mss.direction;
-        reason = `HTF ${mss.label}`;
+    } else if (mss) {
+      // BOS continuation — HH/HL 미충족 시 폴백
+      direction = mss.direction;
+      reason = `HTF ${mss.label} (${mssAge}봉 전 돌파)`;
+    }
+
+    // PDH/PDL sweep 폴백
+    //   양방향 sweep = range expansion failure → direction null 유지 (ICT: wait for directional break).
+    //   단방향 sweep 은 반전 신호로 direction 설정.
+    if (!direction && pdhl) {
+      if (pdhl.pdlSweep && pdhl.pdhSweep) {
+        reason = 'PDH+PDL 양방향 sweep (range)';
+      } else if (pdhl.pdlSweep) {
+        direction = 'bullish'; reason = 'PDL Sweep 반전';
+      } else if (pdhl.pdhSweep) {
+        direction = 'bearish'; reason = 'PDH Sweep 반전';
       }
     }
 
-    // PDH/PDL sweep으로 방향 보강
-    //   동일 캔들이 PDH/PDL 둘 다 스윕한 변동성 장에서는 먼저 평가한 쪽을 유지.
-    //   (else if 로 변경 — 과거엔 두 조건이 모두 true 일 때 bearish 로 덮였음)
-    if (!direction && pdhl) {
-      if (pdhl.pdlSweep) { direction = 'bullish'; reason = 'PDL Sweep 반전'; }
-      else if (pdhl.pdhSweep) { direction = 'bearish'; reason = 'PDH Sweep 반전'; }
+    // EQH/EQL swing sweep 폴백 — 1-A-1 이후 EQH 가 swing 으로 감지되므로
+    //   비-PDH 레벨에서 BSL/SSL sweep 이 발생한 경우도 direction 결정에 활용.
+    //   index 기준 가장 최근 sweep 채택 (배열 순서 보장 없음 — reduce 로 명시).
+    if (!direction) {
+      const sweeps = indicators.detectLiquiditySweep(candles, swingHighs, swingLows);
+      if (sweeps.length > 0) {
+        const latest = sweeps.reduce((a, b) => (a.index > b.index ? a : b));
+        direction = latest.type;
+        reason = `HTF ${latest.label}`;
+      }
     }
 
     // ===== HTF POI 탐색 (OB + FVG) =====
-    const htfPoiTolerance = 0.003; // ±0.3%
+    const htfPoiTolerance = config.ict.htfPoiTolerance;
     const orderBlocks = indicators.findOrderBlocks(candles);
     const fvgs = indicators.findFairValueGaps(candles);
 
@@ -203,15 +225,16 @@ class IctStrategy {
     if (direction) {
       const rawOBs = direction === 'bullish' ? orderBlocks.bullish : orderBlocks.bearish;
       relevantOBs = rawOBs.filter((ob) => {
-        if (direction === 'bullish') return ob.high < currentPrice; // 지지 (아래)
-        return ob.low > currentPrice;                                // 저항 (위)
+        // 내부 진입 / 접촉 반등 포함. broken OB 는 indicators 1-A-3 at-source 필터로 배제됨.
+        if (direction === 'bullish') return ob.low <= currentPrice;  // OB 가 현재가 이하 (내부 포함)
+        return ob.high >= currentPrice;                                // OB 가 현재가 이상 (내부 포함)
       });
 
       const rawFVGs = direction === 'bullish' ? fvgs.bullish : fvgs.bearish;
       relevantFVGs = rawFVGs.filter((f) => {
         if (f.isFilled) return false;
-        if (direction === 'bullish') return f.top <= currentPrice;
-        return f.bottom >= currentPrice;
+        if (direction === 'bullish') return f.bottom <= currentPrice; // FVG 하단이 현재가 이하 (내부 포함)
+        return f.top >= currentPrice;                                  // FVG 상단이 현재가 이상 (내부 포함)
       });
 
       // 현재가가 POI 내부 또는 ±0.3% 근접한 것 = "진입 중"
@@ -290,7 +313,8 @@ class IctStrategy {
     const mssAligned = mss && mss.direction === htfDirection;
 
     if (mssAligned) {
-      confluence.push(`MTF(${config.timeframes.mtf}) ${mss.label}`);
+      const age = candles.length - mss.breakIndex - 1;
+      confluence.push(`MTF(${config.timeframes.mtf}) ${mss.label} (${age}봉 전)`);
     }
 
     // Order Block - 위치 검증
@@ -478,7 +502,8 @@ class IctStrategy {
     // LTF MSS 추가 컨플루언스 (BOS/CHoCH 라벨링)
     const ltfMss = indicators.detectMarketStructureShift(candles, swingHighs, swingLows);
     if (ltfMss && ltfMss.direction === htfDirection) {
-      confluence.push(`LTF ${ltfMss.label}`);
+      const age = candles.length - ltfMss.breakIndex - 1;
+      confluence.push(`LTF ${ltfMss.label} (${age}봉 전)`);
     }
 
     return {

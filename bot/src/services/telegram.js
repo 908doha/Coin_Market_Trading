@@ -128,7 +128,7 @@ class TelegramService {
           }
         }
 
-        await this._sendSafe(chatId, lines.join('\n'));
+        await this.send(lines.join('\n'));
       } catch (err) {
         logger.error(`/status 핸들러 오류: ${err.message}`);
       }
@@ -143,7 +143,7 @@ class TelegramService {
           const active = this.tradingBot.activePositions.has(p);
           lines.push(`${active ? '🟢' : '⚪'} ${this._displayName(p)}`);
         }
-        await this._sendSafe(chatId, lines.join('\n'));
+        await this.send(lines.join('\n'));
       } catch (err) {
         logger.error(`/pairs 핸들러 오류: ${err.message}`);
       }
@@ -281,7 +281,7 @@ class TelegramService {
           );
         }
 
-        await this._sendSafe(chatId, lines.join('\n'));
+        await this.send(lines.join('\n'));
       } catch (err) {
         logger.error(`/pnl 핸들러 오류: ${err.message}`);
       }
@@ -339,7 +339,7 @@ class TelegramService {
       if (!auth(msg)) return;
       try {
         this.tradingBot.isRunning = false;
-        await this._sendSafe(chatId, '🔴 봇 정지됨 (포지션은 유지됨)');
+        await this.send('🔴 봇 정지됨 (포지션은 유지됨)');
       } catch (err) {
         logger.error(`/stop 핸들러 오류: ${err.message}`);
       }
@@ -350,7 +350,7 @@ class TelegramService {
       if (!auth(msg)) return;
       try {
         this.tradingBot.isRunning = true;
-        await this._sendSafe(chatId, '🟢 봇 재개됨');
+        await this.send('🟢 봇 재개됨');
       } catch (err) {
         logger.error(`/start 핸들러 오류: ${err.message}`);
       }
@@ -397,7 +397,7 @@ class TelegramService {
     this.bot.onText(/^\/help/, async (msg) => {
       if (!auth(msg)) return;
       try {
-        await this._sendSafe(chatId, [
+        await this.send([
           `━━━ 명령어 목록 ━━━`,
           `/status            - 봇 상태 + 활성 포지션`,
           `/pairs             - 거래 페어 목록`,
@@ -622,31 +622,6 @@ class TelegramService {
         return; // 성공
       } catch (err) {
         // 400 Bad Request (메시지 형식/길이 오류)는 재시도해도 실패하므로 즉시 abort
-        const status = err && err.response && err.response.statusCode;
-        if (status === 400 || status === 403) {
-          logger.error(`텔레그램 전송 중단 (${status}, 재시도 불가): ${err.message}`);
-          return;
-        }
-        if (attempt === 2) {
-          logger.error(`텔레그램 전송 실패 (3회 시도): ${err.message}`);
-        }
-      }
-    }
-  }
-
-  /**
-   * 특정 채팅에 메시지 전송 (핸들러용, 재시도 + 400 abort 내장)
-   * this.send()와 달리 chatId를 파라미터로 받아 _registerCommands() 내부에서 사용.
-   */
-  async _sendSafe(chatId, message) {
-    if (!this.bot) return;
-    const delays = [0, 1000, 3000];
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        if (delays[attempt] > 0) await new Promise((r) => setTimeout(r, delays[attempt]));
-        await this.bot.sendMessage(chatId, message);
-        return;
-      } catch (err) {
         const status = err && err.response && err.response.statusCode;
         if (status === 400 || status === 403) {
           logger.error(`텔레그램 전송 중단 (${status}, 재시도 불가): ${err.message}`);

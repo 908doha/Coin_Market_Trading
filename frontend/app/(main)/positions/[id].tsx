@@ -1,6 +1,5 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useLocalSearchParams } from 'expo-router';
-import { router } from 'expo-router';
 import { PositionDetailSkeleton, AnimatedNumber } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { positionsService } from '@/services';
@@ -29,15 +28,7 @@ const fmt$ = (v: number) =>
   `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export default function PositionDetail() {
-  const { id, from } = useLocalSearchParams<{ id: string; from?: string }>();
-
-  const handleBack = useCallback(() => {
-    if (from === 'home') {
-      router.navigate('/(main)/home');
-    } else {
-      router.back();
-    }
-  }, [from]);
+  const { id } = useLocalSearchParams<{ id: string }>();
   const { data: cachedPosition, isLoading, error } = useApi(
     () => positionsService.getById(id),
     [id],
@@ -124,7 +115,6 @@ export default function PositionDetail() {
   return (
     <PositionDetailView
       title="포지션 상세"
-      onBack={handleBack}
       showUsd={showUsd}
       onToggleUsd={() => setShowUsd(v => !v)}
       rate={rate}

@@ -204,7 +204,7 @@ async function fetchGatePositions(apiKey: string, apiSecret: string): Promise<Po
       const finalSl = posLvlSl ?? fromOrders.sl;
 
       return {
-        id:           p.contract + '_' + (p.update_time || Date.now()),
+        id:           p.contract + '_' + (p.open_time || p.update_time || Date.now()),
         symbol:       contract.replace('_', '/'),
         coin,
         direction:    isLong ? 'Long' : 'Short',

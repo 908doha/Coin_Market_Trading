@@ -3,7 +3,7 @@ import { View, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import Svg, { Path, Polygon, Text as SvgText } from 'react-native-svg';
-import { Text, SubPageHeader, ScreenTransition } from '@/design-system';
+import { Text, SubPageHeader, ScreenTransition, PressableScale } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType } from '@/store/accounts';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
@@ -59,16 +59,15 @@ function ExchangeLogo({ exchange, size = 52 }: { exchange: ExchangeType; size?: 
 // ── 네비게이션 버튼 ───────────────────────────────────────────────────────────
 function NavButton({ label, icon, onPress }: { label: string; icon: React.ReactNode; onPress: () => void }) {
   return (
-    <Pressable
-      style={({ pressed }) => [nb.wrap, pressed && { backgroundColor: '#F2F2F2' }]}
-      onPress={onPress}
-    >
-      <View style={nb.iconWrap}>{icon}</View>
-      <Text style={nb.label}>{label}</Text>
-      <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-        <Path d="M9 18l6-6-6-6" stroke={colors.text.tertiary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      </Svg>
-    </Pressable>
+    <PressableScale onPress={onPress} scaleTo={0.98}>
+      <View style={nb.wrap}>
+        <View style={nb.iconWrap}>{icon}</View>
+        <Text style={nb.label}>{label}</Text>
+        <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+          <Path d="M9 18l6-6-6-6" stroke={colors.text.tertiary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </Svg>
+      </View>
+    </PressableScale>
   );
 }
 const nb = StyleSheet.create({

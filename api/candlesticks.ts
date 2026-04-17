@@ -18,6 +18,8 @@ function setCors(res: any) {
   res.setHeader('Access-Control-Allow-Origin',  '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  // 빈 응답이 디스크 캐시에 박히면 fallback 로직이 무의미해지므로 캐시 금지
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
 }
 
 function pickInterval(fromSec: number, toSec: number): string {

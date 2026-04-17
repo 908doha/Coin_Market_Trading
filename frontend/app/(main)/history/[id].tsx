@@ -57,7 +57,7 @@ export default function TradeDetail() {
     const to   = trade.exitAt  ? Math.floor(Date.parse(trade.exitAt)  / 1000) : 0;
     if (!from) return;
     const toParam = to > 0 ? `&to=${to}` : '';
-    fetch(`/api/candlesticks?contract=${contract}&from=${from}${toParam}`)
+    fetch(`/api/candlesticks?contract=${contract}&from=${from}${toParam}&_=${Date.now()}`)
       .then((r) => (r.ok ? r.json() : []))
       .then((pts: PricePoint[]) => { if (pts.length) setPricePoints(pts); })
       .catch(() => {});

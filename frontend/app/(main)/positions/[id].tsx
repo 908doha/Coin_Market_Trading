@@ -83,7 +83,7 @@ export default function PositionDetail() {
     // entryAt 파싱 실패 시 최근 1시간 캔들로 fallback
     const from = entryTs || Math.floor(Date.now() / 1000) - 3600;
 
-    fetch(`/api/candlesticks?contract=${contract}&from=${from}`)
+    fetch(`/api/candlesticks?contract=${contract}&from=${from}&_=${Date.now()}`)
       .then((r) => (r.ok ? r.json() : []))
       .then((pts: PricePoint[]) => {
         if (Array.isArray(pts) && pts.length) setPricePoints(pts);

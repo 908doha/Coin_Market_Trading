@@ -4,20 +4,22 @@
  */
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
-  View, StyleSheet, ScrollView, Pressable, LayoutAnimation, Platform, UIManager,
+  View, StyleSheet, ScrollView, Pressable, Modal, LayoutAnimation, Platform, UIManager,
   TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import Svg, { Path, Rect } from 'react-native-svg';
+import Animated, {
+  useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS,
+} from 'react-native-reanimated';
+import Svg, { Path, Polygon, Rect, Text as SvgText, Circle } from 'react-native-svg';
 import { Text, FadeTabView, AnimatedNumber, Skeleton, PressableScale } from '@/design-system';
 import { colors } from '@/design-system/tokens';
-import { useAccounts, EXCHANGE_LABELS } from '@/store/accounts';
-import { ExchangeLogo } from '@/components/ExchangeLogo';
-import { AccountBottomSheet } from '@/components/AccountBottomSheet';
+import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType, ExchangeAccount } from '@/store/accounts';
 import { tradesService } from '@/services';
 import type { Trade } from '@/services/trades.service';
 import { formatKRW } from '@/utils/format';
+import type { Balance } from '@/services/account.service';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -57,6 +59,197 @@ interface Ticker {
   volume24hUsd: number;
   fundingRate:  number;
 }
+
+// ─── 거래소 로고 ──────────────────────────────────────────────────────────────
+
+function ExchangeLogo({ exchange, size = 40 }: { exchange: ExchangeType; size?: number }) {
+  const s = size;
+  const color = EXCHANGE_COLORS[exchange];
+  if (exchange === 'gate') {
+    return (
+      <View style={{ width: s, height: s, borderRadius: s / 2, backgroundColor: '#2354E6', alignItems: 'center', justifyContent: 'center' }}>
+        <Svg width={s} height={s} viewBox="0 0 48 48">
+          <Path d="M36 22 L24 22 L24 27 L31 27 Q30 33 24 33 Q17 33 17 24 Q17 15 24 15 Q29 15 31 19 L37 17 Q33 9 24 9 Q13 9 13 24 Q13 39 24 39 Q35 39 36 28 Z" fill="white" />
+        </Svg>
+      </View>
+    );
+  }
+  if (exchange === 'binance') {
+    return (
+      <View style={{ width: s, height: s, borderRadius: s / 2, backgroundColor: '#F0B90B', alignItems: 'center', justifyContent: 'center' }}>
+        <Svg width={s} height={s} viewBox="0 0 48 48">
+          <Polygon points="24,18 30,24 24,30 18,24" fill="white" />
+          <Polygon points="24,7 28,11 24,15 20,11" fill="white" />
+          <Polygon points="24,33 28,37 24,41 20,37" fill="white" />
+          <Polygon points="7,24 11,20 15,24 11,28" fill="white" />
+          <Polygon points="41,24 37,20 33,24 37,28" fill="white" />
+        </Svg>
+      </View>
+    );
+  }
+  if (exchange === 'upbit') {
+    return (
+      <View style={{ width: s, height: s, borderRadius: s / 2, backgroundColor: '#0062FF', alignItems: 'center', justifyContent: 'center' }}>
+        <Svg width={s} height={s} viewBox="0 0 48 48">
+          <Path d="M15 12 L15 30 Q15 38 24 38 Q33 38 33 30 L33 12" stroke="white" strokeWidth="5" fill="none" strokeLinecap="round" />
+        </Svg>
+      </View>
+    );
+  }
+  return (
+    <View style={{ width: s, height: s, borderRadius: s / 2, backgroundColor: color + '25', alignItems: 'center', justifyContent: 'center' }}>
+      <Svg width={s} height={s} viewBox="0 0 48 48">
+        <SvgText x="24" y="30" textAnchor="middle" fontSize="14" fontWeight="800" fill={color}>
+          {EXCHANGE_LABELS[exchange].slice(0, 2).toUpperCase()}
+        </SvgText>
+      </Svg>
+    </View>
+  );
+}
+
+// ─── 계좌 선택 바텀시트 ───────────────────────────────────────────────────────
+
+function AccountBottomSheet({
+  visible, selectedId, onSelect, onClose,
+  accounts, balances, totalBalance,
+}: {
+  visible:      boolean;
+  selectedId:   string | null;
+  onSelect:     (id: string | null) => void;
+  onClose:      () => void;
+  accounts:     ExchangeAccount[];
+  balances:     Record<string, Balance | null>;
+  totalBalance: Balance | null;
+}) {
+  const translateY = useSharedValue(600);
+  const [mounted, setMounted] = React.useState(false);
+
+  React.useEffect(() => {
+    if (visible) {
+      setMounted(true);
+      translateY.value = withSpring(0, { damping: 28, stiffness: 300, mass: 0.9 });
+    } else {
+      translateY.value = withTiming(600, { duration: 260 }, () => runOnJS(setMounted)(false));
+    }
+  }, [visible]);
+
+  const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: translateY.value }] }));
+  if (!mounted) return null;
+
+  const totalKrw = totalBalance?.total ?? 0;
+
+  return (
+    <Modal visible transparent animationType="none" onRequestClose={onClose}>
+      <Pressable style={bs.overlay} onPress={onClose}>
+        <Animated.View style={[bs.sheet, sheetStyle]}>
+          <Pressable>
+            <View style={bs.handle} />
+            <View style={bs.header}>
+              <Text style={bs.title}>계좌 선택</Text>
+              <Pressable style={bs.closeBtn} onPress={onClose} hitSlop={12}>
+                <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+                  <Path d="M18 6L6 18M6 6l12 12" stroke="#AEAEB2" strokeWidth="2.2" strokeLinecap="round" />
+                </Svg>
+              </Pressable>
+            </View>
+            <View style={bs.sectionRow}>
+              <Text style={bs.sectionLabel}>내 계좌</Text>
+              <Pressable style={bs.totalRow} onPress={() => { onClose(); router.push('/(main)/account/api-accounts'); }}>
+                <Text style={bs.totalText}>총 자산 {formatKRW(totalKrw)}</Text>
+                <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
+                  <Path d="M9 18l6-6-6-6" stroke="#AEAEB2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </Svg>
+              </Pressable>
+            </View>
+            <Pressable
+              style={({ pressed }) => [bs.accRow, pressed && { backgroundColor: '#F8F8F8' }]}
+              onPress={() => { onSelect(null); onClose(); }}
+            >
+              <View style={bs.accIcon}>
+                <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+                  <Rect x="3" y="6" width="18" height="13" rx="2" stroke="#555" strokeWidth="1.8" />
+                  <Path d="M3 10h18" stroke="#555" strokeWidth="1.8" strokeLinecap="round" />
+                </Svg>
+              </View>
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={bs.accName}>모든 계좌</Text>
+                <Text style={bs.accBalance}>{formatKRW(totalKrw)}</Text>
+              </View>
+              {selectedId === null && (
+                <View style={bs.checkCircle}>
+                  <Svg width={22} height={22} viewBox="0 0 24 24">
+                    <Circle cx="12" cy="12" r="12" fill="#246CF9" />
+                    <Path d="M7 12.5l3.5 3.5 6.5-7" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                  </Svg>
+                </View>
+              )}
+            </Pressable>
+            {accounts.map((acc) => {
+              const bal = balances[acc.id];
+              const isSelected = selectedId === acc.id;
+              return (
+                <Pressable
+                  key={acc.id}
+                  style={({ pressed }) => [bs.accRow, pressed && { backgroundColor: '#F8F8F8' }]}
+                  onPress={() => { onSelect(acc.id); onClose(); }}
+                >
+                  <ExchangeLogo exchange={acc.exchange} size={40} />
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={bs.accName}>{acc.name || EXCHANGE_LABELS[acc.exchange]}</Text>
+                    <Text style={bs.accBalance}>{bal ? formatKRW(bal.total) : '—'}</Text>
+                  </View>
+                  {isSelected && (
+                    <View style={bs.checkCircle}>
+                      <Svg width={22} height={22} viewBox="0 0 24 24">
+                        <Circle cx="12" cy="12" r="12" fill="#246CF9" />
+                        <Path d="M7 12.5l3.5 3.5 6.5-7" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                      </Svg>
+                    </View>
+                  )}
+                </Pressable>
+              );
+            })}
+            <View style={bs.divider} />
+            <Pressable
+              style={({ pressed }) => [bs.addRow, pressed && { backgroundColor: '#F8F8F8' }]}
+              onPress={() => { onClose(); router.push('/(main)/account/add-api'); }}
+            >
+              <View style={bs.addIcon}>
+                <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+                  <Path d="M12 5v14M5 12h14" stroke="#555" strokeWidth="2.2" strokeLinecap="round" />
+                </Svg>
+              </View>
+              <Text style={bs.addText}>API 연결하기</Text>
+            </Pressable>
+            <View style={{ height: 32 }} />
+          </Pressable>
+        </Animated.View>
+      </Pressable>
+    </Modal>
+  );
+}
+
+const bs = StyleSheet.create({
+  overlay:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.40)', justifyContent: 'flex-end' },
+  sheet:        { backgroundColor: '#FFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 10 },
+  handle:       { width: 32, height: 4, borderRadius: 2, backgroundColor: '#E5E5EA', alignSelf: 'center', marginBottom: 12 },
+  header:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 20 },
+  title:        { fontSize: 20, fontWeight: '700', color: '#191919' },
+  closeBtn:     { padding: 4 },
+  sectionRow:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 8 },
+  sectionLabel: { fontSize: 13, color: colors.text.tertiary, fontWeight: '500' },
+  totalRow:     { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  totalText:    { fontSize: 13, color: colors.text.tertiary },
+  accRow:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14 },
+  accIcon:      { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F5F5F5', alignItems: 'center', justifyContent: 'center' },
+  accName:      { fontSize: 16, fontWeight: '600', color: '#191919', marginBottom: 3 },
+  accBalance:   { fontSize: 13, color: colors.text.tertiary },
+  checkCircle:  {},
+  divider:      { height: 1, backgroundColor: '#F2F2F2', marginVertical: 8, marginHorizontal: 20 },
+  addRow:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, gap: 12 },
+  addIcon:      { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F5F5F5', alignItems: 'center', justifyContent: 'center' },
+  addText:      { fontSize: 16, fontWeight: '500', color: '#555' },
+});
 
 function formatVol(usd: number): string {
   if (usd >= 1e9) return `$${(usd / 1e9).toFixed(1)}B`;

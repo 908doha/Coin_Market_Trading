@@ -4,6 +4,10 @@
   "outputDirectory": "frontend/dist",
   "framework": null,
   "rewrites": [
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/:path*",   "destination": "/index.html" }
+  ],
+  "crons": [
+    { "path": "/api/cron/positions", "schedule": "*/5 * * * *" }
   ]
 }

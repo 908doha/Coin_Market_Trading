@@ -344,52 +344,74 @@ const indicators = {
   // ========== PDH / PDL (Previous Day High / Low) ==========
 
   /**
-   * 전일 고가/저가 계산
-   * 캔들 타임스탬프 기준으로 전일 데이터 필터링
+   * NY timezone 의 "오늘 자정" 에 해당하는 UTC Date 반환.
+   * ICT 정통의 daily bias reset 시점. DST (EST UTC-5 / EDT UTC-4) 자동 판정.
+   *
+   * 구현: NY 로컬 날짜(YYYY-MM-DD)를 추출한 뒤 UTC 05:00 probe 로 EST/EDT 구분.
+   *   (clock-displayed elapsed 방식은 DST 전환일에 1시간 오차 발생 — 사용 금지.)
+   */
+  _nyMidnight(now) {
+    const dateParts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/New_York',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(now);
+    const y  = parseInt(dateParts.find((p) => p.type === 'year').value, 10);
+    const mo = parseInt(dateParts.find((p) => p.type === 'month').value, 10);
+    const d  = parseInt(dateParts.find((p) => p.type === 'day').value, 10);
+
+    // UTC 05:00 (EST midnight 후보) 에서 NY 시계가 00 이면 EST 기간, 01 이면 EDT 기간.
+    const probe = new Date(Date.UTC(y, mo - 1, d, 5, 0, 0));
+    const nyHour = parseInt(new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York', hour12: false, hour: '2-digit',
+    }).format(probe), 10) % 24;
+
+    return nyHour === 0
+      ? probe                                              // EST midnight = UTC 05:00
+      : new Date(Date.UTC(y, mo - 1, d, 4, 0, 0));         // EDT midnight = UTC 04:00
+  },
+
+  /**
+   * 전일 고가/저가 계산 (ICT 정통 NY midnight 기준)
+   * 캔들 타임스탬프 기준으로 전일/오늘 데이터 필터링.
    */
   calculatePDHL(candles) {
     const now = new Date();
-    const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const todayStart = this._nyMidnight(now);
     const yesterdayStart = new Date(todayStart.getTime() - 24 * 60 * 60 * 1000);
 
     let pdh = -Infinity;
     let pdl = Infinity;
-    let todayHigh = -Infinity;
-    let todayLow = Infinity;
     let hasPrevDay = false;
 
+    // 1차 패스: 전일 PDH/PDL 확정
     for (const c of candles) {
       const t = new Date(c.timestamp);
-
-      // 전일 캔들
       if (t >= yesterdayStart && t < todayStart) {
         if (c.high > pdh) pdh = c.high;
         if (c.low < pdl) pdl = c.low;
         hasPrevDay = true;
       }
-
-      // 오늘 캔들
-      if (t >= todayStart) {
-        if (c.high > todayHigh) todayHigh = c.high;
-        if (c.low < todayLow) todayLow = c.low;
-      }
     }
 
     if (!hasPrevDay) return null;
 
-    const currentPrice = candles[candles.length - 1].close;
+    // 2차 패스: 오늘 장중 어느 봉에서든 PDH/PDL wick 스윕 + 종가 복귀 여부
+    //   (마지막 봉 한정 검사로는 4h HTF 기준 몇 시간 전 sweep 을 놓침)
+    let pdhSweep = false;
+    let pdlSweep = false;
+    for (const c of candles) {
+      const t = new Date(c.timestamp);
+      if (t < todayStart) continue;
+      if (c.high > pdh && c.close < pdh) pdhSweep = true;
+      if (c.low  < pdl && c.close > pdl) pdlSweep = true;
+    }
 
     return {
       pdh,
       pdl,
-      todayHigh,
-      todayLow,
-      // 현재가가 PDH 위인지 아래인지
-      abovePDH: currentPrice > pdh,
-      belowPDL: currentPrice < pdl,
-      // PDH/PDL을 유동성 타겟으로 사용
-      pdhSweep: candles[candles.length - 1].high > pdh && currentPrice < pdh,
-      pdlSweep: candles[candles.length - 1].low < pdl && currentPrice > pdl,
+      // PDH/PDL 을 유동성 타겟으로 사용
+      pdhSweep,
+      pdlSweep,
     };
   },
 

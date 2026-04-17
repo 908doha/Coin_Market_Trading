@@ -239,29 +239,37 @@ const gateClient = {
   },
 
   /**
-   * 최근 거래 이력 조회 (실제 체결 PnL 확인용)
+   * 최근 청산 이력 조회 (실현 PnL 확인용)
    *
-   * Gate.io FuturesApi.getMyTrades(settle, { contract, limit })
-   * 각 trade 의 `pnl` 필드가 포지션 종료 시 실현손익이다 (진입 체결은 pnl=null).
+   * Gate.io FuturesApi.listPositionClose(settle, { contract, limit })
+   *   → PositionClose[] : { time, pnl, contract, side, textSize, accumSize,
+   *                          firstOpenTime, longPrice, shortPrice, text, maxSize }
+   *   pnl 필드가 해당 청산의 실현 손익 (USDT).
+   *   time 은 초 단위(epoch seconds) 숫자.
    *
-   * @returns {Array<{ id, orderId, size, price, time, pnl, text, role }>}
+   * 이전엔 getMyTrades 를 썼으나 FuturesMyTrade 에는 pnl 필드가 없어 실효성 없음.
+   *
+   * @returns {Array<{ time, pnl, contract, side, accumSize, firstOpenTime, text, maxSize }>}
    */
-  async getRecentTrades(contract, limit = 20) {
+  async getRecentClosedPositions(contract, limit = 20) {
     try {
-      const { body } = await futuresApi.getMyTrades(SETTLE, { contract, limit });
+      const { body } = await futuresApi.listPositionClose(SETTLE, { contract, limit });
       if (!Array.isArray(body)) return [];
-      return body.map((t) => ({
-        id:      t.id,
-        orderId: t.orderId != null ? t.orderId : t.order_id,
-        size:    Number(t.size),
-        price:   parseFloat(t.price),
-        time:    t.createTime != null ? t.createTime : (t.create_time != null ? t.create_time : t.time),
-        pnl:     t.pnl != null ? parseFloat(t.pnl) : null,
-        text:    t.text,
-        role:    t.role,
+      return body.map((p) => ({
+        time:          p.time != null ? Number(p.time) : null,
+        pnl:           p.pnl != null ? parseFloat(p.pnl) : null,
+        contract:      p.contract,
+        side:          p.side,
+        accumSize:     p.accumSize != null ? Number(p.accumSize)
+                       : (p.accum_size != null ? Number(p.accum_size) : null),
+        firstOpenTime: p.firstOpenTime != null ? Number(p.firstOpenTime)
+                       : (p.first_open_time != null ? Number(p.first_open_time) : null),
+        text:          p.text,
+        maxSize:       p.maxSize != null ? Number(p.maxSize)
+                       : (p.max_size != null ? Number(p.max_size) : null),
       }));
     } catch (err) {
-      logger.debug(`거래 이력 조회 실패 [${contract}]: ${err.message}`);
+      logger.debug(`청산 이력 조회 실패 [${contract}]: ${err.message}`);
       return [];
     }
   },

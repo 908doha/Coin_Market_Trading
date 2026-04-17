@@ -438,7 +438,7 @@ export function TpSlPathChart({
 
   return (
     <View>
-      <Svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}>
+      <Svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H}>
 
         {/* 구간 채우기 */}
         {tpY !== null && (

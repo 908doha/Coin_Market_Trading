@@ -256,10 +256,12 @@ class OrderManager {
    *          실패해도 봇 구동은 계속되며 수동 개입이 필요함을 로그로 경고.
    */
   async registerExistingPosition(pair, position) {
+    const prev = this.lastKnownPositions.get(pair);
     this.lastKnownPositions.set(pair, {
       size: position.size,
       entryPrice: position.entryPrice,
       unrealisedPnl: position.unrealisedPnl || 0,
+      firstSeenAt: prev && prev.firstSeenAt ? prev.firstSeenAt : Date.now(),
     });
 
     try {
@@ -504,10 +506,12 @@ class OrderManager {
     if (actualPosition && actualPosition.size !== 0) {
       actualSize = Math.abs(actualPosition.size);
       entryPriceActual = actualPosition.entryPrice || entry;
+      const prev = this.lastKnownPositions.get(contract);
       this.lastKnownPositions.set(contract, {
         size: actualPosition.size,
         entryPrice: actualPosition.entryPrice,
         unrealisedPnl: actualPosition.unrealisedPnl,
+        firstSeenAt: prev && prev.firstSeenAt ? prev.firstSeenAt : Date.now(),
       });
       logger.info(`[${contract}] [체결 확인] size=${actualPosition.size} entry=${actualPosition.entryPrice}`);
     } else {
@@ -515,10 +519,12 @@ class OrderManager {
       const orderFillPrice = order && (order.fillPrice || order.fill_price);
       actualSize = orderSize || size;
       entryPriceActual = orderFillPrice ? parseFloat(orderFillPrice) : entry;
+      const prev = this.lastKnownPositions.get(contract);
       this.lastKnownPositions.set(contract, {
         size: direction === 'long' ? actualSize : -actualSize,
         entryPrice: entryPriceActual,
         unrealisedPnl: 0,
+        firstSeenAt: prev && prev.firstSeenAt ? prev.firstSeenAt : Date.now(),
       });
       logger.warn(
         `[${contract}] [체결 확인 폴백] getPosition 실패 → 주문 응답 사용 (size=${actualSize}, entry=${entryPriceActual})`
@@ -577,10 +583,12 @@ class OrderManager {
     // 포지션 살아 있음 → 카운터 초기화
     if (position && position.size !== 0) {
       const currentPrice = position.markPrice;
+      const prev = this.lastKnownPositions.get(contract);
       this.lastKnownPositions.set(contract, {
         size: position.size,
         entryPrice: position.entryPrice,
         unrealisedPnl: position.unrealisedPnl,
+        firstSeenAt: prev && prev.firstSeenAt ? prev.firstSeenAt : Date.now(),
       });
       this.emptyReadCount.delete(contract);
       logger.debug(
@@ -609,10 +617,12 @@ class OrderManager {
     if (retryPosition && retryPosition.size !== 0) {
       // 재조회 성공 → 일시적 API 장애였음, 정상 복귀
       const currentPrice = retryPosition.markPrice;
+      const prev = this.lastKnownPositions.get(contract);
       this.lastKnownPositions.set(contract, {
         size: retryPosition.size,
         entryPrice: retryPosition.entryPrice,
         unrealisedPnl: retryPosition.unrealisedPnl,
+        firstSeenAt: prev && prev.firstSeenAt ? prev.firstSeenAt : Date.now(),
       });
       this.emptyReadCount.delete(contract);
       logger.info(`[${contract}] 포지션 재조회 성공 (2초 후) — 일시적 API 누락`);
@@ -656,17 +666,52 @@ class OrderManager {
       await gateClient.cancelAllTriggerOrders(contract);
     } catch {}
 
-    const pnl = this.lastKnownPositions.get(contract).unrealisedPnl || 0;
-    const action = pnl >= 0 ? 'tp_hit' : 'sl_hit';
-    const label = action === 'tp_hit' ? 'TP 익절' : 'SL 손절';
-    logger.info(`[${contract}] [${label}] 청산 확정 (${EMPTY_THRESHOLD}회 empty) | PnL: ${pnl.toFixed(2)} USDT`);
+    // 실제 실현 PnL 을 청산 이력 API 에서 조회.
+    //   과거엔 lastKnownPositions.unrealisedPnl (직전 폴링 당시 값) 의 부호로
+    //   tp_hit/sl_hit 를 분류했지만, 반등 중 SL hit 등 경계 사례에서 오분류가
+    //   발생해 Kelly 통계와 알림이 오염되었다. 이제는 listPositionClose 로 실제
+    //   실현 PnL 을 집계하고, action 은 'closed' 로 통합한다.
+    //
+    //   시간 필터: 포지션 최초 감지 시각(firstSeenAt) 이후에 발생한 청산만 집계.
+    //   EMPTY_THRESHOLD × cron 주기만큼 감지 지연이 생기므로 고정 60초 윈도우는
+    //   실제 청산 trade 를 놓친다. firstSeenAt 이 없으면 10분 윈도우로 폴백.
+    let pnl = 0;
+    let unknown = false;
+    const known = this.lastKnownPositions.get(contract);
+    const sinceMs = (known && known.firstSeenAt) ? known.firstSeenAt : (Date.now() - 600_000);
+    try {
+      const closes = await gateClient.getRecentClosedPositions(contract, 20);
+      let found = false;
+      for (const p of closes) {
+        // Gate.io time 은 초(epoch seconds). ms 로 변환.
+        const tMs = typeof p.time === 'number' ? p.time * 1000 : NaN;
+        if (!Number.isFinite(tMs) || tMs < sinceMs) continue;
+        if (p.pnl != null && Number.isFinite(p.pnl)) {
+          pnl += p.pnl;
+          found = true;
+        }
+      }
+      if (!found) {
+        unknown = true;
+        logger.warn(`[${contract}] 청산 이력에서 실현 PnL 미확인 — 'closed (unknown)' 처리 (sinceMs=${sinceMs})`);
+      }
+    } catch (err) {
+      unknown = true;
+      logger.error(`[${contract}] 청산 이력 조회 실패 — 'closed (unknown)' 처리: ${err.message}`);
+    }
 
-    this.dailyPnl += pnl;
-    this.recordTradeResult(contract, pnl);
+    const action = unknown ? 'closed (unknown)' : 'closed';
+    const pnlTag = unknown ? 'N/A' : `${pnl.toFixed(2)} USDT`;
+    logger.info(`[${contract}] [포지션 종료] ${action} (${EMPTY_THRESHOLD}회 empty) | PnL: ${pnlTag}`);
+
+    if (!unknown) {
+      this.dailyPnl += pnl;
+      this.recordTradeResult(contract, pnl);
+    }
     this.lastKnownPositions.delete(contract);
     this._clearPairState(contract);
 
-    return { action, price: 0, pnl };
+    return { action, price: 0, pnl: unknown ? 0 : pnl };
   }
 
   /**

@@ -183,9 +183,11 @@ class IctStrategy {
     }
 
     // PDH/PDL sweep으로 방향 보강
+    //   동일 캔들이 PDH/PDL 둘 다 스윕한 변동성 장에서는 먼저 평가한 쪽을 유지.
+    //   (else if 로 변경 — 과거엔 두 조건이 모두 true 일 때 bearish 로 덮였음)
     if (!direction && pdhl) {
       if (pdhl.pdlSweep) { direction = 'bullish'; reason = 'PDL Sweep 반전'; }
-      if (pdhl.pdhSweep) { direction = 'bearish'; reason = 'PDH Sweep 반전'; }
+      else if (pdhl.pdhSweep) { direction = 'bearish'; reason = 'PDH Sweep 반전'; }
     }
 
     // ===== HTF POI 탐색 (OB + FVG) =====
@@ -575,6 +577,16 @@ class IctStrategy {
     }
 
     const risk = Math.abs(price - sl);
+
+    // risk 가 0 이면 (SL이 진입가와 일치 — 부동소수점 오차나 slPct=0 설정 시)
+    // 후속 R:R 계산이 Infinity/NaN 이 되어 잘못된 TP 가 선택된다.
+    // 이 경우 고정 % 기반 SL/TP 로 즉시 반환한다.
+    if (risk <= 0) {
+      const fallbackSl = direction === 'bullish' ? price * (1 - slPct) : price * (1 + slPct);
+      const fallbackTp = direction === 'bullish' ? price * (1 + slPct * fallbackRR) : price * (1 - slPct * fallbackRR);
+      logger.warn(`[SL/TP] risk=0 감지 — 고정 % 폴백: SL=${fallbackSl.toFixed(2)} TP=${fallbackTp.toFixed(2)}`);
+      return { sl: fallbackSl, tp: fallbackTp, rr: fallbackRR, tpSource: 'risk=0 fallback' };
+    }
 
     // ===== TP 계산 (구조적 타겟 — ICT Liquidity Draw) =====
     // 가격은 다음 유동성 풀로 끌린다. TP = 가장 가까운 구조적 타겟.

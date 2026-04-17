@@ -39,6 +39,9 @@ const gateClient = {
   async getTicker(contract) {
     try {
       const { body } = await futuresApi.listFuturesTickers(SETTLE, { contract });
+      if (!Array.isArray(body) || body.length === 0 || !body[0]) {
+        throw new Error(`티커 응답 없음: ${contract}`);
+      }
       const ticker = body[0];
       return {
         last: parseFloat(ticker.last),
@@ -232,6 +235,42 @@ const gateClient = {
     } catch (err) {
       logger.error(`포지션 청산 실패: ${err.message}`);
       throw err;
+    }
+  },
+
+  /**
+   * 최근 청산 이력 조회 (실현 PnL 확인용)
+   *
+   * Gate.io FuturesApi.listPositionClose(settle, { contract, limit })
+   *   → PositionClose[] : { time, pnl, contract, side, textSize, accumSize,
+   *                          firstOpenTime, longPrice, shortPrice, text, maxSize }
+   *   pnl 필드가 해당 청산의 실현 손익 (USDT).
+   *   time 은 초 단위(epoch seconds) 숫자.
+   *
+   * 이전엔 getMyTrades 를 썼으나 FuturesMyTrade 에는 pnl 필드가 없어 실효성 없음.
+   *
+   * @returns {Array<{ time, pnl, contract, side, accumSize, firstOpenTime, text, maxSize }>}
+   */
+  async getRecentClosedPositions(contract, limit = 20) {
+    try {
+      const { body } = await futuresApi.listPositionClose(SETTLE, { contract, limit });
+      if (!Array.isArray(body)) return [];
+      return body.map((p) => ({
+        time:          p.time != null ? Number(p.time) : null,
+        pnl:           p.pnl != null ? parseFloat(p.pnl) : null,
+        contract:      p.contract,
+        side:          p.side,
+        accumSize:     p.accumSize != null ? Number(p.accumSize)
+                       : (p.accum_size != null ? Number(p.accum_size) : null),
+        firstOpenTime: p.firstOpenTime != null ? Number(p.firstOpenTime)
+                       : (p.first_open_time != null ? Number(p.first_open_time) : null),
+        text:          p.text,
+        maxSize:       p.maxSize != null ? Number(p.maxSize)
+                       : (p.max_size != null ? Number(p.max_size) : null),
+      }));
+    } catch (err) {
+      logger.debug(`청산 이력 조회 실패 [${contract}]: ${err.message}`);
+      return [];
     }
   },
 

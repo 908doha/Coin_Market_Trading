@@ -105,40 +105,48 @@ class TelegramService {
     // /status - 봇 상태
     this.bot.onText(/^\/status/, async (msg) => {
       if (!auth(msg)) return;
-      const running = this.tradingBot.isRunning ? '🟢 실행 중' : '🔴 정지됨';
-      const activePositions = this.tradingBot.activePositions;
+      try {
+        const running = this.tradingBot.isRunning ? '🟢 실행 중' : '🔴 정지됨';
+        const activePositions = this.tradingBot.activePositions;
 
-      const lines = [
-        `━━━ 봇 상태 ━━━`,
-        running,
-        `거래 페어: ${this.tradingBot.validPairs.map((p) => this._displayName(p)).join(', ')}`,
-        `레버리지: x${config.leverage}`,
-        `타임프레임: ${config.timeframes.htf}/${config.timeframes.mtf}/${config.timeframes.ltf}`,
-        `활성 포지션: ${activePositions.size}/${config.maxPositions}`,
-      ];
+        const lines = [
+          `━━━ 봇 상태 ━━━`,
+          running,
+          `거래 페어: ${this.tradingBot.validPairs.map((p) => this._displayName(p)).join(', ')}`,
+          `레버리지: x${config.leverage}`,
+          `타임프레임: ${config.timeframes.htf}/${config.timeframes.mtf}/${config.timeframes.ltf}`,
+          `활성 포지션: ${activePositions.size}/${config.maxPositions}`,
+        ];
 
-      if (activePositions.size > 0) {
-        for (const [pair, pos] of activePositions.entries()) {
-          const { sl, tp } = this._resolveSLTP(pair, pos);
-          const slTp = (sl != null && tp != null)
-            ? `SL: ${sl} / TP: ${tp}`
-            : '(수동 SL/TP 또는 미등록)';
-          lines.push(`  • [${this._displayName(pair)}] ${pos.direction.toUpperCase()} ${slTp}`);
+        if (activePositions.size > 0) {
+          for (const [pair, pos] of activePositions.entries()) {
+            const { sl, tp } = this._resolveSLTP(pair, pos);
+            const slTp = (sl != null && tp != null)
+              ? `SL: ${sl} / TP: ${tp}`
+              : '(수동 SL/TP 또는 미등록)';
+            lines.push(`  • [${this._displayName(pair)}] ${pos.direction.toUpperCase()} ${slTp}`);
+          }
         }
-      }
 
-      await this.bot.sendMessage(chatId, lines.join('\n'));
+        await this.send(lines.join('\n'));
+      } catch (err) {
+        logger.error(`/status 핸들러 오류: ${err.message}`);
+      }
     });
 
     // /pairs - 유효 페어 목록
     this.bot.onText(/^\/pairs/, async (msg) => {
       if (!auth(msg)) return;
-      const lines = [`━━━ 거래 페어 ━━━`];
-      for (const p of this.tradingBot.validPairs) {
-        const active = this.tradingBot.activePositions.has(p);
-        lines.push(`${active ? '🟢' : '⚪'} ${this._displayName(p)}`);
+      try {
+        const lines = [`━━━ 거래 페어 ━━━`];
+        for (const p of this.tradingBot.validPairs) {
+          const active = this.tradingBot.activePositions.has(p);
+          lines.push(`${active ? '🟢' : '⚪'} ${this._displayName(p)}`);
+        }
+        await this.send(lines.join('\n'));
+      } catch (err) {
+        logger.error(`/pairs 핸들러 오류: ${err.message}`);
       }
-      await this.bot.sendMessage(chatId, lines.join('\n'));
     });
 
     // /position - 포지션 (전체 요약 또는 특정 페어 상세)
@@ -249,30 +257,34 @@ class TelegramService {
     // /pnl
     this.bot.onText(/^\/pnl/, async (msg) => {
       if (!auth(msg)) return;
-      const om = this.tradingBot.orderManager;
-      const pnlEmoji = om.dailyPnl >= 0 ? '🟢' : '🔴';
-      const limitPct = ((Math.abs(om.dailyPnl) / config.maxDailyLossUsdt) * 100).toFixed(1);
+      try {
+        const om = this.tradingBot.orderManager;
+        const pnlEmoji = om.dailyPnl >= 0 ? '🟢' : '🔴';
+        const limitPct = ((Math.abs(om.dailyPnl) / config.maxDailyLossUsdt) * 100).toFixed(1);
 
-      const lines = [
-        `━━━ 오늘 손익 ━━━`,
-        `${pnlEmoji} 일일 PnL: ${om.dailyPnl.toFixed(2)} USDT`,
-        `📊 일일 손실 한도: ${config.maxDailyLossUsdt} USDT`,
-        `⚠️ 한도 사용: ${limitPct}%`,
-        ``,
-        `━━━ 페어별 Kelly 통계 ━━━`,
-      ];
+        const lines = [
+          `━━━ 오늘 손익 ━━━`,
+          `${pnlEmoji} 일일 PnL: ${om.dailyPnl.toFixed(2)} USDT`,
+          `📊 일일 손실 한도: ${config.maxDailyLossUsdt} USDT`,
+          `⚠️ 한도 사용: ${limitPct}%`,
+          ``,
+          `━━━ 페어별 Kelly 통계 ━━━`,
+        ];
 
-      for (const pair of this.tradingBot.validPairs) {
-        const s = om._getStats(pair);
-        const total = s.wins + s.losses;
-        const f = om.calculateKellyFraction(pair);
-        const winRate = total > 0 ? ((s.wins / total) * 100).toFixed(0) : '-';
-        lines.push(
-          `[${this._displayName(pair)}] W:${s.wins}/L:${s.losses} (승률 ${winRate}%) | f*=${(f * 100).toFixed(2)}%`
-        );
+        for (const pair of this.tradingBot.validPairs) {
+          const s = om._getStats(pair);
+          const total = s.wins + s.losses;
+          const f = om.calculateKellyFraction(pair);
+          const winRate = total > 0 ? ((s.wins / total) * 100).toFixed(0) : '-';
+          lines.push(
+            `[${this._displayName(pair)}] W:${s.wins}/L:${s.losses} (승률 ${winRate}%) | f*=${(f * 100).toFixed(2)}%`
+          );
+        }
+
+        await this.send(lines.join('\n'));
+      } catch (err) {
+        logger.error(`/pnl 핸들러 오류: ${err.message}`);
       }
-
-      await this.bot.sendMessage(chatId, lines.join('\n'));
     });
 
     // /close — 청산 (페어 필수, 또는 all)
@@ -325,15 +337,23 @@ class TelegramService {
     // /stop
     this.bot.onText(/^\/stop/, async (msg) => {
       if (!auth(msg)) return;
-      this.tradingBot.isRunning = false;
-      await this.bot.sendMessage(chatId, '🔴 봇 정지됨 (포지션은 유지됨)');
+      try {
+        this.tradingBot.isRunning = false;
+        await this.send('🔴 봇 정지됨 (포지션은 유지됨)');
+      } catch (err) {
+        logger.error(`/stop 핸들러 오류: ${err.message}`);
+      }
     });
 
     // /start
     this.bot.onText(/^\/start/, async (msg) => {
       if (!auth(msg)) return;
-      this.tradingBot.isRunning = true;
-      await this.bot.sendMessage(chatId, '🟢 봇 재개됨');
+      try {
+        this.tradingBot.isRunning = true;
+        await this.send('🟢 봇 재개됨');
+      } catch (err) {
+        logger.error(`/start 핸들러 오류: ${err.message}`);
+      }
     });
 
     // /analyze - 전체 요약 또는 특정 페어 상세
@@ -376,20 +396,24 @@ class TelegramService {
     // /help
     this.bot.onText(/^\/help/, async (msg) => {
       if (!auth(msg)) return;
-      await this.bot.sendMessage(chatId, [
-        `━━━ 명령어 목록 ━━━`,
-        `/status            - 봇 상태 + 활성 포지션`,
-        `/pairs             - 거래 페어 목록`,
-        `/position          - 모든 활성 포지션`,
-        `/position BTC      - 특정 페어 상세`,
-        `/balance           - 잔고 + 총 노출`,
-        `/pnl               - 일일 손익 + 페어별 Kelly`,
-        `/analyze           - 모든 페어 요약`,
-        `/analyze BTC       - 특정 페어 상세 분석`,
-        `/close BTC         - 특정 페어 청산`,
-        `/close all         - 모든 페어 청산`,
-        `/stop, /start, /help`,
-      ].join('\n'));
+      try {
+        await this.send([
+          `━━━ 명령어 목록 ━━━`,
+          `/status            - 봇 상태 + 활성 포지션`,
+          `/pairs             - 거래 페어 목록`,
+          `/position          - 모든 활성 포지션`,
+          `/position BTC      - 특정 페어 상세`,
+          `/balance           - 잔고 + 총 노출`,
+          `/pnl               - 일일 손익 + 페어별 Kelly`,
+          `/analyze           - 모든 페어 요약`,
+          `/analyze BTC       - 특정 페어 상세 분석`,
+          `/close BTC         - 특정 페어 청산`,
+          `/close all         - 모든 페어 청산`,
+          `/stop, /start, /help`,
+        ].join('\n'));
+      } catch (err) {
+        logger.error(`/help 핸들러 오류: ${err.message}`);
+      }
     });
   }
 
@@ -597,6 +621,12 @@ class TelegramService {
         await this.bot.sendMessage(config.telegramChatId, message);
         return; // 성공
       } catch (err) {
+        // 400 Bad Request (메시지 형식/길이 오류)는 재시도해도 실패하므로 즉시 abort
+        const status = err && err.response && err.response.statusCode;
+        if (status === 400 || status === 403) {
+          logger.error(`텔레그램 전송 중단 (${status}, 재시도 불가): ${err.message}`);
+          return;
+        }
         if (attempt === 2) {
           logger.error(`텔레그램 전송 실패 (3회 시도): ${err.message}`);
         }
@@ -657,11 +687,25 @@ class TelegramService {
 
   /**
    * 포지션 청산 알림 (pair 지정)
+   *
+   * action:
+   *   - 'closed'           : PnL 확인됨 (부호로 익절/손절 판단)
+   *   - 'closed (unknown)' : PnL 조회 실패 — "청산됨 (PnL 미확인)" 으로 표기
    */
   async notifyClose(pair, action, pnl, price) {
-    const emoji = action === 'tp_hit' ? '🎯' : '🛑';
-    const label = action === 'tp_hit' ? '익절' : '손절';
-    const pnlSign = pnl >= 0 ? '+' : '';
+    if (action === 'closed (unknown)') {
+      await this.send([
+        `⚪ ━━━ [${this._displayName(pair)}] 청산 감지 ━━━`,
+        `청산가: ${price}`,
+        `PnL: 미확인 (거래 이력 조회 실패)`,
+      ].join('\n'));
+      return;
+    }
+
+    const isProfit = pnl >= 0;
+    const emoji = isProfit ? '🎯' : '🛑';
+    const label = isProfit ? '익절' : '손절';
+    const pnlSign = isProfit ? '+' : '';
 
     await this.send([
       `${emoji} ━━━ [${this._displayName(pair)}] ${label} 청산 ━━━`,

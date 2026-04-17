@@ -77,8 +77,11 @@ export default function PositionDetail() {
 
     fetch(`/api/candlesticks?contract=${contract}&from=${from}`)
       .then((r) => (r.ok ? r.json() : []))
-      .then((pts: PricePoint[]) => { if (pts.length) setPricePoints(pts); })
-      .catch(() => {});
+      .then((pts: PricePoint[]) => {
+        console.log('[positions/id] candlestick fetch:', pts?.length, Array.isArray(pts));
+        if (Array.isArray(pts) && pts.length) setPricePoints(pts);
+      })
+      .catch((e) => console.error('[positions/id] candlestick error:', e));
   }, [position?.symbol, (position as any)?.entryAt]);
 
   // 실시간 현재가 append (30초 간격)

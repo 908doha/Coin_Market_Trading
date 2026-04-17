@@ -217,6 +217,7 @@ export function PnlCard({
 
   const profitVal = showUsd ? profit / rate : profit;
   const hasPath   = pricePoints && pricePoints.length >= 2;
+  console.log('[PnlCard] hasPath:', hasPath, 'pricePoints:', pricePoints?.length ?? 0);
   const isLong    = direction === 'Long';
 
   // TP/SL 손익률 (진입가 기준)

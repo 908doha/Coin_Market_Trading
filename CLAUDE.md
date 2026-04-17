@@ -57,13 +57,11 @@ Coin_Market_Trading/
 │   │   │   ├── home.tsx          # 홈 (총자산 차트 + 포지션 요약)
 │   │   │   ├── positions/
 │   │   │   │   ├── index.tsx     # 포지션 목록
-│   │   │   │   └── [id].tsx      # 포지션 상세
+│   │   │   │   └── [id].tsx      # 포지션 상세. 뒤로가기는 ?from= 쿼리 기반 결정론적 네비게이션 (home/positions)
 │   │   │   ├── analysis/         # 수익분석 탭
 │   │   │   └── account/          # 계정 관리
-│   │   ├── history/
-│   │   │   └── [id].tsx          # 거래 상세 (청산된 포지션)
-│   │   └── positions/
-│   │       └── [id].tsx          # (main)/positions/[id] 재export (홈 deep-link 호환)
+│   │   └── history/
+│   │       └── [id].tsx          # 거래 상세 (청산된 포지션)
 │   │
 │   └── src/
 │       ├── design-system/        # 디자인 시스템
@@ -149,7 +147,6 @@ Gate.io API ← Vercel Serverless ← Frontend fetch (5초 폴링)
 │   ├── analysis/                 # 수익분석
 │   └── account/
 ├── /history/[id]                 # 거래 상세
-├── /positions/[id]               # (main)/positions/[id] 재export (deep-link 호환)
 └── /onboarding
 ```
 

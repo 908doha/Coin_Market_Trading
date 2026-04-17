@@ -1089,7 +1089,10 @@ export default function Home() {
                         return (
                           <PressableScale
                             key={pos.id}
-                            onPress={() => router.push(`/positions/${pos.id}`)}
+                            onPress={() => router.push({
+                              pathname: '/(main)/positions/[id]',
+                              params:   { id: pos.id, from: 'home' },
+                            })}
                             scaleTo={0.98}
                           >
                           <View style={[styles.posRow, idx < group.items.length - 1 && styles.posRowBorder]}>

@@ -238,7 +238,10 @@ function PositionRow({ pos, isLast, showUsd, rate }: { pos: any; isLast: boolean
   return (
     <PressableScale
       style={[!isLast && pr.border]}
-      onPress={() => router.push(`/(main)/positions/${pos.id}`)}
+      onPress={() => router.push({
+        pathname: '/(main)/positions/[id]',
+        params:   { id: pos.id, from: 'positions' },
+      })}
     >
       <View style={pr.row}>
       <View style={[pr.icon, { backgroundColor: up ? colors.market.riseSubtle : colors.market.fallSubtle }]}>

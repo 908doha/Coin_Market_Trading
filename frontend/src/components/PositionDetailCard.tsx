@@ -219,13 +219,13 @@ export function PnlCard({
   const hasPath   = pricePoints && pricePoints.length >= 2;
   const isLong    = direction === 'Long';
 
-  // 근접도 계산 (compact 차트 아래에 표시)
+  // TP/SL 손익률 (진입가 기준)
   const lastP  = hasPath ? pricePoints![pricePoints!.length - 1].p : null;
-  const tpPct  = lastP != null && targetPrice && targetPrice > 0
-    ? (isLong ? (targetPrice - lastP) : (lastP - targetPrice)) / lastP * 100
+  const tpPct  = entryPrice > 0 && targetPrice && targetPrice > 0
+    ? (isLong ? (targetPrice - entryPrice) : (entryPrice - targetPrice)) / entryPrice * 100
     : null;
-  const slBuf  = lastP != null && stopLoss && stopLoss > 0
-    ? (isLong ? (lastP - stopLoss) : (stopLoss - lastP)) / lastP * 100
+  const slBuf  = entryPrice > 0 && stopLoss && stopLoss > 0
+    ? (isLong ? (entryPrice - stopLoss) : (stopLoss - entryPrice)) / entryPrice * 100
     : null;
   const rrVal  = targetPrice && stopLoss && targetPrice > 0 && stopLoss > 0
     && Math.abs(entryPrice - stopLoss) > 0
@@ -427,11 +427,11 @@ export function TpSlPathChart({
   const dotColor   = (isLong ? lastP >= entry : lastP <= entry) ? PROFIT : LOSS;
   const priceTagX  = Math.min(Math.max(lastX, PL + 24), PL + cW - 4);
 
-  // 근접도 (compact=false 시 하단 행에 표시)
-  const tpPct = !compact && tp && tp > 0
-    ? (isLong ? (tp - lastP) : (lastP - tp)) / lastP * 100 : null;
-  const slBuf = !compact && sl && sl > 0
-    ? (isLong ? (lastP - sl) : (sl - lastP)) / lastP * 100 : null;
+  // TP/SL 손익률 (진입가 기준, compact=false 시 하단 행에 표시)
+  const tpPct = !compact && tp && tp > 0 && entry > 0
+    ? (isLong ? (tp - entry) : (entry - tp)) / entry * 100 : null;
+  const slBuf = !compact && sl && sl > 0 && entry > 0
+    ? (isLong ? (entry - sl) : (sl - entry)) / entry * 100 : null;
   const rr    = !compact && tp && sl && tp > 0 && sl > 0 && Math.abs(entry - sl) > 0
     ? (Math.abs(tp - entry) / Math.abs(entry - sl)).toFixed(2) : null;
 

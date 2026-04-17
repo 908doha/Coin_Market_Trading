@@ -7,13 +7,14 @@ import { router, useLocalSearchParams } from 'expo-router';
 import Animated, {
   useSharedValue, useAnimatedStyle, withTiming, withSpring, Easing, runOnJS,
 } from 'react-native-reanimated';
-import Svg, { Path, Circle, Rect } from 'react-native-svg';
+import Svg, { Path, Rect } from 'react-native-svg';
 import { Text, CurrencyToggle, TradeHistoryListSkeleton, PressableScale } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
 import { useAccounts, EXCHANGE_LABELS } from '@/store/accounts';
 import { ExchangeLogo } from '@/components/ExchangeLogo';
+import { AccountBottomSheet } from '@/components/AccountBottomSheet';
 import { formatKRWSigned, formatRate, formatKRW } from '@/utils/format';
 import type { Trade } from '@/services';
 
@@ -81,129 +82,6 @@ const adr = StyleSheet.create({
   allIcon: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center' },
   label  : { fontSize: 15, fontWeight: '600', color: '#191919' },
   viewAll: { fontSize: 14, color: '#AEAEB2' },
-});
-
-// ── 계좌 선택 바텀시트 ────────────────────────────────────────────────────────
-function AccountPickerModal({
-  visible, selectedId, onSelect, onClose,
-}: {
-  visible: boolean; selectedId: string | null;
-  onSelect: (id: string | null) => void; onClose: () => void;
-}) {
-  const { accounts, balances, totalBalance } = useAccounts();
-  const translateY = useSharedValue(600);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    if (visible) {
-      setMounted(true);
-      translateY.value = withSpring(0, { damping: 28, stiffness: 300, mass: 0.9 });
-    } else {
-      translateY.value = withTiming(600, { duration: 260 }, () => runOnJS(setMounted)(false));
-    }
-  }, [visible]);
-
-  const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: translateY.value }] }));
-  if (!mounted) return null;
-
-  const totalKrw = totalBalance?.total ?? 0;
-
-  return (
-    <Modal visible transparent animationType="none" onRequestClose={onClose}>
-      <Pressable style={am.overlay} onPress={onClose}>
-        <Animated.View style={[am.sheet, sheetStyle]}>
-          <Pressable>
-            <View style={am.handle} />
-            <View style={am.header}>
-              <Text style={am.title}>계좌 선택</Text>
-              <Pressable style={am.closeBtn} onPress={onClose} hitSlop={12}>
-                <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-                  <Path d="M18 6L6 18M6 6l12 12" stroke="#AEAEB2" strokeWidth="2.2" strokeLinecap="round" />
-                </Svg>
-              </Pressable>
-            </View>
-            <View style={am.sectionRow}>
-              <Text style={am.sectionLabel}>내 계좌</Text>
-              <Pressable style={am.totalRow} onPress={() => { onClose(); router.push('/(main)/account/api-accounts'); }}>
-                <Text style={am.totalText}>총 자산 {formatKRW(totalKrw)}</Text>
-                <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
-                  <Path d="M9 18l6-6-6-6" stroke="#AEAEB2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </Svg>
-              </Pressable>
-            </View>
-            {/* 모든 계좌 */}
-            <Pressable style={({ pressed }) => [am.accRow, pressed && { backgroundColor: '#F8F8F8' }]} onPress={() => { onSelect(null); onClose(); }}>
-              <View style={am.accIcon}>
-                <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-                  <Rect x="3" y="6" width="18" height="13" rx="2" stroke="#555" strokeWidth="1.8" />
-                  <Path d="M3 10h18" stroke="#555" strokeWidth="1.8" strokeLinecap="round" />
-                </Svg>
-              </View>
-              <View style={{ flex: 1, marginLeft: 12 }}>
-                <Text style={am.accName}>모든 계좌</Text>
-                <Text style={am.accBalance}>{formatKRW(totalKrw)}</Text>
-              </View>
-              {selectedId === null && (
-                <Svg width={22} height={22} viewBox="0 0 24 24">
-                  <Circle cx="12" cy="12" r="12" fill="#246CF9" />
-                  <Path d="M7 12.5l3.5 3.5 6.5-7" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                </Svg>
-              )}
-            </Pressable>
-            {/* 개별 계좌 */}
-            {accounts.map((acc) => {
-              const bal = balances[acc.id];
-              return (
-                <Pressable key={acc.id} style={({ pressed }) => [am.accRow, pressed && { backgroundColor: '#F8F8F8' }]} onPress={() => { onSelect(acc.id); onClose(); }}>
-                  <ExchangeLogo exchange={acc.exchange} size={40} />
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={am.accName}>{acc.name || EXCHANGE_LABELS[acc.exchange]}</Text>
-                    <Text style={am.accBalance}>{bal ? formatKRW(bal.total) : '—'}</Text>
-                  </View>
-                  {selectedId === acc.id && (
-                    <Svg width={22} height={22} viewBox="0 0 24 24">
-                      <Circle cx="12" cy="12" r="12" fill="#246CF9" />
-                      <Path d="M7 12.5l3.5 3.5 6.5-7" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                    </Svg>
-                  )}
-                </Pressable>
-              );
-            })}
-            <View style={am.divider} />
-            <Pressable style={({ pressed }) => [am.addRow, pressed && { backgroundColor: '#F8F8F8' }]} onPress={() => { onClose(); router.push('/(main)/account/add-api'); }}>
-              <View style={am.addIcon}>
-                <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-                  <Path d="M12 5v14M5 12h14" stroke="#555" strokeWidth="2.2" strokeLinecap="round" />
-                </Svg>
-              </View>
-              <Text style={am.addText}>API 연결하기</Text>
-            </Pressable>
-            <View style={{ height: 32 }} />
-          </Pressable>
-        </Animated.View>
-      </Pressable>
-    </Modal>
-  );
-}
-const am = StyleSheet.create({
-  overlay:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.40)', justifyContent: 'flex-end' },
-  sheet:        { backgroundColor: '#FFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 10 },
-  handle:       { width: 32, height: 4, borderRadius: 2, backgroundColor: '#E5E5EA', alignSelf: 'center', marginBottom: 12 },
-  header:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 20 },
-  title:        { fontSize: 20, fontWeight: '700', color: '#191919' },
-  closeBtn:     { padding: 4 },
-  sectionRow:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 8 },
-  sectionLabel: { fontSize: 13, color: '#AEAEB2', fontWeight: '500' },
-  totalRow:     { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  totalText:    { fontSize: 13, color: '#AEAEB2' },
-  accRow:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14 },
-  accIcon:      { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F5F5F5', alignItems: 'center', justifyContent: 'center' },
-  accName:      { fontSize: 16, fontWeight: '600', color: '#191919', marginBottom: 3 },
-  accBalance:   { fontSize: 13, color: '#AEAEB2' },
-  divider:      { height: 1, backgroundColor: '#F2F2F2', marginVertical: 8, marginHorizontal: 20 },
-  addRow:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, gap: 12 },
-  addIcon:      { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F5F5F5', alignItems: 'center', justifyContent: 'center' },
-  addText:      { fontSize: 16, fontWeight: '500', color: '#555' },
 });
 
 // ── 스태거 페이드인 ───────────────────────────────────────────────────────────
@@ -538,7 +416,7 @@ export default function History() {
         <CurrencyToggle showUsd={showUsd} onToggle={() => setShowUsd((v) => !v)} />
       </View>
 
-      <AccountPickerModal
+      <AccountBottomSheet
         visible={pickerOpen}
         selectedId={selectedId}
         onSelect={(id) => fade(() => setSelectedId(id))}

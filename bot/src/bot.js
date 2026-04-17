@@ -134,8 +134,11 @@ class TradingBot {
         active.direction
       );
 
-      if (result.action === 'sl_hit' || result.action === 'tp_hit') {
-        logger.info(`[${pair}] 포지션 종료: ${result.action} | PnL: ${result.pnl.toFixed(2)} USDT`);
+      if (result.action === 'closed' || result.action === 'closed (unknown)') {
+        const pnlTag = result.action === 'closed (unknown)'
+          ? 'N/A'
+          : `${result.pnl.toFixed(2)} USDT`;
+        logger.info(`[${pair}] 포지션 종료: ${result.action} | PnL: ${pnlTag}`);
         // fire-and-forget: 알림이 실패해도 거래 로직 블로킹 금지 (C)
         this.telegram.notifyClose(pair, result.action, result.pnl, result.price)
           .catch((err) => logger.error(`notifyClose 실패: ${err.message}`));
@@ -352,6 +355,15 @@ function startHttpServer(botInstance) {
   const PORT   = process.env.PORT ?? 3001;
   const SECRET = process.env.BOT_API_SECRET ?? '';
 
+  // BOT_API_SECRET 미설정 시 HTTP 서버 자체를 시작하지 않는다.
+  //   과거에는 SECRET=''이면 `if (SECRET && ...)` 이 false로 평가돼
+  //   모든 요청이 인증 없이 통과하던 보안 취약점이 있었다.
+  //   봇 본체(cron, 텔레그램) 는 정상 동작하며, 외부 HTTP API 만 비활성화.
+  if (!SECRET) {
+    logger.warn('[HTTP] BOT_API_SECRET 미설정 — 외부 HTTP API 비활성화 (봇/텔레그램은 정상 동작)');
+    return;
+  }
+
   const server = http.createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Access-Control-Allow-Origin',  '*');
@@ -359,8 +371,8 @@ function startHttpServer(botInstance) {
 
     if (req.method === 'OPTIONS') { res.writeHead(200).end('{}'); return; }
 
-    // 시크릿 검증 (설정된 경우)
-    if (SECRET && req.headers['x-bot-secret'] !== SECRET) {
+    // 시크릿 검증 (항상 강제)
+    if (req.headers['x-bot-secret'] !== SECRET) {
       res.writeHead(401).end(JSON.stringify({ error: '인증 실패' }));
       return;
     }

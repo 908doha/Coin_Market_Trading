@@ -39,6 +39,9 @@ const gateClient = {
   async getTicker(contract) {
     try {
       const { body } = await futuresApi.listFuturesTickers(SETTLE, { contract });
+      if (!Array.isArray(body) || body.length === 0 || !body[0]) {
+        throw new Error(`티커 응답 없음: ${contract}`);
+      }
       const ticker = body[0];
       return {
         last: parseFloat(ticker.last),
@@ -232,6 +235,34 @@ const gateClient = {
     } catch (err) {
       logger.error(`포지션 청산 실패: ${err.message}`);
       throw err;
+    }
+  },
+
+  /**
+   * 최근 거래 이력 조회 (실제 체결 PnL 확인용)
+   *
+   * Gate.io FuturesApi.getMyTrades(settle, { contract, limit })
+   * 각 trade 의 `pnl` 필드가 포지션 종료 시 실현손익이다 (진입 체결은 pnl=null).
+   *
+   * @returns {Array<{ id, orderId, size, price, time, pnl, text, role }>}
+   */
+  async getRecentTrades(contract, limit = 20) {
+    try {
+      const { body } = await futuresApi.getMyTrades(SETTLE, { contract, limit });
+      if (!Array.isArray(body)) return [];
+      return body.map((t) => ({
+        id:      t.id,
+        orderId: t.orderId != null ? t.orderId : t.order_id,
+        size:    Number(t.size),
+        price:   parseFloat(t.price),
+        time:    t.createTime != null ? t.createTime : (t.create_time != null ? t.create_time : t.time),
+        pnl:     t.pnl != null ? parseFloat(t.pnl) : null,
+        text:    t.text,
+        role:    t.role,
+      }));
+    } catch (err) {
+      logger.debug(`거래 이력 조회 실패 [${contract}]: ${err.message}`);
+      return [];
     }
   },
 

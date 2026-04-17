@@ -656,17 +656,47 @@ class OrderManager {
       await gateClient.cancelAllTriggerOrders(contract);
     } catch {}
 
-    const pnl = this.lastKnownPositions.get(contract).unrealisedPnl || 0;
-    const action = pnl >= 0 ? 'tp_hit' : 'sl_hit';
-    const label = action === 'tp_hit' ? 'TP 익절' : 'SL 손절';
-    logger.info(`[${contract}] [${label}] 청산 확정 (${EMPTY_THRESHOLD}회 empty) | PnL: ${pnl.toFixed(2)} USDT`);
+    // 실제 실현 PnL 을 트레이드 이력 API 에서 조회.
+    //   과거엔 lastKnownPositions.unrealisedPnl (직전 폴링 당시 값) 의 부호로
+    //   tp_hit/sl_hit 를 분류했지만, 반등 중 SL hit 등 경계 사례에서 오분류가
+    //   발생해 Kelly 통계와 알림이 오염되었다. 이제는 getMyTrades 로 실제
+    //   체결된 실현손익을 집계하고, action 은 'closed' 로 통합한다.
+    let pnl = 0;
+    let unknown = false;
+    try {
+      const trades = await gateClient.getRecentTrades(contract, 20);
+      // 최근 60초 이내에 체결된 trade 중 pnl 필드가 있는(=포지션 종료) 것만 합산
+      const sinceMs = Date.now() - 60_000;
+      let found = false;
+      for (const t of trades) {
+        const tMs = typeof t.time === 'number' ? t.time * 1000 : Date.parse(t.time);
+        if (!Number.isFinite(tMs) || tMs < sinceMs) continue;
+        if (t.pnl != null && Number.isFinite(t.pnl)) {
+          pnl += t.pnl;
+          found = true;
+        }
+      }
+      if (!found) {
+        unknown = true;
+        logger.warn(`[${contract}] 거래 이력에서 실현 PnL 미확인 — 'closed (unknown)' 처리`);
+      }
+    } catch (err) {
+      unknown = true;
+      logger.error(`[${contract}] 거래 이력 조회 실패 — 'closed (unknown)' 처리: ${err.message}`);
+    }
 
-    this.dailyPnl += pnl;
-    this.recordTradeResult(contract, pnl);
+    const action = unknown ? 'closed (unknown)' : 'closed';
+    const pnlTag = unknown ? 'N/A' : `${pnl.toFixed(2)} USDT`;
+    logger.info(`[${contract}] [포지션 종료] ${action} (${EMPTY_THRESHOLD}회 empty) | PnL: ${pnlTag}`);
+
+    if (!unknown) {
+      this.dailyPnl += pnl;
+      this.recordTradeResult(contract, pnl);
+    }
     this.lastKnownPositions.delete(contract);
     this._clearPairState(contract);
 
-    return { action, price: 0, pnl };
+    return { action, price: 0, pnl: unknown ? 0 : pnl };
   }
 
   /**

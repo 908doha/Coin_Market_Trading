@@ -271,23 +271,12 @@ export default async function handler(req: any, res: any) {
       trades = await fetchGateTrades(apiKey, apiSecret);
     }
 
-    // DB 저장 시도 후 결과를 응답에 포함 (디버그용)
-    let dbStatus: any = null;
-    try {
-      await saveTradesToDb(trades, exc, apiKey);
-      dbStatus = { saved: true, count: trades.length };
-    } catch (e: any) {
-      dbStatus = { saved: false, error: e?.message };
-    }
+    // 백그라운드로 DB 저장 (응답 블로킹 없음)
+    saveTradesToDb(trades, exc, apiKey).catch((e) => {
+      console.error('[trades] DB save failed:', e?.message);
+    });
 
-    // getSupabase 상태 확인
-    const sbCheck = {
-      hasUrl: !!process.env.SUPABASE_URL,
-      hasKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
-      urlPrefix: (process.env.SUPABASE_URL ?? '').slice(0, 30),
-    };
-
-    res.status(200).json({ trades, _dbDebug: dbStatus, _sbCheck: sbCheck });
+    res.status(200).json(trades);
   } catch (err: any) {
     // Gate.io 실패 → DB 캐시 폴백
     const cached = await loadTradesFromDb(exc, apiKey).catch(() => null);

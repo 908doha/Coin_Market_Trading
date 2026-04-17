@@ -88,8 +88,19 @@ async function fetchGateTrades(apiKey: string, apiSecret: string): Promise<Trade
     const side      = (t.side  as string) ?? '';
     const text      = (t.text  as string) ?? '';
     const closeTime = Number(t.time ?? 0);
-    const openTime  = Number(t.open_time ?? 0);
     const coin      = contract.replace('_USDT', '');
+
+    // 진입 시각: first_open_time > open_time > fill 데이터 최초 시각 순으로 탐색
+    let openTime = Number(t.first_open_time ?? t.open_time ?? 0);
+    if (!openTime) {
+      const contractFills = fillMap.get(contract) ?? [];
+      if (contractFills.length) {
+        const earliest = contractFills.reduce((a: any, b: any) =>
+          Number(a.create_time) < Number(b.create_time) ? a : b,
+        );
+        openTime = Number(earliest.create_time ?? 0);
+      }
+    }
 
     const exitAt  = closeTime ? new Date(closeTime * 1000).toISOString() : new Date().toISOString();
     const entryAt = openTime  ? new Date(openTime  * 1000).toISOString() : exitAt;

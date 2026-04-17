@@ -8,7 +8,7 @@ import { formatKRW } from '@/utils/format';
 import { useAccounts } from '@/store/accounts';
 import { PositionDetailView } from '@/components/PositionDetailView';
 import type { IctAnalysis } from '@/components/IctAnalysisCard';
-import { loadIctSnapshot } from '@/utils/ictSnapshot';
+import { loadIctSnapshot, fetchIctSnapshotRemote } from '@/utils/ictSnapshot';
 import type { PricePoint } from '@/utils/priceHistory';
 
 // entryAt 문자열 → Unix 초
@@ -55,6 +55,14 @@ export default function PositionDetail() {
       setIctAnalysis(stored.analysis as IctAnalysis);
     } else {
       setSnapPending(true);
+      const entryTs = parseEntryAtTs((position as any).entryAt);
+      if (entryTs) {
+        fetchIctSnapshotRemote(contract, entryTs)
+          .then((remote) => {
+            if (remote?.analysis) setIctAnalysis(remote.analysis as IctAnalysis);
+          })
+          .finally(() => setSnapPending(false));
+      }
     }
   }, [position?.symbol]);
 

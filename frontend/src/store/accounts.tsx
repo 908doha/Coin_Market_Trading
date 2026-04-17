@@ -12,7 +12,7 @@ import { exchangeService } from '../services/exchange.service';
 import { positionsService } from '../services/positions.service';
 import type { Balance } from '../services/account.service';
 import type { Position } from '../services/positions.service';
-import { saveIctSnapshot, saveIctSnapshotWithHistory, loadIctSnapshot, pushIctSnapshotRemote } from '../utils/ictSnapshot';
+import { saveIctSnapshot, saveIctSnapshotWithHistory, loadIctSnapshot, pushIctSnapshotRemote, fetchIctSnapshotRemote } from '../utils/ictSnapshot';
 import { savePositionSnapshotWithHistory } from '../utils/positionSnapshot';
 import { appendPricePoint } from '../utils/priceHistory';
 import { appendBalanceSnapshot, syncBalanceHistory, pushBalanceHistory } from '../utils/balanceHistory';
@@ -347,23 +347,30 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
         const stored = loadIctSnapshot(contract);
         if (stored && stored.entryAt === entryAt) continue;
 
-        // 새 포지션 진입 → 백그라운드로 ICT 분석 캡처
+        const entryTs = parseKstEntryTs(entryAt);
         const account = list.find((a) => a.id === (p as any).accountId) ?? list[0];
         if (!account?.apiKey || !account?.apiSecret) continue;
 
-        const entryTs = parseKstEntryTs(entryAt);
-
-        fetch('/api/ict-analyze', {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ apiKey: account.apiKey, apiSecret: account.apiSecret, contract }),
-        })
-          .then((r) => r.json())
-          .then((data) => {
-            if (data?.htf !== undefined) {
-              saveIctSnapshotWithHistory(contract, entryAt, entryTs, data);
-              pushIctSnapshotRemote(contract, entryTs, entryAt, data);
+        // Supabase에 이미 저장된 ICT가 있으면 그것을 사용 (재분석 방지)
+        fetchIctSnapshotRemote(contract, entryTs)
+          .then((remote) => {
+            if (remote?.analysis?.htf !== undefined) {
+              saveIctSnapshotWithHistory(contract, entryAt, entryTs, remote.analysis);
+              return;
             }
+            // Supabase에도 없을 때만 새로 분석
+            return fetch('/api/ict-analyze', {
+              method:  'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body:    JSON.stringify({ apiKey: account.apiKey, apiSecret: account.apiSecret, contract }),
+            })
+              .then((r) => r.json())
+              .then((data) => {
+                if (data?.htf !== undefined) {
+                  saveIctSnapshotWithHistory(contract, entryAt, entryTs, data);
+                  pushIctSnapshotRemote(contract, entryTs, entryAt, data);
+                }
+              });
           })
           .catch(() => {});
       }

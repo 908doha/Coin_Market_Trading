@@ -504,33 +504,62 @@ const indicators = {
    * 유동성 스윕 감지 (BSL / SSL 라벨링)
    *  - BSL (Buy-Side Liquidity)  : swing high 위 stop을 쓸어가는 상승 wick → 하락 반전 신호
    *  - SSL (Sell-Side Liquidity) : swing low 아래 stop을 쓸어가는 하락 wick → 상승 반전 신호
+   *
+   * 탐지 규칙:
+   *  - 최근 WINDOW 봉 내에서 "wick 이 swing 반대편을 찍고 종가 복귀" 패턴 스캔
+   *    (마지막 한 봉 한정 아님 — cron 분할장애/타임프레임 지연 내성)
+   *  - swing 이 형성 이후 sweep 봉 직전까지 종가로 관통되지 않아야 유효
+   *    (intact/unswept — 이미 깨진 swing 은 유동성 풀이 아니라 former S/R)
    */
   detectLiquiditySweep(candles, swingHighs, swingLows) {
     const sweeps = [];
-    const last = candles[candles.length - 1];
-    const prev = candles[candles.length - 2];
+    const WINDOW = 5; // 최근 5봉 내 sweep 스캔
+    const start = Math.max(1, candles.length - WINDOW);
 
     for (const sh of swingHighs.slice(-3)) {
-      if (last.high > sh.price && last.close < sh.price && prev.close < sh.price) {
-        sweeps.push({
-          type: 'bearish',
-          liquidity: 'BSL',
-          label: 'BSL sweep',
-          level: sh.price,
-          wick: last.high,
-        });
+      for (let i = start; i < candles.length; i++) {
+        const c = candles[i];
+        const p = candles[i - 1];
+        if (c.high > sh.price && c.close < sh.price && p.close < sh.price) {
+          // swing 형성 이후 sweep 봉 직전까지 종가 관통 없어야 유효
+          let intact = true;
+          for (let k = sh.index + 1; k < i; k++) {
+            if (candles[k].close > sh.price) { intact = false; break; }
+          }
+          if (!intact) continue;
+          sweeps.push({
+            type: 'bearish',
+            liquidity: 'BSL',
+            label: 'BSL sweep',
+            level: sh.price,
+            wick: c.high,
+            index: i,
+          });
+          break; // 같은 swing 에 대해 가장 오래된 유효 sweep 하나만
+        }
       }
     }
 
     for (const sl of swingLows.slice(-3)) {
-      if (last.low < sl.price && last.close > sl.price && prev.close > sl.price) {
-        sweeps.push({
-          type: 'bullish',
-          liquidity: 'SSL',
-          label: 'SSL sweep',
-          level: sl.price,
-          wick: last.low,
-        });
+      for (let i = start; i < candles.length; i++) {
+        const c = candles[i];
+        const p = candles[i - 1];
+        if (c.low < sl.price && c.close > sl.price && p.close > sl.price) {
+          let intact = true;
+          for (let k = sl.index + 1; k < i; k++) {
+            if (candles[k].close < sl.price) { intact = false; break; }
+          }
+          if (!intact) continue;
+          sweeps.push({
+            type: 'bullish',
+            liquidity: 'SSL',
+            label: 'SSL sweep',
+            level: sl.price,
+            wick: c.low,
+            index: i,
+          });
+          break;
+        }
       }
     }
 
@@ -547,15 +576,20 @@ const indicators = {
   getActiveSession(now) {
     now = now || new Date();
 
-    // 주말 체크 (0=일, 6=토, UTC 기준)
+    // 주말(토/일) 제외 — ICT 정통: institutional 부재로 sweep 은 유동성 사냥이 아닌
+    // 노이즈. Gate.io 선물은 24/7 이지만 ICT 분석 맥락에선 주말 시그널 신뢰도 낮음.
     const dayOfWeek = now.getUTCDay();
     if (dayOfWeek === 0 || dayOfWeek === 6) {
       return { active: false, session: null, reason: '주말 - 세션 휴장' };
     }
 
-    // 2-pass: 활성 세션(AM/PM) 우선. 세션 간 오버랩 (예: NY AM Kill Zone 시작이
-    // London between-kz 끝과 겹침) 에서 inactive 리포트가 active 를 가리지 않도록.
-    for (const [key, session] of Object.entries(config.sessions)) {
+    // config.sessions 를 priority 오름차순으로 정렬 (낮은 값이 높은 우선순위).
+    // NY Kill Zone host 가 overlap 시 London PM 보다 우선. priority 미지정은 맨 뒤.
+    const ordered = Object.entries(config.sessions)
+      .sort(([, a], [, b]) => (a.priority ?? 99) - (b.priority ?? 99));
+
+    // 2-pass: 활성 세션(AM/PM) 우선. overlap 시 active 가 inactive 보다 먼저 매칭.
+    for (const [key, session] of ordered) {
       const tz = session.timezone || 'UTC';
       const amStart = this._sessionTimeToUtc(session.am.start, tz, now);
       const amEnd   = this._sessionTimeToUtc(session.am.end,   tz, now);
@@ -570,8 +604,8 @@ const indicators = {
       }
     }
 
-    // 활성 세션이 없을 때만 between-kz 보고
-    for (const [key, session] of Object.entries(config.sessions)) {
+    // 활성 세션 없으면 between-kz 리포트 (priority 순서 일관 유지).
+    for (const [key, session] of ordered) {
       const tz = session.timezone || 'UTC';
       const amEnd   = this._sessionTimeToUtc(session.am.end,   tz, now);
       const pmStart = this._sessionTimeToUtc(session.pm.start, tz, now);

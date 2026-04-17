@@ -56,6 +56,7 @@ const config = {
     asian: {
       name: 'Asian',
       timezone: 'UTC',
+      priority: 3, // overlap 시 NY/London 다음
       am:  { start: '00:00', end: '03:00' },  // 아시아 오전 (Tokyo open)
       pm:  { start: '04:00', end: '06:30' },  // 아시아 오후
       // 점심: 03:00 ~ 04:00 UTC (Tokyo 12:00~13:00 JST)
@@ -64,6 +65,7 @@ const config = {
     london: {
       name: 'London',
       timezone: 'America/New_York',
+      priority: 2,
       am:  { start: '03:00', end: '06:30' },  // London AM (NY-local 03:00 = London 08:00 BST / 08:00 GMT)
       pm:  { start: '07:30', end: '10:00' },  // London PM
       // 점심: 06:30 ~ 07:30 NY-local (London 11:30~12:30)
@@ -72,6 +74,7 @@ const config = {
     ny: {
       name: 'New York',
       timezone: 'America/New_York',
+      priority: 1, // NY Kill Zone 은 ICT 정통 host — overlap 시 우선
       am:  { start: '07:00', end: '10:00' },  // ICT AM Kill Zone
       pm:  { start: '13:30', end: '16:00' },  // ICT PM Kill Zone
       // between kill zones: 10:00 ~ 13:30 NY-local (low-liquidity 회피)

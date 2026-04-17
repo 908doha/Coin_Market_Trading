@@ -6,6 +6,7 @@
  */
 import React from 'react';
 import { View, StyleSheet, Text as RNText } from 'react-native';
+import Svg, { Line, Rect, Circle, Text as SvgText } from 'react-native-svg';
 import { Text, GlassCard, AnimatedNumber } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
@@ -438,78 +439,76 @@ export function TpSlPathChart({
 
   return (
     <View>
-      {/* @ts-ignore — React Native Web supports svg elements */}
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H}
-        style={{ display: 'block' } as any}>
+      <Svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H}>
 
         {/* 구간 채우기 */}
         {tpY !== null && (
-          <rect x={PL} y={Math.min(entryY, tpY)}
+          <Rect x={PL} y={Math.min(entryY, tpY)}
             width={cW} height={Math.abs(entryY - tpY)} fill="#F0445210" />
         )}
         {slY !== null && (
-          <rect x={PL} y={Math.min(entryY, slY)}
+          <Rect x={PL} y={Math.min(entryY, slY)}
             width={cW} height={Math.abs(entryY - slY)} fill="#246CF910" />
         )}
 
         {/* TP 기준선 */}
         {tpY !== null && tp && (
           <>
-            <line x1={PL} y1={tpY} x2={PL + cW} y2={tpY}
+            <Line x1={PL} y1={tpY} x2={PL + cW} y2={tpY}
               stroke={PROFIT} strokeWidth="1" strokeDasharray="4 3" />
             {!compact && (
-              <text x={PL + cW + 6} y={tpY + 4}
-                fontSize="10" fill={PROFIT} fontWeight="600">{fmt(tp)}</text>
+              <SvgText x={PL + cW + 6} y={tpY + 4}
+                fontSize="10" fill={PROFIT} fontWeight="600">{fmt(tp)}</SvgText>
             )}
           </>
         )}
         {/* SL 기준선 */}
         {slY !== null && sl && (
           <>
-            <line x1={PL} y1={slY} x2={PL + cW} y2={slY}
+            <Line x1={PL} y1={slY} x2={PL + cW} y2={slY}
               stroke={LOSS} strokeWidth="1" strokeDasharray="4 3" />
             {!compact && (
-              <text x={PL + cW + 6} y={slY + 4}
-                fontSize="10" fill={LOSS} fontWeight="600">{fmt(sl)}</text>
+              <SvgText x={PL + cW + 6} y={slY + 4}
+                fontSize="10" fill={LOSS} fontWeight="600">{fmt(sl)}</SvgText>
             )}
           </>
         )}
         {/* 진입가 기준선 */}
-        <line x1={PL} y1={entryY} x2={PL + cW} y2={entryY}
+        <Line x1={PL} y1={entryY} x2={PL + cW} y2={entryY}
           stroke="#555" strokeWidth="1" strokeDasharray="3 3" />
         {!compact && (
-          <text x={PL + cW + 6} y={entryY + 4}
-            fontSize="10" fill="#888" fontWeight="500">{fmt(entry)}</text>
+          <SvgText x={PL + cW + 6} y={entryY + 4}
+            fontSize="10" fill="#888" fontWeight="500">{fmt(entry)}</SvgText>
         )}
 
         {/* 세그먼트별 가격 경로 */}
         {segments.map((s, i) => (
-          <line key={i}
+          <Line key={i}
             x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2}
             stroke={s.color} strokeWidth={compact ? '1.4' : '1.8'} strokeLinecap="round" />
         ))}
 
         {/* 현재가 점 */}
-        <circle cx={lastX} cy={lastY} r={compact ? '2.5' : '3.5'} fill={dotColor} />
+        <Circle cx={lastX} cy={lastY} r={compact ? 2.5 : 3.5} fill={dotColor} />
 
         {/* 현재가 레이블 (compact=false 만) */}
         {!compact && (
-          <text x={priceTagX} y={lastY - 7}
+          <SvgText x={priceTagX} y={lastY - 7}
             fontSize="9" fill={dotColor} fontWeight="700" textAnchor="middle">
             {fmt(lastP)}
-          </text>
+          </SvgText>
         )}
 
         {/* X축 시간 레이블 (compact=false 만) */}
         {!compact && (
           <>
-            <text x={PL} y={H - 5}
-              fontSize="9" fill="#666" textAnchor="start">{fmtTime(minT)}</text>
-            <text x={PL + cW} y={H - 5}
-              fontSize="9" fill="#666" textAnchor="end">{fmtTime(maxT)}</text>
+            <SvgText x={PL} y={H - 5}
+              fontSize="9" fill="#666" textAnchor="start">{fmtTime(minT)}</SvgText>
+            <SvgText x={PL + cW} y={H - 5}
+              fontSize="9" fill="#666" textAnchor="end">{fmtTime(maxT)}</SvgText>
           </>
         )}
-      </svg>
+      </Svg>
 
       {/* 근접도 행 (compact=false 만) */}
       {!compact && (

@@ -79,6 +79,26 @@ async function gateGet(apiKey: string, apiSecret: string, path: string, query: s
   return res.json();
 }
 
+/**
+ * Gate.io 캔들 조회 — 실제 체결 캔들이 비면 mark price 캔들로 fallback.
+ * 원자재/저유동성 perp (XBR/XTI/XAU/XAG 등)은 체결 캔들이 sparse해서
+ * 빈 배열을 반환하는 경우가 많음. mark price는 항상 계산되어 있음.
+ */
+async function gateGetCandles(
+  apiKey: string, apiSecret: string,
+  contract: string, interval: string, limit: number,
+): Promise<any[]> {
+  const path = '/api/v4/futures/usdt/candlesticks';
+  try {
+    const raw = await gateGet(apiKey, apiSecret, path, `contract=${contract}&interval=${interval}&limit=${limit}`);
+    if (Array.isArray(raw) && raw.length >= 10) return raw;
+  } catch { /* fall through */ }
+  try {
+    const raw = await gateGet(apiKey, apiSecret, path, `contract=mark_${contract}&interval=${interval}&limit=${limit}`);
+    return Array.isArray(raw) ? raw : [];
+  } catch { return []; }
+}
+
 // ─── 캔들 변환 ────────────────────────────────────────────────────────────────
 
 function parseCandles(raw: any[]): Candle[] {
@@ -552,11 +572,11 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    // Gate.io 캔들 병렬 fetch
+    // Gate.io 캔들 병렬 fetch — 원자재/저유동성 perp은 mark price 로 자동 fallback
     const [htfRaw, mtfRaw, ltfRaw] = await Promise.all([
-      gateGet(apiKey, apiSecret, '/api/v4/futures/usdt/candlesticks', `contract=${contract}&interval=4h&limit=200`),
-      gateGet(apiKey, apiSecret, '/api/v4/futures/usdt/candlesticks', `contract=${contract}&interval=15m&limit=200`),
-      gateGet(apiKey, apiSecret, '/api/v4/futures/usdt/candlesticks', `contract=${contract}&interval=5m&limit=100`),
+      gateGetCandles(apiKey, apiSecret, contract, '4h', 200),
+      gateGetCandles(apiKey, apiSecret, contract, '15m', 200),
+      gateGetCandles(apiKey, apiSecret, contract, '5m', 100),
     ]);
 
     const htfC = parseCandles(htfRaw);

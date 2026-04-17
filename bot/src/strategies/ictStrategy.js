@@ -392,6 +392,7 @@ class IctStrategy {
     const confluence = [];
     let entryConfirmed = false;
     let entryType = null;
+    let iofedZone = null; // IOFED drill candle body — SL 체인에서 구조적 SL 후보로 사용
 
     const swingHighs = indicators.findSwingHighs(candles, config.ict.structureShiftBars);
     const swingLows = indicators.findSwingLows(candles, config.ict.structureShiftBars);
@@ -458,6 +459,7 @@ class IctStrategy {
           confluence.push(`IOFED ${latest.type} (${latest.consecutiveBars}연속봉 후 반전)`);
           entryConfirmed = true;
           entryType = 'IOFED';
+          iofedZone = latest.entryZone; // drill candle body — SL 후보로 전달
         }
       }
     }
@@ -487,6 +489,7 @@ class IctStrategy {
       swingHighs,
       swingLows,
       sessionRanges,
+      iofedZone,
     };
   }
 
@@ -530,6 +533,13 @@ class IctStrategy {
           if (ob.low < price) { slCandidates.push(ob.low * (1 - slPct * 0.3)); break; }
         }
       }
+      // 2.5. IOFED drill candle body (institutional entry pocket) — MTF OB 보다 타이트, LTF swing 보다 구조적
+      if (slCandidates.length === 0 && ltfEntry.iofedZone) {
+        const zoneLow = ltfEntry.iofedZone.low;
+        if (zoneLow < price && (price - zoneLow * (1 - 0.001)) / price <= maxRiskPct) {
+          slCandidates.push(zoneLow * (1 - 0.001));
+        }
+      }
       // 3. LTF Swing Low
       if (slCandidates.length === 0 && ltfEntry.swingLows) {
         for (let i = ltfEntry.swingLows.length - 1; i >= 0; i--) {
@@ -560,6 +570,13 @@ class IctStrategy {
         for (let i = mtfStructure.orderBlocks.length - 1; i >= 0; i--) {
           const ob = mtfStructure.orderBlocks[i];
           if (ob.high > price) { slCandidates.push(ob.high * (1 + slPct * 0.3)); break; }
+        }
+      }
+      // 2.5. IOFED drill candle body (bullish drill = 마지막 양봉 body 상단)
+      if (slCandidates.length === 0 && ltfEntry.iofedZone) {
+        const zoneHigh = ltfEntry.iofedZone.high;
+        if (zoneHigh > price && (zoneHigh * (1 + 0.001) - price) / price <= maxRiskPct) {
+          slCandidates.push(zoneHigh * (1 + 0.001));
         }
       }
       if (slCandidates.length === 0 && ltfEntry.swingHighs) {

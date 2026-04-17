@@ -174,16 +174,24 @@ const indicators = {
           const bottom = c1.high;
           const ce = (top + bottom) / 2; // Consequent Encroachment
 
-          // Fill 계산: 이후 캔들이 FVG를 얼마나 채웠는지
+          // maxFillPercent: FVG 형성 이후 wick 최대 침투 깊이 (monotonic — 한번 찍히면 유지).
+          //   isFilled(=invalidation) 판정 전용. "이 FVG 가 역사적으로 얼마나 건드려졌는가".
           let fillLevel = top; // FVG 상단부터 시작
           for (let k = i + 1; k < candles.length; k++) {
             if (candles[k].low < fillLevel) {
               fillLevel = candles[k].low;
             }
           }
-          const fillPercent = fillLevel <= bottom ? 100
+          const maxFillPercent = fillLevel <= bottom ? 100
             : Math.max(0, ((top - fillLevel) / (top - bottom)) * 100);
-          const isFilled = fillPercent >= 100;
+          const isFilled = maxFillPercent >= 100;
+
+          // fillPercent: 현재가 기준 FVG 내 침투 깊이. inRange 와 시간 기준 일치.
+          //   0% = 현재가가 top 이상 (미접촉), 100% = 현재가가 bottom 이하.
+          //   "FVG Fill 진입" 조건은 이 현재 시점 값으로 판단 → 되돌림 후 재진입이 fresh 로 인식됨.
+          const fillPercent = (currentPrice >= top) ? 0
+            : (currentPrice <= bottom) ? 100
+            : ((top - currentPrice) / (top - bottom)) * 100;
 
           gaps.bullish.push({
             index: i - 1,
@@ -193,6 +201,7 @@ const indicators = {
             mid: ce,
             gapPercent: gapSize * 100,
             fillPercent: parseFloat(fillPercent.toFixed(1)),
+            maxFillPercent: parseFloat(maxFillPercent.toFixed(1)),
             isFilled,
             timestamp: c2.timestamp,
             // 현재가가 CE 근처인지

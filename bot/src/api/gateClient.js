@@ -39,6 +39,9 @@ const gateClient = {
   async getTicker(contract) {
     try {
       const { body } = await futuresApi.listFuturesTickers(SETTLE, { contract });
+      if (!Array.isArray(body) || body.length === 0 || !body[0]) {
+        throw new Error(`티커 응답 없음: ${contract}`);
+      }
       const ticker = body[0];
       return {
         last: parseFloat(ticker.last),
@@ -236,6 +239,42 @@ const gateClient = {
   },
 
   /**
+   * 최근 청산 이력 조회 (실현 PnL 확인용)
+   *
+   * Gate.io FuturesApi.listPositionClose(settle, { contract, limit })
+   *   → PositionClose[] : { time, pnl, contract, side, textSize, accumSize,
+   *                          firstOpenTime, longPrice, shortPrice, text, maxSize }
+   *   pnl 필드가 해당 청산의 실현 손익 (USDT).
+   *   time 은 초 단위(epoch seconds) 숫자.
+   *
+   * 이전엔 getMyTrades 를 썼으나 FuturesMyTrade 에는 pnl 필드가 없어 실효성 없음.
+   *
+   * @returns {Array<{ time, pnl, contract, side, accumSize, firstOpenTime, text, maxSize }>}
+   */
+  async getRecentClosedPositions(contract, limit = 20) {
+    try {
+      const { body } = await futuresApi.listPositionClose(SETTLE, { contract, limit });
+      if (!Array.isArray(body)) return [];
+      return body.map((p) => ({
+        time:          p.time != null ? Number(p.time) : null,
+        pnl:           p.pnl != null ? parseFloat(p.pnl) : null,
+        contract:      p.contract,
+        side:          p.side,
+        accumSize:     p.accumSize != null ? Number(p.accumSize)
+                       : (p.accum_size != null ? Number(p.accum_size) : null),
+        firstOpenTime: p.firstOpenTime != null ? Number(p.firstOpenTime)
+                       : (p.first_open_time != null ? Number(p.first_open_time) : null),
+        text:          p.text,
+        maxSize:       p.maxSize != null ? Number(p.maxSize)
+                       : (p.max_size != null ? Number(p.max_size) : null),
+      }));
+    } catch (err) {
+      logger.debug(`청산 이력 조회 실패 [${contract}]: ${err.message}`);
+      return [];
+    }
+  },
+
+  /**
    * 잔고 조회
    */
   async getBalance() {
@@ -319,16 +358,33 @@ const gateClient = {
     const autoSize = direction === 'long' ? 'close_long' : 'close_short';
     const modeOpts = { isDual, autoSize };
 
-    if (direction === 'long') {
-      // SL: mark price <= sl 도달 시 청산 (rule=2)
-      results.slOrder = await this._createTriggerOrder(contract, slRounded, 2, orderType, modeOpts);
-      // TP: mark price >= tp 도달 시 청산 (rule=1)
-      results.tpOrder = await this._createTriggerOrder(contract, tpRounded, 1, orderType, modeOpts);
-    } else {
-      // SL: mark price >= sl 도달 시 청산 (rule=1)
-      results.slOrder = await this._createTriggerOrder(contract, slRounded, 1, orderType, modeOpts);
-      // TP: mark price <= tp 도달 시 청산 (rule=2)
-      results.tpOrder = await this._createTriggerOrder(contract, tpRounded, 2, orderType, modeOpts);
+    // long:  SL rule=2 (<=), TP rule=1 (>=)
+    // short: SL rule=1 (>=), TP rule=2 (<=)
+    const slRule = direction === 'long' ? 2 : 1;
+    const tpRule = direction === 'long' ? 1 : 2;
+
+    // 1) SL 먼저 등록
+    results.slOrder = await this._createTriggerOrder(contract, slRounded, slRule, orderType, modeOpts);
+
+    // 2) TP 등록 시도 — 실패 시 이미 등록된 SL 을 롤백해 orphan 방지 (원자성 보장)
+    try {
+      results.tpOrder = await this._createTriggerOrder(contract, tpRounded, tpRule, orderType, modeOpts);
+    } catch (tpErr) {
+      if (results.slOrder && results.slOrder.id) {
+        logger.warn(
+          `[${contract}] TP 등록 실패 → 이미 등록된 SL 롤백 시도 (id=${results.slOrder.id}): ${tpErr.message}`
+        );
+        const rollback = await this.cancelTriggerOrder(results.slOrder.id);
+        if (rollback) {
+          logger.info(`[${contract}] SL 롤백 완료 (orphan 방지)`);
+          results.slOrder = null;
+        } else {
+          logger.error(
+            `[${contract}] SL 롤백 실패 — orphan SL 수동 정리 필요 (id=${results.slOrder.id})`
+          );
+        }
+      }
+      throw tpErr;
     }
 
     logger.info(`SL/TP 등록 완료: SL=${slRounded} TP=${tpRounded} (mode=${isDual ? 'dual' : 'single'})`);
@@ -398,14 +454,89 @@ const gateClient = {
   },
 
   /**
-   * 조건부 주문 전체 취소
+   * 조건부 주문 목록 조회 (특정 페어 / 상태별)
+   *
+   * SDK: listPriceTriggeredOrders(settle, status, { contract })
+   * 반환된 결과에서 한 번 더 contract 일치 여부를 필터하여 서버 측 필터가
+   * 제대로 동작하지 않아도 다른 페어가 섞이지 않도록 방어.
+   *
+   * @param {string} contract  거래 페어 (예: "BTC_USDT")
+   * @param {string} status    'open' | 'finished'
+   * @returns {Array} 트리거 주문 목록 (실패/없음 시 빈 배열)
+   */
+  async listTriggerOrders(contract, status = 'open') {
+    try {
+      const { body } = await futuresApi.listPriceTriggeredOrders(SETTLE, status, { contract });
+      if (!Array.isArray(body)) return [];
+      return body.filter((o) => o && o.initial && o.initial.contract === contract);
+    } catch (err) {
+      logger.error(`조건부 주문 목록 조회 실패 [${contract}]: ${err.message}`);
+      return [];
+    }
+  },
+
+  /**
+   * 조건부 주문 개별 취소 (주문 ID 지정)
+   *
+   * SDK: cancelPriceTriggeredOrder(settle, orderId)
+   * 이미 체결/취소된 주문은 경고 없이 true 반환 (idempotent).
+   */
+  async cancelTriggerOrder(orderId) {
+    if (orderId == null) return false;
+    try {
+      await futuresApi.cancelPriceTriggeredOrder(SETTLE, String(orderId));
+      return true;
+    } catch (err) {
+      const label = err && err.body && err.body.label;
+      if (label === 'ORDER_NOT_FOUND' || label === 'ORDER_FINISHED' || label === 'AUTO_ORDER_NOT_FOUND') {
+        logger.debug(`조건부 주문 이미 종료됨 [${orderId}]: ${label}`);
+        return true;
+      }
+      logger.error(`조건부 주문 취소 실패 [${orderId}]: ${err.message}`);
+      return false;
+    }
+  },
+
+  /**
+   * 페어별 조건부 주문 전체 취소 (안전 버전)
+   *
+   * ⚠️ 배경: Gate.io SDK의 cancelPriceTriggeredOrderList(settle, contract) 는
+   *   DELETE /futures/{settle}/price_orders 로 매핑되는데, 이 엔드포인트는
+   *   contract 쿼리 파라미터가 optional 이어서 직렬화 누락 시 **계정 전체**
+   *   trigger order 가 삭제되는 치명적 위험이 있다.
+   *   (2026-04-15 20:49:03 KST 사고 재발 방지)
+   *
+   * 안전 절차:
+   *   1) listTriggerOrders 로 해당 페어의 open trigger 만 조회
+   *   2) 각 주문의 order.initial.contract 재검증
+   *   3) cancelPriceTriggeredOrder(orderId) 로 개별 취소
+   *   → 다른 페어에는 절대 영향 없음.
    */
   async cancelAllTriggerOrders(contract) {
+    if (!contract) {
+      logger.error('cancelAllTriggerOrders: contract 인자 필수 (안전장치)');
+      return;
+    }
     try {
-      await futuresApi.cancelPriceTriggeredOrderList(SETTLE, contract);
-      logger.info(`조건부 주문 전체 취소: ${contract}`);
+      const orders = await this.listTriggerOrders(contract, 'open');
+      if (orders.length === 0) {
+        logger.debug(`조건부 주문 취소: ${contract} - 대상 없음`);
+        return;
+      }
+      let ok = 0;
+      for (const order of orders) {
+        if (!order.initial || order.initial.contract !== contract) {
+          logger.warn(
+            `조건부 주문 skip (contract 불일치): expected=${contract} actual=${order.initial && order.initial.contract}`
+          );
+          continue;
+        }
+        const success = await this.cancelTriggerOrder(order.id);
+        if (success) ok++;
+      }
+      logger.info(`조건부 주문 취소 완료: ${contract} (${ok}/${orders.length}건)`);
     } catch (err) {
-      logger.error(`조건부 주문 취소 실패: ${err.message}`);
+      logger.error(`조건부 주문 취소 실패 [${contract}]: ${err.message}`);
     }
   },
 };

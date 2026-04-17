@@ -169,7 +169,8 @@ async function fetchGatePositions(apiKey: string, apiSecret: string): Promise<Po
       const riskLevel = leverage <= 3 ? 1 : leverage <= 5 ? 2 : leverage <= 10 ? 3 : leverage <= 20 ? 4 : 5;
 
       // 보유 기간 계산
-      const openTime   = p.open_time ? new Date(p.open_time * 1000) : null;
+      const rawTime    = p.open_time || p.update_time || 0;
+      const openTime   = rawTime ? new Date(rawTime * 1000) : null;
       const holdingMs  = openTime ? Date.now() - openTime.getTime() : 0;
       const holdingDays  = Math.floor(holdingMs / (1000 * 60 * 60 * 24));
       const holdingHours = Math.floor((holdingMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));

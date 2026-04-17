@@ -20,9 +20,9 @@ export { Toggle }                 from './components/Toggle';
 export { CurrencyToggle }         from './components/CurrencyToggle';
 export { FadeTabView }            from './components/FadeTabView';
 export {
-  Skeleton, AssetCardSkeleton, TradingListSkeleton, AccountSkeleton,
+  Skeleton, AssetCardSkeleton, PositionRowSkeleton, TradingListSkeleton, AccountSkeleton,
   TransactionListSkeleton, PositionDetailSkeleton, AgentSettingsSkeleton,
-  TradeHistoryListSkeleton, TradeDetailSkeleton, BalanceCardsSkeleton,
+  TradeHistoryListSkeleton, TradeDetailSkeleton, BalanceCardsSkeleton, StatRowSkeleton,
   AccountRowSkeleton,
 } from './components/Skeleton';
 

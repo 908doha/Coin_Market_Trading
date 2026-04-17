@@ -4,6 +4,7 @@
  *   → Gate.io 선물 캔들스틱을 PricePoint[] 형태로 반환
  *
  * Gate.io 캔들 API는 공개 데이터 — 인증 불필요
+ * 주의: Gate.io는 from과 to를 동시에 지원하지 않음 → from만 사용
  *
  * 보유 기간별 자동 interval 선택:
  *   ≤ 1h  → 1m   (~60개)
@@ -35,37 +36,51 @@ export default async function handler(req: any, res: any) {
 
   const contract = (req.query?.contract as string ?? '').trim();
   const from     = parseInt(req.query?.from as string, 10);
-  const to       = parseInt(req.query?.to   as string, 10) || Math.floor(Date.now() / 1000);
+  const rawTo    = parseInt(req.query?.to   as string, 10) || 0;
+  const to       = rawTo || Math.floor(Date.now() / 1000);
 
   if (!contract || !from || from <= 0) {
     res.status(400).json({ error: 'contract, from 파라미터 필요' });
     return;
   }
 
-  const interval = pickInterval(from, to);
+  const safeTo = Math.max(to, from + 60);
+
+  if (safeTo - from < 60) {
+    res.status(200).json([]);
+    return;
+  }
+
+  const interval = pickInterval(from, safeTo);
+
+  // Gate.io는 from과 to를 동시에 사용할 수 없음
+  // from만 사용하고 limit으로 개수 제한
+  const url =
+    `https://api.gateio.ws/api/v4/futures/usdt/candlesticks` +
+    `?contract=${encodeURIComponent(contract)}` +
+    `&from=${from}&interval=${interval}&limit=1000`;
 
   try {
-    const url =
-      `https://api.gateio.ws/api/v4/futures/usdt/candlesticks` +
-      `?contract=${encodeURIComponent(contract)}` +
-      `&from=${from}&to=${to}&interval=${interval}&limit=1000`;
-
     const r = await fetch(url, { headers: { Accept: 'application/json' } });
     if (!r.ok) {
-      res.status(502).json({ error: `Gate.io ${r.status}` });
+      console.error('[candlesticks] Gate.io error', r.status, contract, from);
+      res.status(200).json([]);
       return;
     }
 
-    const data: any[] = await r.json();
-    const points = data
+    const data = await r.json();
+    const points = (Array.isArray(data) ? data : [])
       .filter((d: any) => d.t && d.c)
       .map((d: any) => ({
         t: Number(d.t) * 1000,   // Gate.io seconds → ms
         p: parseFloat(d.c),      // close price
-      }));
+      }))
+      // to가 명시적으로 지정된 경우 (과거 거래), 해당 시점까지만 자르기
+      .filter((pt: any) => rawTo ? pt.t <= rawTo * 1000 : true);
 
     res.status(200).json(points);
   } catch (err: any) {
-    res.status(502).json({ error: err?.message ?? 'fetch failed' });
+    console.error('[candlesticks] fetch error', err?.message, contract);
+    res.status(200).json([]);
   }
 }

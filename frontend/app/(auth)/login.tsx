@@ -76,7 +76,7 @@ export default function Login() {
               value={password}
               onChangeText={(v) => { setPassword(v); setError(''); }}
               error={error || undefined}
-              returnKeyType="done"
+              returnKeyType="go"
               onSubmitEditing={handleLogin}
             />
           </View>

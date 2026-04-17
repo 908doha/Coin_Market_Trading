@@ -382,7 +382,7 @@ function TradeRow({
 
   return (
     <AnimatedRow index={globalIndex}>
-      <PressableScale onPress={() => router.push(`/history/${trade.id}`)} scaleTo={0.98}>
+      <PressableScale onPress={() => router.push(`/(main)/history/${trade.id}`)} scaleTo={0.98}>
         <View style={[tr.wrap, !isLast && tr.border]}>
         <Text style={tr.date}>{showDate ? fmtDate(trade.exitAt) : ''}</Text>
         <View style={tr.middle}>

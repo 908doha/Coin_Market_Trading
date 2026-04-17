@@ -12,7 +12,7 @@ import Animated, {
   useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS,
 } from 'react-native-reanimated';
 import Svg, { Path, Polygon, Rect, Text as SvgText, Circle } from 'react-native-svg';
-import { Text, FadeTabView, PressableScale, BalanceCardsSkeleton, AnimatedNumber, CurrencyToggle } from '@/design-system';
+import { Text, FadeTabView, PressableScale, BalanceCardsSkeleton, PositionRowSkeleton, AnimatedNumber, CurrencyToggle } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType, ExchangeAccount } from '@/store/accounts';
@@ -381,7 +381,7 @@ export default function Trading() {
 
           {/* ── 메뉴: 거래 내역 + 수익 분석 ── */}
           <View style={st.menuSection}>
-            <PressableScale onPress={() => router.push('/history')}>
+            <PressableScale onPress={() => router.push('/(main)/history')}>
               <View style={st.menuRow}>
                 <Text style={st.menuText}>거래 내역</Text>
                 <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
@@ -430,6 +430,14 @@ export default function Trading() {
 
             {posExpanded && (() => {
               if (!positions || positions.length === 0) {
+                if (balancesLoading) {
+                  return (
+                    <View>
+                      <PositionRowSkeleton />
+                      <PositionRowSkeleton />
+                    </View>
+                  );
+                }
                 return (
                   <View style={st.emptyPos}>
                     <Text style={st.emptyPosText}>활성 포지션이 없어요</Text>

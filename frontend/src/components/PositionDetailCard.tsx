@@ -438,26 +438,26 @@ export function TpSlPathChart({
 
   return (
     <View>
-      <Svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H}>
+      <Svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ maxWidth: '100%' }}>
 
         {/* 구간 채우기 */}
         {tpY !== null && (
           <Rect x={PL} y={Math.min(entryY, tpY)}
-            width={cW} height={Math.abs(entryY - tpY)} fill="#F0445210" />
+            width={cW} height={Math.abs(entryY - tpY)} fill={PROFIT} opacity={0.06} />
         )}
         {slY !== null && (
           <Rect x={PL} y={Math.min(entryY, slY)}
-            width={cW} height={Math.abs(entryY - slY)} fill="#246CF910" />
+            width={cW} height={Math.abs(entryY - slY)} fill={LOSS} opacity={0.06} />
         )}
 
         {/* TP 기준선 */}
         {tpY !== null && tp && (
           <>
             <Line x1={PL} y1={tpY} x2={PL + cW} y2={tpY}
-              stroke={PROFIT} strokeWidth="1" strokeDasharray="4 3" />
+              stroke={PROFIT} strokeWidth={1} strokeDasharray={[4, 3]} />
             {!compact && (
               <SvgText x={PL + cW + 6} y={tpY + 4}
-                fontSize="10" fill={PROFIT} fontWeight="600">{fmt(tp)}</SvgText>
+                fontSize={10} fill={PROFIT} fontWeight="600">{fmt(tp)}</SvgText>
             )}
           </>
         )}
@@ -465,26 +465,26 @@ export function TpSlPathChart({
         {slY !== null && sl && (
           <>
             <Line x1={PL} y1={slY} x2={PL + cW} y2={slY}
-              stroke={LOSS} strokeWidth="1" strokeDasharray="4 3" />
+              stroke={LOSS} strokeWidth={1} strokeDasharray={[4, 3]} />
             {!compact && (
               <SvgText x={PL + cW + 6} y={slY + 4}
-                fontSize="10" fill={LOSS} fontWeight="600">{fmt(sl)}</SvgText>
+                fontSize={10} fill={LOSS} fontWeight="600">{fmt(sl)}</SvgText>
             )}
           </>
         )}
         {/* 진입가 기준선 */}
         <Line x1={PL} y1={entryY} x2={PL + cW} y2={entryY}
-          stroke="#555" strokeWidth="1" strokeDasharray="3 3" />
+          stroke="#555" strokeWidth={1} strokeDasharray={[3, 3]} />
         {!compact && (
           <SvgText x={PL + cW + 6} y={entryY + 4}
-            fontSize="10" fill="#888" fontWeight="500">{fmt(entry)}</SvgText>
+            fontSize={10} fill="#888" fontWeight="500">{fmt(entry)}</SvgText>
         )}
 
         {/* 세그먼트별 가격 경로 */}
         {segments.map((s, i) => (
           <Line key={i}
             x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2}
-            stroke={s.color} strokeWidth={compact ? '1.4' : '1.8'} strokeLinecap="round" />
+            stroke={s.color} strokeWidth={compact ? 1.4 : 1.8} strokeLinecap="round" />
         ))}
 
         {/* 현재가 점 */}
@@ -493,7 +493,7 @@ export function TpSlPathChart({
         {/* 현재가 레이블 (compact=false 만) */}
         {!compact && (
           <SvgText x={priceTagX} y={lastY - 7}
-            fontSize="9" fill={dotColor} fontWeight="700" textAnchor="middle">
+            fontSize={9} fill={dotColor} fontWeight="700" textAnchor="middle">
             {fmt(lastP)}
           </SvgText>
         )}
@@ -502,9 +502,9 @@ export function TpSlPathChart({
         {!compact && (
           <>
             <SvgText x={PL} y={H - 5}
-              fontSize="9" fill="#666" textAnchor="start">{fmtTime(minT)}</SvgText>
+              fontSize={9} fill="#666" textAnchor="start">{fmtTime(minT)}</SvgText>
             <SvgText x={PL + cW} y={H - 5}
-              fontSize="9" fill="#666" textAnchor="end">{fmtTime(maxT)}</SvgText>
+              fontSize={9} fill="#666" textAnchor="end">{fmtTime(maxT)}</SvgText>
           </>
         )}
       </Svg>

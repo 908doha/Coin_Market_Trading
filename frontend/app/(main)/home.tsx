@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Svg, { Polyline, Defs, LinearGradient, Stop, Polygon, Path, Rect, Text as SvgText, Line, Circle } from 'react-native-svg';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
-import { Text, GlassCard, PressableScale, FadeTabView, AssetCardSkeleton, PageHeader, CurrencyToggle, AnimatedNumber } from '@/design-system';
+import { Text, GlassCard, PressableScale, FadeTabView, AssetCardSkeleton, PageHeader, CurrencyToggle, AnimatedNumber, Skeleton } from '@/design-system';
 import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { accountService, tradesService } from '@/services';
 import type { Trade } from '@/services';
@@ -796,8 +796,10 @@ function AccountRow({
               color={colors.text.primary}
               letterSpacing={-0.3}
             />
+          ) : error ? (
+            <Text style={accRow.amount} numberOfLines={1}>조회 실패</Text>
           ) : (
-            <Text style={accRow.amount} numberOfLines={1}>{error ? '조회 실패' : '—'}</Text>
+            <Skeleton width={100} height={18} radius={6} />
           )}
           <Text style={accRow.name} numberOfLines={1}>
             {account.name || label} · {label}
@@ -807,7 +809,7 @@ function AccountRow({
           )}
         </View>
 
-        {balance && (
+        {balance ? (
           <View style={accRow.pnlCol}>
             <AnimatedNumber
               value={pnlValue}
@@ -825,7 +827,12 @@ function AccountRow({
               style={{ marginTop: 2 }}
             />
           </View>
-        )}
+        ) : !error ? (
+          <View style={accRow.pnlCol}>
+            <Skeleton width={72} height={14} radius={6} />
+            <Skeleton width={48} height={13} radius={5} style={{ marginTop: 4 }} />
+          </View>
+        ) : null}
       </View>
     </PressableScale>
   );

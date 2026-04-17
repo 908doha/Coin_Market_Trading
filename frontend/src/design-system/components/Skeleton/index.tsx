@@ -244,14 +244,19 @@ export function PositionDetailSkeleton() {
 export function TradeRowSkeleton() {
   return (
     <View style={[s.row, { paddingVertical: 14, paddingHorizontal: 20 }]}>
-      <Skeleton width={28} height={13} radius={5} style={{ marginRight: 12 }} />
-      <View style={{ flex: 1, gap: 7 }}>
-        <Skeleton width={110} height={15} radius={6} />
-        <Skeleton width={76} height={13} radius={5} />
+      <View style={{ width: 34, marginRight: 0 }}>
+        <Skeleton width={28} height={13} radius={5} />
       </View>
-      <View style={{ alignItems: 'flex-end', gap: 7 }}>
+      <View style={{ flex: 1, paddingRight: 12 }}>
+        <View style={[s.row, { gap: 6 }]}>
+          <Skeleton width={80} height={15} radius={6} />
+          <Skeleton width={28} height={18} radius={4} />
+          <Skeleton width={28} height={18} radius={4} />
+        </View>
+      </View>
+      <View style={{ alignItems: 'flex-end', gap: 4 }}>
         <Skeleton width={72} height={15} radius={6} />
-        <Skeleton width={44} height={13} radius={5} />
+        <Skeleton width={44} height={12} radius={5} />
       </View>
     </View>
   );
@@ -259,16 +264,7 @@ export function TradeRowSkeleton() {
 
 export function TradeHistoryListSkeleton() {
   return (
-    <View>
-      {/* 통계 바 */}
-      <View style={[s.row, { justifyContent: 'space-around', paddingVertical: 14, backgroundColor: '#FAFAFA', borderBottomWidth: 1, borderBottomColor: '#F0F0F0' }]}>
-        {[38, 28, 60].map((w, i) => (
-          <View key={i} style={{ alignItems: 'center', gap: 6 }}>
-            <Skeleton width={w - 10} height={12} radius={4} />
-            <Skeleton width={w} height={18} radius={6} />
-          </View>
-        ))}
-      </View>
+    <View style={{ backgroundColor: '#FFFFFF' }}>
       {/* 섹션 헤더 */}
       <View style={{ paddingHorizontal: 20, paddingTop: 24, paddingBottom: 10 }}>
         <Skeleton width={80} height={18} radius={6} />
@@ -362,6 +358,24 @@ export function AgentSettingsSkeleton() {
             <Skeleton width={undefined} height={13} radius={5} style={{ width: '80%' }} />
           </View>
         ))}
+      </View>
+    </View>
+  );
+}
+
+// ─── 홈: 연결된 계좌 행 로딩 ─────────────────────────────────────────────────
+
+export function AccountRowSkeleton() {
+  return (
+    <View style={[s.row, { paddingVertical: 16, paddingHorizontal: 20, gap: 14 }]}>
+      <Skeleton width={44} height={44} radius={22} />
+      <View style={{ flex: 1, gap: 8 }}>
+        <Skeleton width={100} height={18} radius={6} />
+        <Skeleton width={80} height={14} radius={5} />
+      </View>
+      <View style={{ alignItems: 'flex-end', gap: 6 }}>
+        <Skeleton width={72} height={14} radius={6} />
+        <Skeleton width={48} height={13} radius={5} />
       </View>
     </View>
   );

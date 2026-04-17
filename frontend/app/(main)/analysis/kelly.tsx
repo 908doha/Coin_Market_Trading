@@ -11,13 +11,14 @@ import { router } from 'expo-router';
 import Animated, {
   useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS,
 } from 'react-native-reanimated';
-import Svg, { Path, Polygon, Rect, Text as SvgText, Circle } from 'react-native-svg';
+import Svg, { Path, Rect, Circle } from 'react-native-svg';
 import {
   Text, GlassCard, SubPageHeader, ScreenTransition,
   Skeleton,
 } from '@/design-system';
 import { colors } from '@/design-system/tokens';
-import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType, ExchangeAccount } from '@/store/accounts';
+import { useAccounts, EXCHANGE_LABELS, ExchangeAccount } from '@/store/accounts';
+import { ExchangeLogo } from '@/components/ExchangeLogo';
 import { tradesService } from '@/services';
 import { formatKRW } from '@/utils/format';
 import type { Balance } from '@/services/account.service';

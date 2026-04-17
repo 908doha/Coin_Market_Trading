@@ -62,6 +62,9 @@ export interface PositionDetailViewProps {
   // ─ TP/SL 수동 새로고침 (포지션 상세에서만 사용)
   onRefreshTpSl?:    () => void;
   tpSlRefreshing?:   boolean;
+
+  // ─ 뒤로가기 커스텀 (홈→상세→홈 흐름)
+  onBack?:           () => void;
 }
 
 export function PositionDetailView({
@@ -76,13 +79,14 @@ export function PositionDetailView({
   pricePoints, entryAtTs,
   ictAnalysis, ictPending,
   onRefreshTpSl, tpSlRefreshing,
+  onBack,
 }: PositionDetailViewProps) {
   return (
     <ScreenTransition>
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg.elevated }} edges={['top']}>
         <SubPageHeader
           title={title}
-          onBack={() => router.back()}
+          onBack={onBack ?? (() => router.back())}
           rightElement={
             onToggleUsd
               ? <CurrencyToggle showUsd={showUsd} onToggle={onToggleUsd} />

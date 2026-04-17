@@ -23,7 +23,10 @@ const indicators = {
     for (let i = lookback; i < candles.length - lookback; i++) {
       let isSwingHigh = true;
       for (let j = 1; j <= lookback; j++) {
-        if (candles[i].high <= candles[i - j].high || candles[i].high <= candles[i + j].high) {
+        // first-of-plateau: 왼쪽은 `<=` (동일가 왼쪽에 있으면 그 봉이 먼저 — 현재 탈락),
+        // 오른쪽은 `<` (동일가 오른쪽에 있어도 현재가 first-of-plateau 로 통과).
+        // → EQH (Equal Highs) 가 swing 으로 감지됨 (ICT liquidity pool 핵심).
+        if (candles[i].high <= candles[i - j].high || candles[i].high < candles[i + j].high) {
           isSwingHigh = false;
           break;
         }
@@ -40,7 +43,8 @@ const indicators = {
     for (let i = lookback; i < candles.length - lookback; i++) {
       let isSwingLow = true;
       for (let j = 1; j <= lookback; j++) {
-        if (candles[i].low >= candles[i - j].low || candles[i].low >= candles[i + j].low) {
+        // first-of-plateau 대칭 (EQL 감지)
+        if (candles[i].low >= candles[i - j].low || candles[i].low > candles[i + j].low) {
           isSwingLow = false;
           break;
         }
@@ -67,10 +71,7 @@ const indicators = {
   detectMarketStructureShift(candles, swingHighs, swingLows) {
     if (swingHighs.length < 2 || swingLows.length < 2) return null;
 
-    const lastCandle = candles[candles.length - 1];
-    const prevCandle = candles[candles.length - 2];
-
-    // 직전 추세 추정
+    // 직전 추세 추정 (HH/HL 또는 LH/LL)
     const lh = swingHighs[swingHighs.length - 1].price;
     const ph = swingHighs[swingHighs.length - 2].price;
     const ll = swingLows[swingLows.length - 1].price;
@@ -83,21 +84,46 @@ const indicators = {
     const recentHigh = swingHighs[swingHighs.length - 1];
     const recentLow = swingLows[swingLows.length - 1];
 
-    // Bullish 돌파 (직전 swing high 종가 돌파)
+    // MSS 는 단일 캔들 이벤트가 아니라 "구조 상태" — 돌파 후 구조가 유효한 동안 지속.
+    // 스캔 범위는 swing-bounded (recentLow/recentHigh 이후) 로 자연 종결.
+
+    // Bullish MSS: recentLow 이후 어느 봉이든 종가가 prevHigh 돌파
+    //            + 이후 recentLow 종가로 깨지지 않음 (구조 intact)
     if (recentLow.index > recentHigh.index) {
       const prevHigh = swingHighs[swingHighs.length - 1];
-      if (lastCandle.close > prevHigh.price && prevCandle.close <= prevHigh.price) {
-        const kind = priorTrend === 'bearish' ? 'CHoCH' : 'BOS';
-        return { direction: 'bullish', kind, label: `${kind} bullish` };
+      let broke = false;
+      for (let k = recentLow.index + 1; k < candles.length; k++) {
+        if (candles[k].close > prevHigh.price) { broke = true; break; }
+      }
+      if (broke) {
+        let lowIntact = true;
+        for (let k = recentLow.index + 1; k < candles.length; k++) {
+          if (candles[k].close < recentLow.price) { lowIntact = false; break; }
+        }
+        if (lowIntact) {
+          const kind = priorTrend === 'bearish' ? 'CHoCH' : 'BOS';
+          return { direction: 'bullish', kind, label: `${kind} bullish` };
+        }
       }
     }
 
-    // Bearish 돌파 (직전 swing low 종가 돌파)
+    // Bearish MSS: recentHigh 이후 어느 봉이든 종가가 prevLow 돌파
+    //            + 이후 recentHigh 종가로 깨지지 않음
     if (recentHigh.index > recentLow.index) {
       const prevLow = swingLows[swingLows.length - 1];
-      if (lastCandle.close < prevLow.price && prevCandle.close >= prevLow.price) {
-        const kind = priorTrend === 'bullish' ? 'CHoCH' : 'BOS';
-        return { direction: 'bearish', kind, label: `${kind} bearish` };
+      let broke = false;
+      for (let k = recentHigh.index + 1; k < candles.length; k++) {
+        if (candles[k].close < prevLow.price) { broke = true; break; }
+      }
+      if (broke) {
+        let highIntact = true;
+        for (let k = recentHigh.index + 1; k < candles.length; k++) {
+          if (candles[k].close > recentHigh.price) { highIntact = false; break; }
+        }
+        if (highIntact) {
+          const kind = priorTrend === 'bullish' ? 'CHoCH' : 'BOS';
+          return { direction: 'bearish', kind, label: `${kind} bearish` };
+        }
       }
     }
 
@@ -120,13 +146,21 @@ const indicators = {
       const strongMove = (curr.close - curr.open) / curr.open > 0.002;
 
       if (prevBearish && currBullish && strongMove) {
-        blocks.bullish.push({
-          index: i - 1,
-          high: prev.open,
-          low: prev.close,
-          mid: (prev.open + prev.close) / 2,
-          timestamp: prev.timestamp,
-        });
+        // Bullish OB: body [prev.close, prev.open]. broken = 이후 종가가 OB low (prev.close) 아래 관통.
+        // wick 터치는 mitigation (테스트됨) — 여전히 유효. 종가 관통만 구조 파괴로 배제.
+        let broken = false;
+        for (let k = i + 1; k < candles.length; k++) {
+          if (candles[k].close < prev.close) { broken = true; break; }
+        }
+        if (!broken) {
+          blocks.bullish.push({
+            index: i - 1,
+            high: prev.open,
+            low: prev.close,
+            mid: (prev.open + prev.close) / 2,
+            timestamp: prev.timestamp,
+          });
+        }
       }
 
       const prevBullish = prev.close > prev.open;
@@ -134,13 +168,20 @@ const indicators = {
       const strongDown = (curr.open - curr.close) / curr.open > 0.002;
 
       if (prevBullish && currBearish && strongDown) {
-        blocks.bearish.push({
-          index: i - 1,
-          high: prev.close,
-          low: prev.open,
-          mid: (prev.open + prev.close) / 2,
-          timestamp: prev.timestamp,
-        });
+        // Bearish OB: body [prev.open, prev.close]. broken = 이후 종가가 OB high (prev.close) 위 관통.
+        let broken = false;
+        for (let k = i + 1; k < candles.length; k++) {
+          if (candles[k].close > prev.close) { broken = true; break; }
+        }
+        if (!broken) {
+          blocks.bearish.push({
+            index: i - 1,
+            high: prev.close,
+            low: prev.open,
+            mid: (prev.open + prev.close) / 2,
+            timestamp: prev.timestamp,
+          });
+        }
       }
     }
 
@@ -220,15 +261,24 @@ const indicators = {
           const bottom = c3.high;
           const ce = (top + bottom) / 2;
 
+          // maxFillPercent: FVG 형성 이후 wick 최대 침투 깊이 (monotonic).
+          //   isFilled(=invalidation) 판정 전용.
           let fillLevel = bottom;
           for (let k = i + 1; k < candles.length; k++) {
             if (candles[k].high > fillLevel) {
               fillLevel = candles[k].high;
             }
           }
-          const fillPercent = fillLevel >= top ? 100
+          const maxFillPercent = fillLevel >= top ? 100
             : Math.max(0, ((fillLevel - bottom) / (top - bottom)) * 100);
-          const isFilled = fillPercent >= 100;
+          const isFilled = maxFillPercent >= 100;
+
+          // fillPercent: 현재가 기준 FVG 내 침투 깊이. inRange 와 시간 기준 일치.
+          //   0% = 현재가가 bottom 이하 (미접촉), 100% = 현재가가 top 이상.
+          //   되돌림 후 재진입이 fresh 로 인식됨 (Bullish 수정과 거울 대칭).
+          const fillPercent = (currentPrice <= bottom) ? 0
+            : (currentPrice >= top) ? 100
+            : ((currentPrice - bottom) / (top - bottom)) * 100;
 
           gaps.bearish.push({
             index: i - 1,
@@ -238,6 +288,7 @@ const indicators = {
             mid: ce,
             gapPercent: gapSize * 100,
             fillPercent: parseFloat(fillPercent.toFixed(1)),
+            maxFillPercent: parseFloat(maxFillPercent.toFixed(1)),
             isFilled,
             timestamp: c2.timestamp,
             atCE: Math.abs(currentPrice - ce) / ce <= config.ict.fvgCeThreshold,

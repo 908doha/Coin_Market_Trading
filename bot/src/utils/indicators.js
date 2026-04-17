@@ -371,6 +371,26 @@ const indicators = {
   },
 
   /**
+   * 세션 시간 문자열("HH:MM") 을 해당 timezone 기준 "오늘" 의 UTC Date 로 변환.
+   *   - 'UTC'              : UTC 자정 기반 (Tokyo 등 DST 없는 세션)
+   *   - 'America/New_York' : NY midnight 기반 (DST 자동, 런던·NY 세션)
+   */
+  _sessionTimeToUtc(hhmm, timezone, now) {
+    const [h, m] = hhmm.split(':').map(Number);
+    let baseMid;
+    if (timezone === 'UTC') {
+      baseMid = new Date(Date.UTC(
+        now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()
+      ));
+    } else if (timezone === 'America/New_York') {
+      baseMid = this._nyMidnight(now);
+    } else {
+      throw new Error(`Unsupported session timezone: ${timezone}`);
+    }
+    return new Date(baseMid.getTime() + (h * 60 + m) * 60000);
+  },
+
+  /**
    * 전일 고가/저가 계산 (ICT 정통 NY midnight 기준)
    * 캔들 타임스탬프 기준으로 전일/오늘 데이터 필터링.
    */
@@ -423,16 +443,18 @@ const indicators = {
    */
   calculateSessionRanges(candles) {
     const now = new Date();
-    const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
     const currentPrice = candles[candles.length - 1].close;
 
     const ranges = {};
 
     for (const [key, session] of Object.entries(config.sessions)) {
-      const [sh, sm] = session.full.start.split(':').map(Number);
-      const [eh, em] = session.full.end.split(':').map(Number);
-      const sessionStart = new Date(todayStart.getTime() + (sh * 60 + sm) * 60000);
-      const sessionEnd = new Date(todayStart.getTime() + (eh * 60 + em) * 60000);
+      const tz = session.timezone || 'UTC';
+      const sessionStart = this._sessionTimeToUtc(session.full.start, tz, now);
+      const sessionEnd   = this._sessionTimeToUtc(session.full.end,   tz, now);
+      // 자정 넘김 세션 (end <= start): start 를 어제로 당김 — defensive
+      const startAdj = sessionEnd <= sessionStart
+        ? new Date(sessionStart.getTime() - 24 * 60 * 60 * 1000)
+        : sessionStart;
 
       let high = -Infinity;
       let low = Infinity;
@@ -440,14 +462,24 @@ const indicators = {
 
       for (const c of candles) {
         const t = new Date(c.timestamp);
-        if (t >= sessionStart && t < sessionEnd) {
+        if (t >= startAdj && t < sessionEnd) {
           if (c.high > high) high = c.high;
           if (c.low < low) low = c.low;
           hasData = true;
         }
       }
 
-      if (hasData && high !== -Infinity) {
+      if (hasData) {
+        // 세션 내 어느 봉에서든 wick sweep + 종가 복귀 여부 (마지막 봉 한정 아님)
+        let highSweep = false;
+        let lowSweep = false;
+        for (const c of candles) {
+          const t = new Date(c.timestamp);
+          if (t < startAdj || t >= sessionEnd) continue;
+          if (c.high > high && c.close < high) highSweep = true;
+          if (c.low  < low  && c.close > low)  lowSweep  = true;
+        }
+
         ranges[key] = {
           name: session.name,
           high,
@@ -457,8 +489,8 @@ const indicators = {
           // 현재가 대비 위치
           aboveHigh: currentPrice > high,
           belowLow: currentPrice < low,
-          highSweep: candles[candles.length - 1].high > high && currentPrice < high,
-          lowSweep: candles[candles.length - 1].low < low && currentPrice > low,
+          highSweep,
+          lowSweep,
         };
       }
     }
@@ -515,40 +547,36 @@ const indicators = {
   getActiveSession(now) {
     now = now || new Date();
 
-    // 주말 체크 (0=일, 6=토)
+    // 주말 체크 (0=일, 6=토, UTC 기준)
     const dayOfWeek = now.getUTCDay();
     if (dayOfWeek === 0 || dayOfWeek === 6) {
       return { active: false, session: null, reason: '주말 - 세션 휴장' };
     }
 
-    const utcH = now.getUTCHours();
-    const utcM = now.getUTCMinutes();
-    const utcTime = utcH * 60 + utcM;
-
+    // 2-pass: 활성 세션(AM/PM) 우선. 세션 간 오버랩 (예: NY AM Kill Zone 시작이
+    // London between-kz 끝과 겹침) 에서 inactive 리포트가 active 를 가리지 않도록.
     for (const [key, session] of Object.entries(config.sessions)) {
-      // AM 세션 체크
-      const [amSh, amSm] = session.am.start.split(':').map(Number);
-      const [amEh, amEm] = session.am.end.split(':').map(Number);
-      const amStart = amSh * 60 + amSm;
-      const amEnd = amEh * 60 + amEm;
+      const tz = session.timezone || 'UTC';
+      const amStart = this._sessionTimeToUtc(session.am.start, tz, now);
+      const amEnd   = this._sessionTimeToUtc(session.am.end,   tz, now);
+      const pmStart = this._sessionTimeToUtc(session.pm.start, tz, now);
+      const pmEnd   = this._sessionTimeToUtc(session.pm.end,   tz, now);
 
-      if (utcTime >= amStart && utcTime < amEnd) {
+      if (now >= amStart && now < amEnd) {
         return { active: true, session: key, period: 'am', name: `${session.name} AM` };
       }
-
-      // PM 세션 체크
-      const [pmSh, pmSm] = session.pm.start.split(':').map(Number);
-      const [pmEh, pmEm] = session.pm.end.split(':').map(Number);
-      const pmStart = pmSh * 60 + pmSm;
-      const pmEnd = pmEh * 60 + pmEm;
-
-      if (utcTime >= pmStart && utcTime < pmEnd) {
+      if (now >= pmStart && now < pmEnd) {
         return { active: true, session: key, period: 'pm', name: `${session.name} PM` };
       }
+    }
 
-      // 점심시간 체크
-      if (utcTime >= amEnd && utcTime < pmStart) {
-        return { active: false, session: key, reason: `${session.name} 점심시간` };
+    // 활성 세션이 없을 때만 between-kz 보고
+    for (const [key, session] of Object.entries(config.sessions)) {
+      const tz = session.timezone || 'UTC';
+      const amEnd   = this._sessionTimeToUtc(session.am.end,   tz, now);
+      const pmStart = this._sessionTimeToUtc(session.pm.start, tz, now);
+      if (now >= amEnd && now < pmStart) {
+        return { active: false, session: key, reason: `${session.name} between kill zones` };
       }
     }
 

@@ -46,28 +46,36 @@ const config = {
   cronSchedule: process.env.BOT_CRON_SCHEDULE || '*/1 * * * *',
   logLevel: process.env.LOG_LEVEL || 'info',
 
-  // Trading Sessions (UTC) - 점심시간 제외
+  // Trading Sessions (Hybrid timezone) — 점심/between kill zones 제외
+  //   - asian  : UTC 고정 (Tokyo 유동성 풀, DST 없음)
+  //   - london : NY-local (ICT 정통, DST 자동)
+  //   - ny     : NY-local + ICT Kill Zone (07:00-10:00 AM / 13:30-16:00 PM)
+  //             NYSE 개장 시간이 아닌 ICT 정의를 사용 — crypto 24/7 거래에선
+  //             NYSE 시간 자체는 무의미하고, ICT Kill Zone 이 유동성 phase 기준.
   sessions: {
     asian: {
       name: 'Asian',
-      am:  { start: '00:00', end: '03:00' },  // 아시아 오전
+      timezone: 'UTC',
+      am:  { start: '00:00', end: '03:00' },  // 아시아 오전 (Tokyo open)
       pm:  { start: '04:00', end: '06:30' },  // 아시아 오후
-      // 점심: 03:00 ~ 04:00 UTC (KST 12:00~13:00)
+      // 점심: 03:00 ~ 04:00 UTC (Tokyo 12:00~13:00 JST)
       full: { start: '00:00', end: '06:30' },
     },
     london: {
       name: 'London',
-      am:  { start: '07:00', end: '10:30' },  // 런던 오전
-      pm:  { start: '11:30', end: '14:00' },  // 런던 오후
-      // 점심: 10:30 ~ 11:30 UTC (런던 11:30~12:30)
-      full: { start: '07:00', end: '14:00' },
+      timezone: 'America/New_York',
+      am:  { start: '03:00', end: '06:30' },  // London AM (NY-local 03:00 = London 08:00 BST / 08:00 GMT)
+      pm:  { start: '07:30', end: '10:00' },  // London PM
+      // 점심: 06:30 ~ 07:30 NY-local (London 11:30~12:30)
+      full: { start: '03:00', end: '10:00' },
     },
     ny: {
       name: 'New York',
-      am:  { start: '13:30', end: '16:00' },  // NY 오전
-      pm:  { start: '17:00', end: '19:30' },  // NY 오후
-      // 점심: 16:00 ~ 17:00 UTC (NY 12:00~13:00)
-      full: { start: '13:30', end: '19:30' },
+      timezone: 'America/New_York',
+      am:  { start: '07:00', end: '10:00' },  // ICT AM Kill Zone
+      pm:  { start: '13:30', end: '16:00' },  // ICT PM Kill Zone
+      // between kill zones: 10:00 ~ 13:30 NY-local (low-liquidity 회피)
+      full: { start: '07:00', end: '16:00' },
     },
   },
 

@@ -189,11 +189,14 @@ class IctStrategy {
 
     // MSS 를 먼저 조회 — CHoCH (reversal) 는 HH/HL 보다 우선 (fresh 신호가 stale 구조 덮음).
     const mss = indicators.detectMarketStructureShift(candles, swingHighs, swingLows);
-    const mssAge = mss ? candles.length - mss.breakIndex - 1 : null;
+    // breakIndex 가 number 임을 명시 검증 — indicators 측 implementation detail 의존 해소.
+    const mssAge = (mss && Number.isFinite(mss.breakIndex))
+      ? candles.length - mss.breakIndex - 1 : null;
+    const mssAgeStr = mssAge !== null ? ` (${mssAge}봉 전 돌파)` : '';
 
     if (mss && mss.kind === 'CHoCH') {
       direction = mss.direction;
-      reason = `HTF ${mss.label} (${mssAge}봉 전 돌파)`;
+      reason = `HTF ${mss.label}${mssAgeStr}`;
     } else if (higherHigh && higherLow) {
       direction = 'bullish';
       reason = 'HH + HL';
@@ -203,7 +206,7 @@ class IctStrategy {
     } else if (mss) {
       // BOS continuation — HH/HL 미충족 시 폴백
       direction = mss.direction;
-      reason = `HTF ${mss.label} (${mssAge}봉 전 돌파)`;
+      reason = `HTF ${mss.label}${mssAgeStr}`;
     }
 
     // PDH/PDL sweep 폴백
@@ -224,8 +227,10 @@ class IctStrategy {
     //   index 기준 가장 최근 sweep 채택 (배열 순서 보장 없음 — reduce 로 명시).
     if (!direction) {
       const sweeps = indicators.detectLiquiditySweep(candles, swingHighs, swingLows);
-      if (sweeps.length > 0) {
-        const latest = sweeps.reduce((a, b) => (a.index > b.index ? a : b));
+      // self-defending reduce — 다른 3건 (L298, L416, L537) 과 동일 패턴.
+      //   `if (sweeps.length > 0)` 가드 의존 제거.
+      const latest = sweeps.reduce((a, b) => (!a || b.index > a.index ? b : a), null);
+      if (latest) {
         direction = latest.type;
         reason = `HTF ${latest.label}`;
       }
@@ -337,8 +342,11 @@ class IctStrategy {
     const mssAligned = mss && mss.direction === htfDirection;
 
     if (mssAligned) {
-      const age = candles.length - mss.breakIndex - 1;
-      confluence.push(`MTF(${config.timeframes.mtf}) ${mss.label} (${age}봉 전)`);
+      // breakIndex 가 number 임을 명시 검증 — HTF 와 대칭, indicators 의존 해소.
+      const age = Number.isFinite(mss.breakIndex)
+        ? candles.length - mss.breakIndex - 1 : null;
+      const ageStr = age !== null ? ` (${age}봉 전)` : '';
+      confluence.push(`MTF(${config.timeframes.mtf}) ${mss.label}${ageStr}`);
     }
 
     // Order Block - 위치 검증
@@ -548,8 +556,11 @@ class IctStrategy {
     // LTF MSS confluence 가점 (entry trigger 아님 — stateful MSS 는 오래된 break 도
     // 포함할 수 있어 독립 entry 근거로는 부적합, confluence 전용)
     if (ltfMssAligned) {
-      const age = candles.length - ltfMss.breakIndex - 1;
-      confluence.push(`LTF ${ltfMss.label} (${age}봉 전 돌파)`);
+      // breakIndex 가 number 임을 명시 검증 — HTF/MTF 와 대칭, indicators 의존 해소.
+      const age = Number.isFinite(ltfMss.breakIndex)
+        ? candles.length - ltfMss.breakIndex - 1 : null;
+      const ageStr = age !== null ? ` (${age}봉 전 돌파)` : '';
+      confluence.push(`LTF ${ltfMss.label}${ageStr}`);
     }
 
     return {

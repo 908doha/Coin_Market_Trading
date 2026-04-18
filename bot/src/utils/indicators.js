@@ -345,48 +345,43 @@ const indicators = {
       const currBullish = curr.close > curr.open;
       const currBearish = curr.close < curr.open;
 
-      // 이전 연속 봉 체크
-      let consecutiveBearish = 0;
-      let consecutiveBullish = 0;
+      // doji (close === open) 면 IOFED 자체 발생 불가 — 스캔 skip.
+      if (!currBullish && !currBearish) continue;
 
+      // curr 방향에 따라 반대 색상 한 방향만 카운트 (Bullish IOFED 는 이전 음봉,
+      //   Bearish IOFED 는 이전 양봉). 두 색상 동시 카운트는 항상 한쪽이 0 — 불필요.
+      const isOpposite = currBullish
+        ? (p) => p.close < p.open  // Bullish curr → 이전 음봉 카운트
+        : (p) => p.close > p.open; // Bearish curr → 이전 양봉 카운트
+
+      let consecutiveOpposite = 0;
       for (let j = 1; j <= Math.min(minBars + 5, i); j++) {
-        const prev = candles[i - j];
-        if (prev.close < prev.open) {
-          consecutiveBearish++;
+        if (isOpposite(candles[i - j])) {
+          consecutiveOpposite++;
         } else {
           break;
         }
       }
 
-      for (let j = 1; j <= Math.min(minBars + 5, i); j++) {
-        const prev = candles[i - j];
-        if (prev.close > prev.open) {
-          consecutiveBullish++;
-        } else {
-          break;
-        }
-      }
+      if (consecutiveOpposite < minBars) continue;
 
-      // Bullish IOFED: 연속 음봉 후 양봉
-      if (currBullish && consecutiveBearish >= minBars) {
-        const drillCandle = candles[i - 1]; // 마지막 음봉
+      const drillCandle = candles[i - 1]; // 마지막 반대색 봉 (institutional drill)
+      if (currBullish) {
+        // Bullish IOFED: drill = 마지막 음봉 (open=high, close=low of body)
         results.push({
           type: 'bullish',
           index: i,
           entryZone: { high: drillCandle.open, low: drillCandle.close },
-          consecutiveBars: consecutiveBearish,
+          consecutiveBars: consecutiveOpposite,
           timestamp: curr.timestamp,
         });
-      }
-
-      // Bearish IOFED: 연속 양봉 후 음봉
-      if (currBearish && consecutiveBullish >= minBars) {
-        const drillCandle = candles[i - 1]; // 마지막 양봉
+      } else {
+        // Bearish IOFED: drill = 마지막 양봉 (close=high, open=low of body)
         results.push({
           type: 'bearish',
           index: i,
           entryZone: { high: drillCandle.close, low: drillCandle.open },
-          consecutiveBars: consecutiveBullish,
+          consecutiveBars: consecutiveOpposite,
           timestamp: curr.timestamp,
         });
       }

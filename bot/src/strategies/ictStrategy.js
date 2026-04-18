@@ -97,9 +97,23 @@ class IctStrategy {
     const direction = htfBias.direction;
     const signal = direction === 'bullish' ? 'long' : 'short';
 
-    const { sl, tp, rr } = this._calculateSLTP(
+    const { sl, tp, rr, tpSource } = this._calculateSLTP(
       currentPrice, direction, mtfStructure, ltfEntry, htfBias
     );
+
+    // ========== Weak setup + fallback TP skip ==========
+    // ICT: "구조적 liquidity draw 없으면 매매 skip". weak setup (hasHtfPoi 없고
+    // confluence < 5) 과 fallback TP (구조적 타겟 전부 탈락) 의 이중 약점 조합은
+    // minRR 필터의 경계 (2.5) 를 정확히 통과해도 entry 금지.
+    const isFallbackTp = /^fallback/.test(tpSource || '');
+    if (!hasHtfPoi && confluence.length < 5 && isFallbackTp) {
+      logger.info(`[ICT v2] ${signal.toUpperCase()} weak setup + fallback TP → skip`);
+      return {
+        signal: null,
+        reason: 'weak setup + 구조적 TP 없음 (fallback)',
+        confluence,
+      };
+    }
 
     // ========== R:R 필터 (7-B: 컨플루언스 강도별 최소 R:R) ==========
     let minRR;
@@ -112,21 +126,21 @@ class IctStrategy {
     }
 
     if (rr < minRR) {
-      logger.info(`[ICT v2] ${signal.toUpperCase()} R:R ${rr} < 최소 ${minRR} (컨플루언스 ${confluence.length}개) → 스킵`);
+      logger.info(`[ICT v2] ${signal.toUpperCase()} R:R ${rr.toFixed(2)} < 최소 ${minRR} (컨플루언스 ${confluence.length}개) → 스킵`);
       return {
         signal: null,
-        reason: `R:R ${rr} 부족 (최소 ${minRR}, 컨플루언스 ${confluence.length}개)`,
+        reason: `R:R ${rr.toFixed(2)} 부족 (최소 ${minRR}, 컨플루언스 ${confluence.length}개)`,
         confluence,
       };
     }
 
     // ========== Setup Score ==========
     const setupScore = this._calculateSetupScore(confluence, rr);
-    logger.info(`[ICT v2] ${signal.toUpperCase()} | R:R ${rr} | ${setupScore.score}/100 ${setupScore.label} | ${confluence.length}개 컨플루언스`);
+    logger.info(`[ICT v2] ${signal.toUpperCase()} | R:R ${rr.toFixed(2)} | ${setupScore.score}/100 ${setupScore.label} | ${confluence.length}개 컨플루언스`);
 
     return {
       signal,
-      reason: `ICT v2 ${signal.toUpperCase()} - R:R ${rr} | ${setupScore.score}/100 ${setupScore.label}`,
+      reason: `ICT v2 ${signal.toUpperCase()} - R:R ${rr.toFixed(2)} | ${setupScore.score}/100 ${setupScore.label}`,
       entry: currentPrice,
       sl: parseFloat(sl.toFixed(2)),
       tp: parseFloat(tp.toFixed(2)),
@@ -784,7 +798,9 @@ class IctStrategy {
     const actualRR = Math.abs(tp - price) / risk;
     logger.info(`[SL/TP] SL=${sl.toFixed(2)} | TP=${tp.toFixed(2)} (${tpSource}) | R:R 1:${actualRR.toFixed(2)} | 후보 ${tpCandidates.length}개`);
 
-    return { sl, tp, rr: parseFloat(actualRR.toFixed(2)), tpSource };
+    // rr 은 raw 값 반환 — 소비처에서 display 시점에만 toFixed 적용.
+    // 반올림된 값을 비교에 쓰면 경계 0.005 이내 정밀도 손실 발생.
+    return { sl, tp, rr: actualRR, tpSource };
   }
 
   /**
@@ -838,7 +854,7 @@ class IctStrategy {
     else if (rr >= 2.5) rrBonus = 3;
     if (rrBonus > 0) {
       total += rrBonus;
-      breakdown.push({ text: `R:R ${rr} bonus`, points: rrBonus });
+      breakdown.push({ text: `R:R ${rr.toFixed(2)} bonus`, points: rrBonus });
     }
 
     const score = Math.min(total, 100);

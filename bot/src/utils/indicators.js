@@ -345,48 +345,43 @@ const indicators = {
       const currBullish = curr.close > curr.open;
       const currBearish = curr.close < curr.open;
 
-      // 이전 연속 봉 체크
-      let consecutiveBearish = 0;
-      let consecutiveBullish = 0;
+      // doji (close === open) 면 IOFED 자체 발생 불가 — 스캔 skip.
+      if (!currBullish && !currBearish) continue;
 
+      // curr 방향에 따라 반대 색상 한 방향만 카운트 (Bullish IOFED 는 이전 음봉,
+      //   Bearish IOFED 는 이전 양봉). 두 색상 동시 카운트는 항상 한쪽이 0 — 불필요.
+      const isOpposite = currBullish
+        ? (p) => p.close < p.open  // Bullish curr → 이전 음봉 카운트
+        : (p) => p.close > p.open; // Bearish curr → 이전 양봉 카운트
+
+      let consecutiveOpposite = 0;
       for (let j = 1; j <= Math.min(minBars + 5, i); j++) {
-        const prev = candles[i - j];
-        if (prev.close < prev.open) {
-          consecutiveBearish++;
+        if (isOpposite(candles[i - j])) {
+          consecutiveOpposite++;
         } else {
           break;
         }
       }
 
-      for (let j = 1; j <= Math.min(minBars + 5, i); j++) {
-        const prev = candles[i - j];
-        if (prev.close > prev.open) {
-          consecutiveBullish++;
-        } else {
-          break;
-        }
-      }
+      if (consecutiveOpposite < minBars) continue;
 
-      // Bullish IOFED: 연속 음봉 후 양봉
-      if (currBullish && consecutiveBearish >= minBars) {
-        const drillCandle = candles[i - 1]; // 마지막 음봉
+      const drillCandle = candles[i - 1]; // 마지막 반대색 봉 (institutional drill)
+      if (currBullish) {
+        // Bullish IOFED: drill = 마지막 음봉 (open=high, close=low of body)
         results.push({
           type: 'bullish',
           index: i,
           entryZone: { high: drillCandle.open, low: drillCandle.close },
-          consecutiveBars: consecutiveBearish,
+          consecutiveBars: consecutiveOpposite,
           timestamp: curr.timestamp,
         });
-      }
-
-      // Bearish IOFED: 연속 양봉 후 음봉
-      if (currBearish && consecutiveBullish >= minBars) {
-        const drillCandle = candles[i - 1]; // 마지막 양봉
+      } else {
+        // Bearish IOFED: drill = 마지막 양봉 (close=high, open=low of body)
         results.push({
           type: 'bearish',
           index: i,
           entryZone: { high: drillCandle.close, low: drillCandle.open },
-          consecutiveBars: consecutiveBullish,
+          consecutiveBars: consecutiveOpposite,
           timestamp: curr.timestamp,
         });
       }
@@ -418,6 +413,22 @@ const indicators = {
   // ========== PDH / PDL (Previous Day High / Low) ==========
 
   /**
+   * NY timezone 의 현재 년/월/일 정수 추출 (Intl.DateTimeFormat formatToParts 기반).
+   *   _nyMidnight / _sessionTimeToUtc 가 공유하는 NY 로컬 날짜 추출 패턴.
+   */
+  _nyDateParts(now) {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/New_York',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(now);
+    return {
+      y:  parseInt(parts.find((p) => p.type === 'year').value, 10),
+      mo: parseInt(parts.find((p) => p.type === 'month').value, 10),
+      d:  parseInt(parts.find((p) => p.type === 'day').value, 10),
+    };
+  },
+
+  /**
    * NY timezone 의 "오늘 자정" 에 해당하는 UTC Date 반환.
    * ICT 정통의 daily bias reset 시점. DST (EST UTC-5 / EDT UTC-4) 자동 판정.
    *
@@ -425,13 +436,7 @@ const indicators = {
    *   (clock-displayed elapsed 방식은 DST 전환일에 1시간 오차 발생 — 사용 금지.)
    */
   _nyMidnight(now) {
-    const dateParts = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/New_York',
-      year: 'numeric', month: '2-digit', day: '2-digit',
-    }).formatToParts(now);
-    const y  = parseInt(dateParts.find((p) => p.type === 'year').value, 10);
-    const mo = parseInt(dateParts.find((p) => p.type === 'month').value, 10);
-    const d  = parseInt(dateParts.find((p) => p.type === 'day').value, 10);
+    const { y, mo, d } = this._nyDateParts(now);
 
     // UTC 05:00 (EST midnight 후보) 에서 NY 시계가 00 이면 EST 기간, 01 이면 EDT 기간.
     const probe = new Date(Date.UTC(y, mo - 1, d, 5, 0, 0));
@@ -465,13 +470,7 @@ const indicators = {
     } else if (timezone === 'America/New_York') {
       // NY 로컬 날짜(Y/M/D) 추출 후, NY clock HH:MM 을 EST(UTC-5) 후보로 만든 뒤
       // probe → NY 시계가 h 를 가리키면 EST, 아니면 EDT (UTC-4).
-      const dateParts = new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'America/New_York',
-        year: 'numeric', month: '2-digit', day: '2-digit',
-      }).formatToParts(now);
-      const y  = parseInt(dateParts.find((p) => p.type === 'year').value, 10);
-      const mo = parseInt(dateParts.find((p) => p.type === 'month').value, 10);
-      const d  = parseInt(dateParts.find((p) => p.type === 'day').value, 10);
+      const { y, mo, d } = this._nyDateParts(now);
 
       const estCandidate = new Date(Date.UTC(y, mo - 1, d, h + 5, m, 0));
       const nyHour = parseInt(new Intl.DateTimeFormat('en-US', {

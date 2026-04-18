@@ -80,6 +80,7 @@ const indicators = {
     let priorTrend = null;
     if (lh > ph && ll > pl) priorTrend = 'bullish';
     else if (lh < ph && ll < pl) priorTrend = 'bearish';
+    else priorTrend = 'mixed'; // HH+LL 또는 LH+HL 등 혼합 — 추세 불명확
 
     const recentHigh = swingHighs[swingHighs.length - 1];
     const recentLow = swingLows[swingLows.length - 1];
@@ -101,7 +102,9 @@ const indicators = {
           if (candles[k].close < recentLow.price) { lowIntact = false; break; }
         }
         if (lowIntact) {
-          const kind = priorTrend === 'bearish' ? 'CHoCH' : 'BOS';
+          // bullish break: priorTrend 가 strict bullish (HH+HL) 일 때만 BOS(continuation).
+          // bearish/mixed 는 방향 선언 또는 반전이므로 CHoCH.
+          const kind = priorTrend === 'bullish' ? 'BOS' : 'CHoCH';
           return { direction: 'bullish', kind, label: `${kind} bullish`, breakIndex };
         }
       }
@@ -121,7 +124,8 @@ const indicators = {
           if (candles[k].close > recentHigh.price) { highIntact = false; break; }
         }
         if (highIntact) {
-          const kind = priorTrend === 'bullish' ? 'CHoCH' : 'BOS';
+          // 거울 대칭: bearish break 에선 priorTrend 가 strict bearish 일 때만 BOS.
+          const kind = priorTrend === 'bearish' ? 'BOS' : 'CHoCH';
           return { direction: 'bearish', kind, label: `${kind} bearish`, breakIndex };
         }
       }
@@ -137,7 +141,9 @@ const indicators = {
     const blocks = { bullish: [], bearish: [] };
     const start = Math.max(0, candles.length - lookback);
 
-    for (let i = start + 2; i < candles.length; i++) {
+    // OB 는 prev (i-1) 만 참조하므로 start + 1 이 최소 인덱스 (findFairValueGaps 의 c1=i-2
+    // 요건을 복붙해 start + 2 로 쓰던 부분 수정 — lookback 윈도우 경계 OB 1봉 누락 해소).
+    for (let i = start + 1; i < candles.length; i++) {
       const prev = candles[i - 1];
       const curr = candles[i];
 

@@ -91,6 +91,7 @@ const config = {
     orderBlockLookback: 50,
     structureShiftBars: 5,
     fvgCeThreshold: 0.0015,    // FVG CE 진입 허용 오차 (0.15%)
+    fvgFillBasis: 'wick',      // 'wick' | 'close' — FVG fill 판정 기준 (wick=ICT 보수적, close=rejection 허용)
     iofedMinBars: 3,           // IOFED 최소 연속 봉 수
     iofedWindow: 10,           // detectIOFED 탐색 윈도우 (최근 N봉)
     iofedValidityBars: 5,      // _analyzeLTF: 최근 N봉 내 IOFED 만 유효 entry 근거

@@ -215,18 +215,22 @@ const indicators = {
 
       // Bullish FVG
       if (c1.high < c3.low) {
-        const gapSize = (c3.low - c1.high) / c2.close;
+        // gap 분모는 gap 시작점(c1.high) 기준 — ICT 정통, c2 바디 위치 영향 제거
+        const gapSize = (c3.low - c1.high) / c1.high;
         if (gapSize >= config.ict.fvgMinGapPercent / 100) {
           const top = c3.low;
           const bottom = c1.high;
           const ce = (top + bottom) / 2; // Consequent Encroachment
 
-          // maxFillPercent: FVG 형성 이후 wick 최대 침투 깊이 (monotonic — 한번 찍히면 유지).
+          // maxFillPercent: FVG 형성 이후 최대 침투 깊이 (monotonic — 한번 찍히면 유지).
           //   isFilled(=invalidation) 판정 전용. "이 FVG 가 역사적으로 얼마나 건드려졌는가".
+          //   config.ict.fvgFillBasis 로 wick / close 학파 선택 가능 (기본 wick, ICT 보수적).
+          const fillBasis = config.ict.fvgFillBasis || 'wick';
           let fillLevel = top; // FVG 상단부터 시작
           for (let k = i + 1; k < candles.length; k++) {
-            if (candles[k].low < fillLevel) {
-              fillLevel = candles[k].low;
+            const probe = fillBasis === 'close' ? candles[k].close : candles[k].low;
+            if (probe < fillLevel) {
+              fillLevel = probe;
             }
           }
           const maxFillPercent = fillLevel <= bottom ? 100
@@ -261,18 +265,21 @@ const indicators = {
 
       // Bearish FVG
       if (c1.low > c3.high) {
-        const gapSize = (c1.low - c3.high) / c2.close;
+        // gap 분모는 gap 시작점(c1.low) 기준 — ICT 정통 (Bullish 와 거울 대칭)
+        const gapSize = (c1.low - c3.high) / c1.low;
         if (gapSize >= config.ict.fvgMinGapPercent / 100) {
           const top = c1.low;
           const bottom = c3.high;
           const ce = (top + bottom) / 2;
 
-          // maxFillPercent: FVG 형성 이후 wick 최대 침투 깊이 (monotonic).
-          //   isFilled(=invalidation) 판정 전용.
+          // maxFillPercent: FVG 형성 이후 최대 침투 깊이 (monotonic).
+          //   isFilled(=invalidation) 판정 전용. wick/close 학파 선택 가능.
+          const fillBasis = config.ict.fvgFillBasis || 'wick';
           let fillLevel = bottom;
           for (let k = i + 1; k < candles.length; k++) {
-            if (candles[k].high > fillLevel) {
-              fillLevel = candles[k].high;
+            const probe = fillBasis === 'close' ? candles[k].close : candles[k].high;
+            if (probe > fillLevel) {
+              fillLevel = probe;
             }
           }
           const maxFillPercent = fillLevel >= top ? 100

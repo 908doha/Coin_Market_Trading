@@ -619,7 +619,7 @@ class IctStrategy {
    */
   _calculateSLTP(price, direction, mtfStructure, ltfEntry, htfBias) {
     const slPct = config.stopLossPercent / 100;
-    const maxRiskPct = 0.03;
+    const maxRiskPct = config.ict.maxRiskPct;
     const maxRR = 5.0;
     const fallbackRR = 2.5;
 

@@ -96,6 +96,7 @@ const config = {
     iofedWindow: 10,           // detectIOFED 탐색 윈도우 (최근 N봉)
     iofedValidityBars: 5,      // _analyzeLTF: 최근 N봉 내 IOFED 만 유효 entry 근거
     htfPoiTolerance: 0.003,    // HTF OB/FVG 근접 허용 오차 (activeOBs/FVGs 판정, ±0.3%)
+    maxRiskPct: 0.03,          // SL 최대 risk 상한 (진입가 대비, Pass 1-C-4a-1)
   },
 };
 

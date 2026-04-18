@@ -205,6 +205,7 @@ const indicators = {
   findFairValueGaps(candles, lookback) {
     lookback = lookback || config.ict.orderBlockLookback;
     const gaps = { bullish: [], bearish: [] };
+    if (!candles || candles.length === 0) return gaps;
     const start = Math.max(0, candles.length - lookback);
     const currentPrice = candles[candles.length - 1].close;
 
@@ -233,8 +234,12 @@ const indicators = {
               fillLevel = probe;
             }
           }
-          const maxFillPercent = fillLevel <= bottom ? 100
+          // 라운딩 후 값으로 isFilled 판정 — 저장된 maxFillPercent 와 일관 보장.
+          //   raw 값이 [99.95, 100) 이면 toFixed(1) 가 "100.0" 으로 snap 되므로
+          //   isFilled 도 그 기준에 맞춰 true 가 되어야 모순이 발생하지 않음.
+          const rawMaxFill = fillLevel <= bottom ? 100
             : Math.max(0, ((top - fillLevel) / (top - bottom)) * 100);
+          const maxFillPercent = parseFloat(rawMaxFill.toFixed(1));
           const isFilled = maxFillPercent >= 100;
 
           // fillPercent: 현재가 기준 FVG 내 침투 깊이. inRange 와 시간 기준 일치.
@@ -252,7 +257,7 @@ const indicators = {
             mid: ce,
             gapPercent: gapSize * 100,
             fillPercent: parseFloat(fillPercent.toFixed(1)),
-            maxFillPercent: parseFloat(maxFillPercent.toFixed(1)),
+            maxFillPercent,
             isFilled,
             timestamp: c2.timestamp,
             // 현재가가 CE 근처인지
@@ -282,8 +287,10 @@ const indicators = {
               fillLevel = probe;
             }
           }
-          const maxFillPercent = fillLevel >= top ? 100
+          // Bullish 수정과 거울 대칭 — 라운딩 후 값으로 isFilled 판정.
+          const rawMaxFill = fillLevel >= top ? 100
             : Math.max(0, ((fillLevel - bottom) / (top - bottom)) * 100);
+          const maxFillPercent = parseFloat(rawMaxFill.toFixed(1));
           const isFilled = maxFillPercent >= 100;
 
           // fillPercent: 현재가 기준 FVG 내 침투 깊이. inRange 와 시간 기준 일치.
@@ -301,7 +308,7 @@ const indicators = {
             mid: ce,
             gapPercent: gapSize * 100,
             fillPercent: parseFloat(fillPercent.toFixed(1)),
-            maxFillPercent: parseFloat(maxFillPercent.toFixed(1)),
+            maxFillPercent,
             isFilled,
             timestamp: c2.timestamp,
             atCE: Math.abs(currentPrice - ce) / ce <= config.ict.fvgCeThreshold,
@@ -391,6 +398,8 @@ const indicators = {
   // ========== OTE ==========
 
   calculateOTE(swingHigh, swingLow) {
+    // 입력 방어: 호출자가 swing 순서를 뒤바꾸거나 동일값을 전달하면 OTE 가 의미 없음.
+    if (!(swingHigh > swingLow)) return null;
     const range = swingHigh - swingLow;
     return {
       bullish: {
@@ -459,8 +468,7 @@ const indicators = {
    * 전일 고가/저가 계산 (ICT 정통 NY midnight 기준)
    * 캔들 타임스탬프 기준으로 전일/오늘 데이터 필터링.
    */
-  calculatePDHL(candles) {
-    const now = new Date();
+  calculatePDHL(candles, now = new Date()) {
     const todayStart = this._nyMidnight(now);
     const yesterdayStart = new Date(todayStart.getTime() - 24 * 60 * 60 * 1000);
 
@@ -506,8 +514,8 @@ const indicators = {
    * 세션별 고가/저가 레인지 계산
    * 당일 각 세션의 레인지를 유동성 기준으로 사용
    */
-  calculateSessionRanges(candles) {
-    const now = new Date();
+  calculateSessionRanges(candles, now = new Date()) {
+    if (!candles || candles.length === 0) return {};
     const currentPrice = candles[candles.length - 1].close;
 
     const ranges = {};
@@ -583,6 +591,10 @@ const indicators = {
 
     for (const sh of swingHighs.slice(-3)) {
       for (let i = start; i < candles.length; i++) {
+        // swing 이 sweep 후보 봉과 같거나 이후면 유효 sweep 대상이 아님.
+        //   현재 config (structureShiftBars=5, WINDOW=5) 에선 자연 회피되지만
+        //   둘 중 어느 값이 바뀌어도 swing.index >= i 가 가능 — 명시적 방어.
+        if (sh.index >= i) continue;
         const c = candles[i];
         const p = candles[i - 1];
         if (c.high > sh.price && c.close < sh.price && p.close < sh.price) {
@@ -607,6 +619,8 @@ const indicators = {
 
     for (const sl of swingLows.slice(-3)) {
       for (let i = start; i < candles.length; i++) {
+        // Bullish 대칭 — swing 이 sweep 후보 봉 이후면 skip.
+        if (sl.index >= i) continue;
         const c = candles[i];
         const p = candles[i - 1];
         if (c.low < sl.price && c.close > sl.price && p.close > sl.price) {

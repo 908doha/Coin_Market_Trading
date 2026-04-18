@@ -205,6 +205,7 @@ const indicators = {
   findFairValueGaps(candles, lookback) {
     lookback = lookback || config.ict.orderBlockLookback;
     const gaps = { bullish: [], bearish: [] };
+    if (!candles || candles.length === 0) return gaps;
     const start = Math.max(0, candles.length - lookback);
     const currentPrice = candles[candles.length - 1].close;
 
@@ -233,8 +234,12 @@ const indicators = {
               fillLevel = probe;
             }
           }
-          const maxFillPercent = fillLevel <= bottom ? 100
+          // 라운딩 후 값으로 isFilled 판정 — 저장된 maxFillPercent 와 일관 보장.
+          //   raw 값이 [99.95, 100) 이면 toFixed(1) 가 "100.0" 으로 snap 되므로
+          //   isFilled 도 그 기준에 맞춰 true 가 되어야 모순이 발생하지 않음.
+          const rawMaxFill = fillLevel <= bottom ? 100
             : Math.max(0, ((top - fillLevel) / (top - bottom)) * 100);
+          const maxFillPercent = parseFloat(rawMaxFill.toFixed(1));
           const isFilled = maxFillPercent >= 100;
 
           // fillPercent: 현재가 기준 FVG 내 침투 깊이. inRange 와 시간 기준 일치.
@@ -252,7 +257,7 @@ const indicators = {
             mid: ce,
             gapPercent: gapSize * 100,
             fillPercent: parseFloat(fillPercent.toFixed(1)),
-            maxFillPercent: parseFloat(maxFillPercent.toFixed(1)),
+            maxFillPercent,
             isFilled,
             timestamp: c2.timestamp,
             // 현재가가 CE 근처인지
@@ -282,8 +287,10 @@ const indicators = {
               fillLevel = probe;
             }
           }
-          const maxFillPercent = fillLevel >= top ? 100
+          // Bullish 수정과 거울 대칭 — 라운딩 후 값으로 isFilled 판정.
+          const rawMaxFill = fillLevel >= top ? 100
             : Math.max(0, ((fillLevel - bottom) / (top - bottom)) * 100);
+          const maxFillPercent = parseFloat(rawMaxFill.toFixed(1));
           const isFilled = maxFillPercent >= 100;
 
           // fillPercent: 현재가 기준 FVG 내 침투 깊이. inRange 와 시간 기준 일치.
@@ -301,7 +308,7 @@ const indicators = {
             mid: ce,
             gapPercent: gapSize * 100,
             fillPercent: parseFloat(fillPercent.toFixed(1)),
-            maxFillPercent: parseFloat(maxFillPercent.toFixed(1)),
+            maxFillPercent,
             isFilled,
             timestamp: c2.timestamp,
             atCE: Math.abs(currentPrice - ce) / ce <= config.ict.fvgCeThreshold,
@@ -391,6 +398,8 @@ const indicators = {
   // ========== OTE ==========
 
   calculateOTE(swingHigh, swingLow) {
+    // 입력 방어: 호출자가 swing 순서를 뒤바꾸거나 동일값을 전달하면 OTE 가 의미 없음.
+    if (!(swingHigh > swingLow)) return null;
     const range = swingHigh - swingLow;
     return {
       bullish: {
@@ -438,31 +447,60 @@ const indicators = {
   /**
    * 세션 시간 문자열("HH:MM") 을 해당 timezone 기준 "오늘" 의 UTC Date 로 변환.
    *   - 'UTC'              : UTC 자정 기반 (Tokyo 등 DST 없는 세션)
-   *   - 'America/New_York' : NY midnight 기반 (DST 자동, 런던·NY 세션)
+   *   - 'America/New_York' : NY clock HH:MM 을 그 날 NY 자정 후 clock-elapsed 로 해석.
+   *                           DST 전환일에 `_nyMidnight + millisecond-elapsed` 방식은
+   *                           clock-time 과 real-elapsed 가 어긋나 1시간 미스 — 대신
+   *                           NY 로컬 날짜 + clock HH 을 EST/EDT 두 후보로 probe.
    */
   _sessionTimeToUtc(hhmm, timezone, now) {
     const [h, m] = hhmm.split(':').map(Number);
-    let baseMid;
+    if (!Number.isFinite(h) || !Number.isFinite(m)) {
+      throw new Error(`Invalid session time format: "${hhmm}" (expected "HH:MM")`);
+    }
     if (timezone === 'UTC') {
-      baseMid = new Date(Date.UTC(
+      const baseMid = new Date(Date.UTC(
         now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()
       ));
+      return new Date(baseMid.getTime() + (h * 60 + m) * 60000);
     } else if (timezone === 'America/New_York') {
-      baseMid = this._nyMidnight(now);
+      // NY 로컬 날짜(Y/M/D) 추출 후, NY clock HH:MM 을 EST(UTC-5) 후보로 만든 뒤
+      // probe → NY 시계가 h 를 가리키면 EST, 아니면 EDT (UTC-4).
+      const dateParts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/New_York',
+        year: 'numeric', month: '2-digit', day: '2-digit',
+      }).formatToParts(now);
+      const y  = parseInt(dateParts.find((p) => p.type === 'year').value, 10);
+      const mo = parseInt(dateParts.find((p) => p.type === 'month').value, 10);
+      const d  = parseInt(dateParts.find((p) => p.type === 'day').value, 10);
+
+      const estCandidate = new Date(Date.UTC(y, mo - 1, d, h + 5, m, 0));
+      const nyHour = parseInt(new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York', hour12: false, hour: '2-digit',
+      }).format(estCandidate), 10) % 24;
+
+      return nyHour === h
+        ? estCandidate                                               // EST (UTC-5)
+        : new Date(Date.UTC(y, mo - 1, d, h + 4, m, 0));             // EDT (UTC-4)
     } else {
       throw new Error(`Unsupported session timezone: ${timezone}`);
     }
-    return new Date(baseMid.getTime() + (h * 60 + m) * 60000);
   },
 
   /**
    * 전일 고가/저가 계산 (ICT 정통 NY midnight 기준)
    * 캔들 타임스탬프 기준으로 전일/오늘 데이터 필터링.
    */
-  calculatePDHL(candles) {
-    const now = new Date();
+  calculatePDHL(candles, now = new Date()) {
     const todayStart = this._nyMidnight(now);
-    const yesterdayStart = new Date(todayStart.getTime() - 24 * 60 * 60 * 1000);
+    // DST 전환 인접일 (Mar 9 / Nov 2) 에는 "어제" 가 23h/25h 길이라 -24h 로는 1시간 어긋남.
+    //   안전하게 어제 NY 정오 (확실히 어제 내부) 를 만든 뒤 _nyMidnight 재호출.
+    const yesterdayNoon = new Date(todayStart.getTime() - 12 * 60 * 60 * 1000);
+    const yesterdayStart = this._nyMidnight(yesterdayNoon);
+
+    // Gate.io candles 는 timestamp 가 ms 정수 (gateClient.js:23 의 c.t*1000).
+    //   Date 객체 대신 numeric 비교로 tight-loop 할당/GC 압력 감소.
+    const yesterdayStartMs = yesterdayStart.getTime();
+    const todayStartMs = todayStart.getTime();
 
     let pdh = -Infinity;
     let pdl = Infinity;
@@ -470,8 +508,8 @@ const indicators = {
 
     // 1차 패스: 전일 PDH/PDL 확정
     for (const c of candles) {
-      const t = new Date(c.timestamp);
-      if (t >= yesterdayStart && t < todayStart) {
+      const t = c.timestamp;
+      if (t >= yesterdayStartMs && t < todayStartMs) {
         if (c.high > pdh) pdh = c.high;
         if (c.low < pdl) pdl = c.low;
         hasPrevDay = true;
@@ -485,8 +523,7 @@ const indicators = {
     let pdhSweep = false;
     let pdlSweep = false;
     for (const c of candles) {
-      const t = new Date(c.timestamp);
-      if (t < todayStart) continue;
+      if (c.timestamp < todayStartMs) continue;
       if (c.high > pdh && c.close < pdh) pdhSweep = true;
       if (c.low  < pdl && c.close > pdl) pdlSweep = true;
     }
@@ -506,8 +543,8 @@ const indicators = {
    * 세션별 고가/저가 레인지 계산
    * 당일 각 세션의 레인지를 유동성 기준으로 사용
    */
-  calculateSessionRanges(candles) {
-    const now = new Date();
+  calculateSessionRanges(candles, now = new Date()) {
+    if (!candles || candles.length === 0) return {};
     const currentPrice = candles[candles.length - 1].close;
 
     const ranges = {};
@@ -520,14 +557,17 @@ const indicators = {
       const startAdj = sessionEnd <= sessionStart
         ? new Date(sessionStart.getTime() - 24 * 60 * 60 * 1000)
         : sessionStart;
+      // tight-loop 에서 Date 객체 할당 피하기 위해 ms 로 캐싱.
+      const startMs = startAdj.getTime();
+      const endMs = sessionEnd.getTime();
 
       let high = -Infinity;
       let low = Infinity;
       let hasData = false;
 
       for (const c of candles) {
-        const t = new Date(c.timestamp);
-        if (t >= startAdj && t < sessionEnd) {
+        const t = c.timestamp;
+        if (t >= startMs && t < endMs) {
           if (c.high > high) high = c.high;
           if (c.low < low) low = c.low;
           hasData = true;
@@ -539,8 +579,8 @@ const indicators = {
         let highSweep = false;
         let lowSweep = false;
         for (const c of candles) {
-          const t = new Date(c.timestamp);
-          if (t < startAdj || t >= sessionEnd) continue;
+          const t = c.timestamp;
+          if (t < startMs || t >= endMs) continue;
           if (c.high > high && c.close < high) highSweep = true;
           if (c.low  < low  && c.close > low)  lowSweep  = true;
         }
@@ -583,6 +623,10 @@ const indicators = {
 
     for (const sh of swingHighs.slice(-3)) {
       for (let i = start; i < candles.length; i++) {
+        // swing 이 sweep 후보 봉과 같거나 이후면 유효 sweep 대상이 아님.
+        //   현재 config (structureShiftBars=5, WINDOW=5) 에선 자연 회피되지만
+        //   둘 중 어느 값이 바뀌어도 swing.index >= i 가 가능 — 명시적 방어.
+        if (sh.index >= i) continue;
         const c = candles[i];
         const p = candles[i - 1];
         if (c.high > sh.price && c.close < sh.price && p.close < sh.price) {
@@ -607,6 +651,8 @@ const indicators = {
 
     for (const sl of swingLows.slice(-3)) {
       for (let i = start; i < candles.length; i++) {
+        // Bullish 대칭 — swing 이 sweep 후보 봉 이후면 skip.
+        if (sl.index >= i) continue;
         const c = candles[i];
         const p = candles[i - 1];
         if (c.low < sl.price && c.close > sl.price && p.close > sl.price) {
@@ -638,9 +684,7 @@ const indicators = {
    * - 점심시간 제외
    * - 주말 제외 (토/일)
    */
-  getActiveSession(now) {
-    now = now || new Date();
-
+  getActiveSession(now = new Date()) {
     // 주말(토/일) 제외 — ICT 정통: institutional 부재로 sweep 은 유동성 사냥이 아닌
     // 노이즈. Gate.io 선물은 24/7 이지만 ICT 분석 맥락에선 주말 시그널 신뢰도 낮음.
     const dayOfWeek = now.getUTCDay();

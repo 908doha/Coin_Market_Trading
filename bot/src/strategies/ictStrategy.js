@@ -497,8 +497,8 @@ class IctStrategy {
 
       if (relevantIOFED.length > 0) {
         const latest = relevantIOFED[relevantIOFED.length - 1];
-        // 최근 5봉 내의 IOFED만 유효
-        if (candles.length - latest.index <= 5) {
+        // config.ict.iofedValidityBars 봉 내의 IOFED 만 유효 entry 근거
+        if (candles.length - latest.index <= config.ict.iofedValidityBars) {
           confluence.push(`IOFED ${latest.type} (${latest.consecutiveBars}연속봉 후 반전)`);
           entryConfirmed = true;
           entryType = 'IOFED';
@@ -507,22 +507,30 @@ class IctStrategy {
       }
     }
 
-    // Liquidity Sweep 추가 컨플루언스 (BSL/SSL 라벨링)
+    // LTF MSS (BOS/CHoCH) — sweep entry 의 확정 조건 + confluence 로 공용 사용
+    const ltfMss = indicators.detectMarketStructureShift(candles, swingHighs, swingLows);
+    const ltfMssAligned = ltfMss && ltfMss.direction === htfDirection;
+
+    // Liquidity Sweep (BSL/SSL) — index 기준 최신 sweep 채택
     const sweeps = indicators.detectLiquiditySweep(candles, swingHighs, swingLows);
-    const relevantSweep = sweeps.find(s => s.type === htfDirection);
+    const relevantSweep = sweeps
+      .filter((s) => s.type === htfDirection)
+      .reduce((a, b) => (!a || b.index > a.index ? b : a), null);
     if (relevantSweep) {
       confluence.push(`LTF ${relevantSweep.label} @ ${relevantSweep.level.toFixed(2)}`);
-      if (!entryConfirmed) {
+      // ICT 정통 "sweep is bait, CHoCH is confirmation" — sweep 단독 entry 금지.
+      // CE/Fill/IOFED 미충족 시 sweep + LTF MSS 정렬 조합만 entry trigger.
+      if (!entryConfirmed && ltfMssAligned) {
         entryConfirmed = true;
         entryType = relevantSweep.liquidity; // 'BSL' | 'SSL'
       }
     }
 
-    // LTF MSS 추가 컨플루언스 (BOS/CHoCH 라벨링)
-    const ltfMss = indicators.detectMarketStructureShift(candles, swingHighs, swingLows);
-    if (ltfMss && ltfMss.direction === htfDirection) {
+    // LTF MSS confluence 가점 (entry trigger 아님 — stateful MSS 는 오래된 break 도
+    // 포함할 수 있어 독립 entry 근거로는 부적합, confluence 전용)
+    if (ltfMssAligned) {
       const age = candles.length - ltfMss.breakIndex - 1;
-      confluence.push(`LTF ${ltfMss.label} (${age}봉 전)`);
+      confluence.push(`LTF ${ltfMss.label} (${age}봉 전 돌파)`);
     }
 
     return {

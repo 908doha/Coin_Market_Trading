@@ -322,8 +322,9 @@ const indicators = {
     const len = candles.length;
     if (len < minBars + 2) return results;
 
-    // 최근 30봉 내에서 탐색
-    const start = Math.max(0, len - 30);
+    // 최근 iofedWindow 봉 내에서 탐색 (소비처 iofedValidityBars 5 + 여유 마진).
+    //   이전엔 30봉 하드코드였으나 소비처 5봉 필터와 비일관 → config 로 통합.
+    const start = Math.max(0, len - (config.ict.iofedWindow || 10));
 
     for (let i = start + minBars; i < len; i++) {
       const curr = candles[i];

@@ -92,6 +92,8 @@ const config = {
     structureShiftBars: 5,
     fvgCeThreshold: 0.0015,    // FVG CE 진입 허용 오차 (0.15%)
     iofedMinBars: 3,           // IOFED 최소 연속 봉 수
+    iofedWindow: 10,           // detectIOFED 탐색 윈도우 (최근 N봉)
+    iofedValidityBars: 5,      // _analyzeLTF: 최근 N봉 내 IOFED 만 유효 entry 근거
     htfPoiTolerance: 0.003,    // HTF OB/FVG 근접 허용 오차 (activeOBs/FVGs 판정, ±0.3%)
   },
 };

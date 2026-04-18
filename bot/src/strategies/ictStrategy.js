@@ -54,6 +54,11 @@ class IctStrategy {
       return { signal: null, reason: `HTF 방향 불명확: ${htfBias.reason}` };
     }
     confluence.push(`HTF(${config.timeframes.htf}) ${htfBias.direction.toUpperCase()}`);
+    // HTF MSS 가 direction 근거일 때 별도 confluence (MTF/LTF MSS 와 대칭적 가점).
+    // HH/HL 폴백 direction 은 매칭되지 않아 영향 없음.
+    if (htfBias.reason && /^HTF (BOS|CHoCH)/.test(htfBias.reason)) {
+      confluence.push(`HTF ${htfBias.reason.replace(/^HTF /, '')}`);
+    }
 
     // PDH/PDL
     if (htfBias.pdhl) {
@@ -817,10 +822,13 @@ class IctStrategy {
     const rules = [
       { pattern: /세션:/,                              points: 5,  label: 'Session' },
       { pattern: /HTF\(.+\)\s+(BULLISH|BEARISH)/,      points: 10, label: 'HTF Direction' },
+      // HTF MSS (BOS/CHoCH) — MTF/LTF MSS 와 대칭, HTF 레이어 우선으로 10점
+      { pattern: /HTF (BOS|CHoCH)/,                    points: 10, label: 'HTF MSS' },
       { pattern: /★ HTF OB 진입/,                      points: 15, label: 'HTF OB Entry' },
       { pattern: /★ HTF FVG 진입/,                     points: 12, label: 'HTF FVG Entry' },
-      { pattern: /★ HTF (BSL|SSL) sweep/,              points: 10, label: 'HTF Sweep' },
-      { pattern: /PD[HL] Sweep/,                        points: 8,  label: 'PDH/PDL Sweep' },
+      // HTF Sweep ↔ PDH/PDL 가중치 swap — ICT daily liquidity 우선 (1-B-2 NY midnight 업그레이드 반영)
+      { pattern: /★ HTF (BSL|SSL) sweep/,              points: 8,  label: 'HTF Sweep' },
+      { pattern: /PD[HL] Sweep/,                        points: 10, label: 'PDH/PDL Sweep' },
       { pattern: /★ HTF\+MTF.+겹침/,                   points: 12, label: 'HTF+MTF Overlap' },
       { pattern: /MTF\(.+\)\s+(BOS|CHoCH)/,            points: 8,  label: 'MTF MSS' },
       { pattern: /MTF OB/,                              points: 7,  label: 'MTF OB' },
@@ -838,12 +846,20 @@ class IctStrategy {
     let total = 0;
 
     for (const c of confluence) {
+      let matched = false;
       for (const rule of rules) {
         if (rule.pattern.test(c)) {
           total += rule.points;
           breakdown.push({ text: c, points: rule.points });
+          matched = true;
           break; // 한 컨플루언스에 하나의 룰만 매칭
         }
+      }
+      // 매치 실패 confluence 는 silent 로 누락되지 않고 breakdown 에 표시 + 경고.
+      // 향후 confluence 포맷 변경 시 regex 호환성 깨져도 조기 탐지 가능.
+      if (!matched) {
+        logger.warn(`[setupScore] 미매칭 confluence: "${c}"`);
+        breakdown.push({ text: c, points: 0, unmatched: true });
       }
     }
 

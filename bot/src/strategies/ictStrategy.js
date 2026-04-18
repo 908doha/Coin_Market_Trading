@@ -576,6 +576,25 @@ class IctStrategy {
   }
 
   /**
+   * SL candidate 를 safety margin 적용 + maxRiskPct 가드 후 반환.
+   *   - basePrice: structural reference (OB.low / OB.high, swing.price, PDL/PDH 등)
+   *   - direction === 'bullish' 시 candidate = basePrice * (1 - 0.001) (price 아래로 0.1% 띄움)
+   *   - direction === 'bearish' 시 candidate = basePrice * (1 + 0.001) (price 위로 0.1% 띄움)
+   *   - sideValid: bullish 는 basePrice < price, bearish 는 basePrice > price
+   *   - risk (|candidate - price| / price) 가 maxRiskPct 초과 시 null 반환
+   *
+   * Pass 3-A: SL 체인 10 지점 (Bullish 5 + Bearish 5) 의 중복 패턴 추출.
+   */
+  _slCandidateWithRisk(price, basePrice, direction, maxRiskPct) {
+    const sideValid = direction === 'bullish' ? basePrice < price : basePrice > price;
+    if (!sideValid) return null;
+    const marginFactor = direction === 'bullish' ? (1 - 0.001) : (1 + 0.001);
+    const candidate = basePrice * marginFactor;
+    const dist = Math.abs(candidate - price);
+    return dist / price <= maxRiskPct ? candidate : null;
+  }
+
+  /**
    * SL/TP 계산 (ICT 구조적 R:R)
    *
    * SL: 구조 기반 (HTF OB → MTF OB → LTF Swing → PDH/PDL → 고정 %)
@@ -601,48 +620,33 @@ class IctStrategy {
       // 1. HTF OB
       if (htfBias && htfBias.orderBlocks) {
         for (let i = htfBias.orderBlocks.length - 1; i >= 0; i--) {
-          const ob = htfBias.orderBlocks[i];
-          if (ob.low < price && (price - ob.low * (1 - 0.001)) / price <= maxRiskPct) {
-            slCandidates.push(ob.low * (1 - 0.001));
-            break;
-          }
+          const c = this._slCandidateWithRisk(price, htfBias.orderBlocks[i].low, 'bullish', maxRiskPct);
+          if (c !== null) { slCandidates.push(c); break; }
         }
       }
       // 2. MTF OB — margin 0.001 통일, maxRiskPct 가드
       if (slCandidates.length === 0) {
         for (let i = mtfStructure.orderBlocks.length - 1; i >= 0; i--) {
-          const ob = mtfStructure.orderBlocks[i];
-          const candidate = ob.low * (1 - 0.001);
-          if (ob.low < price && (price - candidate) / price <= maxRiskPct) {
-            slCandidates.push(candidate);
-            break;
-          }
+          const c = this._slCandidateWithRisk(price, mtfStructure.orderBlocks[i].low, 'bullish', maxRiskPct);
+          if (c !== null) { slCandidates.push(c); break; }
         }
       }
       // 2.5. IOFED drill candle body (institutional entry pocket) — MTF OB 보다 타이트, LTF swing 보다 구조적
       if (slCandidates.length === 0 && ltfEntry.iofedZone) {
-        const zoneLow = ltfEntry.iofedZone.low;
-        if (zoneLow < price && (price - zoneLow * (1 - 0.001)) / price <= maxRiskPct) {
-          slCandidates.push(zoneLow * (1 - 0.001));
-        }
+        const c = this._slCandidateWithRisk(price, ltfEntry.iofedZone.low, 'bullish', maxRiskPct);
+        if (c !== null) slCandidates.push(c);
       }
       // 3. LTF Swing Low — maxRiskPct 가드 추가
       if (slCandidates.length === 0 && ltfEntry.swingLows) {
         for (let i = ltfEntry.swingLows.length - 1; i >= 0; i--) {
-          const swingLow = ltfEntry.swingLows[i].price;
-          const candidate = swingLow * (1 - 0.001);
-          if (swingLow < price && (price - candidate) / price <= maxRiskPct) {
-            slCandidates.push(candidate);
-            break;
-          }
+          const c = this._slCandidateWithRisk(price, ltfEntry.swingLows[i].price, 'bullish', maxRiskPct);
+          if (c !== null) { slCandidates.push(c); break; }
         }
       }
       // 4. PDL — maxRiskPct 가드 추가 (강한 추세장에서 PDL 이 멀 때 무제한 risk 차단)
       if (slCandidates.length === 0 && htfBias.pdhl && htfBias.pdhl.pdl < price) {
-        const candidate = htfBias.pdhl.pdl * (1 - 0.001);
-        if ((price - candidate) / price <= maxRiskPct) {
-          slCandidates.push(candidate);
-        }
+        const c = this._slCandidateWithRisk(price, htfBias.pdhl.pdl, 'bullish', maxRiskPct);
+        if (c !== null) slCandidates.push(c);
       }
       // 5. 고정 % 폴백 (모든 구조적 후보 탈락 시 안전망)
       if (slCandidates.length === 0) slCandidates.push(price * (1 - slPct));
@@ -653,48 +657,33 @@ class IctStrategy {
       // Short SL
       if (htfBias && htfBias.orderBlocks) {
         for (let i = htfBias.orderBlocks.length - 1; i >= 0; i--) {
-          const ob = htfBias.orderBlocks[i];
-          if (ob.high > price && (ob.high * (1 + 0.001) - price) / price <= maxRiskPct) {
-            slCandidates.push(ob.high * (1 + 0.001));
-            break;
-          }
+          const c = this._slCandidateWithRisk(price, htfBias.orderBlocks[i].high, 'bearish', maxRiskPct);
+          if (c !== null) { slCandidates.push(c); break; }
         }
       }
       // 2. MTF OB — margin 0.001 통일 + maxRiskPct 가드
       if (slCandidates.length === 0) {
         for (let i = mtfStructure.orderBlocks.length - 1; i >= 0; i--) {
-          const ob = mtfStructure.orderBlocks[i];
-          const candidate = ob.high * (1 + 0.001);
-          if (ob.high > price && (candidate - price) / price <= maxRiskPct) {
-            slCandidates.push(candidate);
-            break;
-          }
+          const c = this._slCandidateWithRisk(price, mtfStructure.orderBlocks[i].high, 'bearish', maxRiskPct);
+          if (c !== null) { slCandidates.push(c); break; }
         }
       }
       // 2.5. IOFED drill candle body (bullish drill = 마지막 양봉 body 상단)
       if (slCandidates.length === 0 && ltfEntry.iofedZone) {
-        const zoneHigh = ltfEntry.iofedZone.high;
-        if (zoneHigh > price && (zoneHigh * (1 + 0.001) - price) / price <= maxRiskPct) {
-          slCandidates.push(zoneHigh * (1 + 0.001));
-        }
+        const c = this._slCandidateWithRisk(price, ltfEntry.iofedZone.high, 'bearish', maxRiskPct);
+        if (c !== null) slCandidates.push(c);
       }
       // 3. LTF Swing High — maxRiskPct 가드 추가
       if (slCandidates.length === 0 && ltfEntry.swingHighs) {
         for (let i = ltfEntry.swingHighs.length - 1; i >= 0; i--) {
-          const swingHigh = ltfEntry.swingHighs[i].price;
-          const candidate = swingHigh * (1 + 0.001);
-          if (swingHigh > price && (candidate - price) / price <= maxRiskPct) {
-            slCandidates.push(candidate);
-            break;
-          }
+          const c = this._slCandidateWithRisk(price, ltfEntry.swingHighs[i].price, 'bearish', maxRiskPct);
+          if (c !== null) { slCandidates.push(c); break; }
         }
       }
       // 4. PDH — maxRiskPct 가드 추가
       if (slCandidates.length === 0 && htfBias.pdhl && htfBias.pdhl.pdh > price) {
-        const candidate = htfBias.pdhl.pdh * (1 + 0.001);
-        if ((candidate - price) / price <= maxRiskPct) {
-          slCandidates.push(candidate);
-        }
+        const c = this._slCandidateWithRisk(price, htfBias.pdhl.pdh, 'bearish', maxRiskPct);
+        if (c !== null) slCandidates.push(c);
       }
       // 5. 고정 % 폴백
       if (slCandidates.length === 0) slCandidates.push(price * (1 + slPct));

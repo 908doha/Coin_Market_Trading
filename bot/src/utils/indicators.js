@@ -447,21 +447,43 @@ const indicators = {
   /**
    * 세션 시간 문자열("HH:MM") 을 해당 timezone 기준 "오늘" 의 UTC Date 로 변환.
    *   - 'UTC'              : UTC 자정 기반 (Tokyo 등 DST 없는 세션)
-   *   - 'America/New_York' : NY midnight 기반 (DST 자동, 런던·NY 세션)
+   *   - 'America/New_York' : NY clock HH:MM 을 그 날 NY 자정 후 clock-elapsed 로 해석.
+   *                           DST 전환일에 `_nyMidnight + millisecond-elapsed` 방식은
+   *                           clock-time 과 real-elapsed 가 어긋나 1시간 미스 — 대신
+   *                           NY 로컬 날짜 + clock HH 을 EST/EDT 두 후보로 probe.
    */
   _sessionTimeToUtc(hhmm, timezone, now) {
     const [h, m] = hhmm.split(':').map(Number);
-    let baseMid;
+    if (!Number.isFinite(h) || !Number.isFinite(m)) {
+      throw new Error(`Invalid session time format: "${hhmm}" (expected "HH:MM")`);
+    }
     if (timezone === 'UTC') {
-      baseMid = new Date(Date.UTC(
+      const baseMid = new Date(Date.UTC(
         now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()
       ));
+      return new Date(baseMid.getTime() + (h * 60 + m) * 60000);
     } else if (timezone === 'America/New_York') {
-      baseMid = this._nyMidnight(now);
+      // NY 로컬 날짜(Y/M/D) 추출 후, NY clock HH:MM 을 EST(UTC-5) 후보로 만든 뒤
+      // probe → NY 시계가 h 를 가리키면 EST, 아니면 EDT (UTC-4).
+      const dateParts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/New_York',
+        year: 'numeric', month: '2-digit', day: '2-digit',
+      }).formatToParts(now);
+      const y  = parseInt(dateParts.find((p) => p.type === 'year').value, 10);
+      const mo = parseInt(dateParts.find((p) => p.type === 'month').value, 10);
+      const d  = parseInt(dateParts.find((p) => p.type === 'day').value, 10);
+
+      const estCandidate = new Date(Date.UTC(y, mo - 1, d, h + 5, m, 0));
+      const nyHour = parseInt(new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York', hour12: false, hour: '2-digit',
+      }).format(estCandidate), 10) % 24;
+
+      return nyHour === h
+        ? estCandidate                                               // EST (UTC-5)
+        : new Date(Date.UTC(y, mo - 1, d, h + 4, m, 0));             // EDT (UTC-4)
     } else {
       throw new Error(`Unsupported session timezone: ${timezone}`);
     }
-    return new Date(baseMid.getTime() + (h * 60 + m) * 60000);
   },
 
   /**
@@ -470,7 +492,15 @@ const indicators = {
    */
   calculatePDHL(candles, now = new Date()) {
     const todayStart = this._nyMidnight(now);
-    const yesterdayStart = new Date(todayStart.getTime() - 24 * 60 * 60 * 1000);
+    // DST 전환 인접일 (Mar 9 / Nov 2) 에는 "어제" 가 23h/25h 길이라 -24h 로는 1시간 어긋남.
+    //   안전하게 어제 NY 정오 (확실히 어제 내부) 를 만든 뒤 _nyMidnight 재호출.
+    const yesterdayNoon = new Date(todayStart.getTime() - 12 * 60 * 60 * 1000);
+    const yesterdayStart = this._nyMidnight(yesterdayNoon);
+
+    // Gate.io candles 는 timestamp 가 ms 정수 (gateClient.js:23 의 c.t*1000).
+    //   Date 객체 대신 numeric 비교로 tight-loop 할당/GC 압력 감소.
+    const yesterdayStartMs = yesterdayStart.getTime();
+    const todayStartMs = todayStart.getTime();
 
     let pdh = -Infinity;
     let pdl = Infinity;
@@ -478,8 +508,8 @@ const indicators = {
 
     // 1차 패스: 전일 PDH/PDL 확정
     for (const c of candles) {
-      const t = new Date(c.timestamp);
-      if (t >= yesterdayStart && t < todayStart) {
+      const t = c.timestamp;
+      if (t >= yesterdayStartMs && t < todayStartMs) {
         if (c.high > pdh) pdh = c.high;
         if (c.low < pdl) pdl = c.low;
         hasPrevDay = true;
@@ -493,8 +523,7 @@ const indicators = {
     let pdhSweep = false;
     let pdlSweep = false;
     for (const c of candles) {
-      const t = new Date(c.timestamp);
-      if (t < todayStart) continue;
+      if (c.timestamp < todayStartMs) continue;
       if (c.high > pdh && c.close < pdh) pdhSweep = true;
       if (c.low  < pdl && c.close > pdl) pdlSweep = true;
     }
@@ -528,14 +557,17 @@ const indicators = {
       const startAdj = sessionEnd <= sessionStart
         ? new Date(sessionStart.getTime() - 24 * 60 * 60 * 1000)
         : sessionStart;
+      // tight-loop 에서 Date 객체 할당 피하기 위해 ms 로 캐싱.
+      const startMs = startAdj.getTime();
+      const endMs = sessionEnd.getTime();
 
       let high = -Infinity;
       let low = Infinity;
       let hasData = false;
 
       for (const c of candles) {
-        const t = new Date(c.timestamp);
-        if (t >= startAdj && t < sessionEnd) {
+        const t = c.timestamp;
+        if (t >= startMs && t < endMs) {
           if (c.high > high) high = c.high;
           if (c.low < low) low = c.low;
           hasData = true;
@@ -547,8 +579,8 @@ const indicators = {
         let highSweep = false;
         let lowSweep = false;
         for (const c of candles) {
-          const t = new Date(c.timestamp);
-          if (t < startAdj || t >= sessionEnd) continue;
+          const t = c.timestamp;
+          if (t < startMs || t >= endMs) continue;
           if (c.high > high && c.close < high) highSweep = true;
           if (c.low  < low  && c.close > low)  lowSweep  = true;
         }
@@ -652,9 +684,7 @@ const indicators = {
    * - 점심시간 제외
    * - 주말 제외 (토/일)
    */
-  getActiveSession(now) {
-    now = now || new Date();
-
+  getActiveSession(now = new Date()) {
     // 주말(토/일) 제외 — ICT 정통: institutional 부재로 sweep 은 유동성 사냥이 아닌
     // 노이즈. Gate.io 선물은 24/7 이지만 ICT 분석 맥락에선 주말 시그널 신뢰도 낮음.
     const dayOfWeek = now.getUTCDay();

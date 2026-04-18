@@ -321,6 +321,29 @@ class IctStrategy {
   }
 
   /**
+   * 두 배열의 첫 overlap 찾기 (역순 iteration — 가장 최신 쌍 우선).
+   *   각 원소의 [lowKey] ~ [highKey] 범위 비교.
+   *   overlap 발견 시 교집합 {lo, hi} 반환, 없으면 null.
+   *
+   * Pass 3-C: _analyzeMTF 의 OB/FVG overlap 검사 2곳 패턴 추출.
+   */
+  _findFirstOverlap(mtfArr, htfArr, lowKey, highKey) {
+    for (let mi = mtfArr.length - 1; mi >= 0; mi--) {
+      const m = mtfArr[mi];
+      for (let hi = htfArr.length - 1; hi >= 0; hi--) {
+        const h = htfArr[hi];
+        if (m[lowKey] <= h[highKey] && m[highKey] >= h[lowKey]) {
+          return {
+            lo: Math.max(m[lowKey], h[lowKey]),
+            hi: Math.min(m[highKey], h[highKey]),
+          };
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
    * MTF (15m): 구조 확인
    * HTF 방향에 맞고 현재가 기준 올바른 위치에 있는 OB/FVG만 사용
    *   - Bullish: 진입가보다 아래 (지지 역할)
@@ -382,38 +405,15 @@ class IctStrategy {
       confluence.push(`MTF FVG [${fvg.bottom.toFixed(2)}-${fvg.top.toFixed(2)}] CE:${fvg.ce.toFixed(2)}`);
     }
 
-    // HTF POI와 겹침 검사 (ICT 탑다운 컨플루언스)
-    const rangesOverlap = (aLow, aHigh, bLow, bHigh) => aLow <= bHigh && aHigh >= bLow;
-
+    // HTF POI와 겹침 검사 (ICT 탑다운 컨플루언스) — 역순 iteration (최신 쌍 우선)
     if (htfBias && htfBias.orderBlocks && htfBias.orderBlocks.length > 0 && relevantOBs.length > 0) {
-      // 역순 — 가장 최신 MTF × 최신 HTF 쌍부터 검사 (activeOBs[length-1] 관례와 일관)
-      outer: for (let mi = relevantOBs.length - 1; mi >= 0; mi--) {
-        for (let hi = htfBias.orderBlocks.length - 1; hi >= 0; hi--) {
-          const mOB = relevantOBs[mi];
-          const hOB = htfBias.orderBlocks[hi];
-          if (rangesOverlap(mOB.low, mOB.high, hOB.low, hOB.high)) {
-            const lo = Math.max(mOB.low, hOB.low);
-            const hi2 = Math.min(mOB.high, hOB.high);
-            confluence.push(`★ HTF+MTF OB 겹침 [${lo.toFixed(2)}-${hi2.toFixed(2)}]`);
-            break outer;
-          }
-        }
-      }
+      const ov = this._findFirstOverlap(relevantOBs, htfBias.orderBlocks, 'low', 'high');
+      if (ov) confluence.push(`★ HTF+MTF OB 겹침 [${ov.lo.toFixed(2)}-${ov.hi.toFixed(2)}]`);
     }
 
     if (htfBias && htfBias.fvgs && htfBias.fvgs.length > 0 && unfilled.length > 0) {
-      outer: for (let mi = unfilled.length - 1; mi >= 0; mi--) {
-        for (let hi = htfBias.fvgs.length - 1; hi >= 0; hi--) {
-          const mFVG = unfilled[mi];
-          const hFVG = htfBias.fvgs[hi];
-          if (rangesOverlap(mFVG.bottom, mFVG.top, hFVG.bottom, hFVG.top)) {
-            const lo = Math.max(mFVG.bottom, hFVG.bottom);
-            const hi2 = Math.min(mFVG.top, hFVG.top);
-            confluence.push(`★ HTF+MTF FVG 겹침 [${lo.toFixed(2)}-${hi2.toFixed(2)}]`);
-            break outer;
-          }
-        }
-      }
+      const ov = this._findFirstOverlap(unfilled, htfBias.fvgs, 'bottom', 'top');
+      if (ov) confluence.push(`★ HTF+MTF FVG 겹침 [${ov.lo.toFixed(2)}-${ov.hi.toFixed(2)}]`);
     }
 
     // MTF Liquidity Sweep (BSL/SSL) — HTF 방향과 일치하는 스윕만 가점

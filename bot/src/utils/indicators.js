@@ -413,6 +413,22 @@ const indicators = {
   // ========== PDH / PDL (Previous Day High / Low) ==========
 
   /**
+   * NY timezone 의 현재 년/월/일 정수 추출 (Intl.DateTimeFormat formatToParts 기반).
+   *   _nyMidnight / _sessionTimeToUtc 가 공유하는 NY 로컬 날짜 추출 패턴.
+   */
+  _nyDateParts(now) {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/New_York',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(now);
+    return {
+      y:  parseInt(parts.find((p) => p.type === 'year').value, 10),
+      mo: parseInt(parts.find((p) => p.type === 'month').value, 10),
+      d:  parseInt(parts.find((p) => p.type === 'day').value, 10),
+    };
+  },
+
+  /**
    * NY timezone 의 "오늘 자정" 에 해당하는 UTC Date 반환.
    * ICT 정통의 daily bias reset 시점. DST (EST UTC-5 / EDT UTC-4) 자동 판정.
    *
@@ -420,13 +436,7 @@ const indicators = {
    *   (clock-displayed elapsed 방식은 DST 전환일에 1시간 오차 발생 — 사용 금지.)
    */
   _nyMidnight(now) {
-    const dateParts = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/New_York',
-      year: 'numeric', month: '2-digit', day: '2-digit',
-    }).formatToParts(now);
-    const y  = parseInt(dateParts.find((p) => p.type === 'year').value, 10);
-    const mo = parseInt(dateParts.find((p) => p.type === 'month').value, 10);
-    const d  = parseInt(dateParts.find((p) => p.type === 'day').value, 10);
+    const { y, mo, d } = this._nyDateParts(now);
 
     // UTC 05:00 (EST midnight 후보) 에서 NY 시계가 00 이면 EST 기간, 01 이면 EDT 기간.
     const probe = new Date(Date.UTC(y, mo - 1, d, 5, 0, 0));
@@ -460,13 +470,7 @@ const indicators = {
     } else if (timezone === 'America/New_York') {
       // NY 로컬 날짜(Y/M/D) 추출 후, NY clock HH:MM 을 EST(UTC-5) 후보로 만든 뒤
       // probe → NY 시계가 h 를 가리키면 EST, 아니면 EDT (UTC-4).
-      const dateParts = new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'America/New_York',
-        year: 'numeric', month: '2-digit', day: '2-digit',
-      }).formatToParts(now);
-      const y  = parseInt(dateParts.find((p) => p.type === 'year').value, 10);
-      const mo = parseInt(dateParts.find((p) => p.type === 'month').value, 10);
-      const d  = parseInt(dateParts.find((p) => p.type === 'day').value, 10);
+      const { y, mo, d } = this._nyDateParts(now);
 
       const estCandidate = new Date(Date.UTC(y, mo - 1, d, h + 5, m, 0));
       const nyHour = parseInt(new Intl.DateTimeFormat('en-US', {

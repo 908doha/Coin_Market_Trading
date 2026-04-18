@@ -712,7 +712,7 @@ class IctStrategy {
       const fallbackSl = direction === 'bullish' ? price * (1 - slPct) : price * (1 + slPct);
       const fallbackTp = direction === 'bullish' ? price * (1 + slPct * fallbackRR) : price * (1 - slPct * fallbackRR);
       logger.warn(`[SL/TP] risk=0 감지 — 고정 % 폴백: SL=${fallbackSl.toFixed(2)} TP=${fallbackTp.toFixed(2)}`);
-      return { sl: fallbackSl, tp: fallbackTp, rr: fallbackRR, tpSource: 'risk=0 fallback' };
+      return { sl: fallbackSl, tp: fallbackTp, rr: fallbackRR, tpSource: 'fallback (risk=0)' };
     }
 
     // ===== TP 계산 (구조적 타겟 — ICT Liquidity Draw) =====

@@ -271,8 +271,13 @@ class IctStrategy {
     }
 
     // ===== HTF Liquidity Sweep (BSL/SSL) =====
+    // index 기준 최신 sweep 채택 (1-C-1 EQH 폴백과 동일 원칙).
     const htfSweeps = indicators.detectLiquiditySweep(candles, swingHighs, swingLows);
-    const htfActiveSweep = direction ? htfSweeps.find((s) => s.type === direction) : null;
+    const htfActiveSweep = direction
+      ? htfSweeps
+          .filter((s) => s.type === direction)
+          .reduce((a, b) => (!a || b.index > a.index ? b : a), null)
+      : null;
 
     return {
       direction,
@@ -321,13 +326,9 @@ class IctStrategy {
     const orderBlocks = indicators.findOrderBlocks(candles);
     const rawOBs = htfDirection === 'bullish' ? orderBlocks.bullish : orderBlocks.bearish;
     const relevantOBs = rawOBs.filter((ob) => {
-      if (htfDirection === 'bullish') {
-        // Bullish OB는 현재가보다 아래 (지지)
-        return ob.high < currentPrice;
-      } else {
-        // Bearish OB는 현재가보다 위 (저항)
-        return ob.low > currentPrice;
-      }
+      // 내부 진입 / 접촉 반등 포함. broken OB 는 1-A-3 at-source 필터로 배제됨.
+      if (htfDirection === 'bullish') return ob.low <= currentPrice;
+      return ob.high >= currentPrice;
     });
     // 반대 방향 OB = TP 구조적 타겟용
     const opposingRawOBs = htfDirection === 'bullish' ? orderBlocks.bearish : orderBlocks.bullish;
@@ -345,11 +346,9 @@ class IctStrategy {
     const rawFVGs = htfDirection === 'bullish' ? fvgs.bullish : fvgs.bearish;
     const unfilled = rawFVGs.filter((f) => {
       if (f.isFilled) return false;
-      if (htfDirection === 'bullish') {
-        return f.top <= currentPrice; // 현재가 아래의 Bullish FVG
-      } else {
-        return f.bottom >= currentPrice; // 현재가 위의 Bearish FVG
-      }
+      // 내부 진입 포함 (HTF 필터와 대칭)
+      if (htfDirection === 'bullish') return f.bottom <= currentPrice;
+      return f.top >= currentPrice;
     });
     if (unfilled.length > 0) {
       const fvg = unfilled[unfilled.length - 1];
@@ -360,12 +359,15 @@ class IctStrategy {
     const rangesOverlap = (aLow, aHigh, bLow, bHigh) => aLow <= bHigh && aHigh >= bLow;
 
     if (htfBias && htfBias.orderBlocks && htfBias.orderBlocks.length > 0 && relevantOBs.length > 0) {
-      outer: for (const mOB of relevantOBs) {
-        for (const hOB of htfBias.orderBlocks) {
+      // 역순 — 가장 최신 MTF × 최신 HTF 쌍부터 검사 (activeOBs[length-1] 관례와 일관)
+      outer: for (let mi = relevantOBs.length - 1; mi >= 0; mi--) {
+        for (let hi = htfBias.orderBlocks.length - 1; hi >= 0; hi--) {
+          const mOB = relevantOBs[mi];
+          const hOB = htfBias.orderBlocks[hi];
           if (rangesOverlap(mOB.low, mOB.high, hOB.low, hOB.high)) {
             const lo = Math.max(mOB.low, hOB.low);
-            const hi = Math.min(mOB.high, hOB.high);
-            confluence.push(`★ HTF+MTF OB 겹침 [${lo.toFixed(2)}-${hi.toFixed(2)}]`);
+            const hi2 = Math.min(mOB.high, hOB.high);
+            confluence.push(`★ HTF+MTF OB 겹침 [${lo.toFixed(2)}-${hi2.toFixed(2)}]`);
             break outer;
           }
         }
@@ -373,12 +375,14 @@ class IctStrategy {
     }
 
     if (htfBias && htfBias.fvgs && htfBias.fvgs.length > 0 && unfilled.length > 0) {
-      outer: for (const mFVG of unfilled) {
-        for (const hFVG of htfBias.fvgs) {
+      outer: for (let mi = unfilled.length - 1; mi >= 0; mi--) {
+        for (let hi = htfBias.fvgs.length - 1; hi >= 0; hi--) {
+          const mFVG = unfilled[mi];
+          const hFVG = htfBias.fvgs[hi];
           if (rangesOverlap(mFVG.bottom, mFVG.top, hFVG.bottom, hFVG.top)) {
             const lo = Math.max(mFVG.bottom, hFVG.bottom);
-            const hi = Math.min(mFVG.top, hFVG.top);
-            confluence.push(`★ HTF+MTF FVG 겹침 [${lo.toFixed(2)}-${hi.toFixed(2)}]`);
+            const hi2 = Math.min(mFVG.top, hFVG.top);
+            confluence.push(`★ HTF+MTF FVG 겹침 [${lo.toFixed(2)}-${hi2.toFixed(2)}]`);
             break outer;
           }
         }
@@ -386,18 +390,33 @@ class IctStrategy {
     }
 
     // MTF Liquidity Sweep (BSL/SSL) — HTF 방향과 일치하는 스윕만 가점
+    // index 기준 최신 sweep 채택 (배열 순서는 swing 순회순이라 index 최신 보장 없음).
     const mtfSweeps = indicators.detectLiquiditySweep(candles, swingHighs, swingLows);
-    const mtfActiveSweep = mtfSweeps.find((s) => s.type === htfDirection);
+    const mtfActiveSweep = mtfSweeps
+      .filter((s) => s.type === htfDirection)
+      .reduce((a, b) => (!a || b.index > a.index ? b : a), null);
     if (mtfActiveSweep) {
       confluence.push(`★ MTF ${mtfActiveSweep.label} @ ${mtfActiveSweep.level.toFixed(2)}`);
     }
 
-    const hasStructure = mssAligned || relevantOBs.length > 0;
+    // hasStructure: ICT 정통 "MSS 또는 swing 패턴 (HH/HL/LH/LL)" 으로 구조 확인.
+    // OB 존재만으로는 구조 증거 부족 (OB 는 potential reaction zone, structural break 아님).
+    let swingPattern = false;
+    if (swingHighs.length >= 2 && swingLows.length >= 2) {
+      const lastHigh = swingHighs[swingHighs.length - 1].price;
+      const prevHigh = swingHighs[swingHighs.length - 2].price;
+      const lastLow = swingLows[swingLows.length - 1].price;
+      const prevLow = swingLows[swingLows.length - 2].price;
+      swingPattern =
+        (htfDirection === 'bullish' && lastHigh > prevHigh && lastLow > prevLow) ||
+        (htfDirection === 'bearish' && lastHigh < prevHigh && lastLow < prevLow);
+    }
+    const hasStructure = mssAligned || swingPattern;
     const hasPOI = relevantOBs.length > 0 || unfilled.length > 0;
 
     return {
       confirmed: hasStructure && hasPOI,
-      reason: hasStructure && hasPOI ? '구조 확인됨' : 'MSS 또는 POI 부족 (위치 검증 후)',
+      reason: hasStructure && hasPOI ? '구조 확인됨' : 'MSS/swing 패턴 또는 POI 부족 (위치 검증 후)',
       confluence,
       orderBlocks: relevantOBs,
       opposingOBs,

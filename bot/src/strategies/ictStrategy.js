@@ -576,6 +576,17 @@ class IctStrategy {
   }
 
   /**
+   * TP 후보 중 minRR 이상의 R:R 을 만족하는 첫 원소 반환.
+   *   tpCandidates 는 수집 단계에서 이미 direction 쪽만 포함하므로 Math.abs 로
+   *   Bullish/Bearish 부호 차이 흡수.
+   *
+   * Pass 3-C2: Bullish/Bearish TP 블록의 R:R filter 공통 로직 추출 (나머지 거울 유지).
+   */
+  _findTpAtRR(tpCandidates, price, risk, minRR) {
+    return tpCandidates.find((t) => Math.abs(t.price - price) / risk >= minRR) || null;
+  }
+
+  /**
    * SL candidate 를 safety margin 적용 + maxRiskPct 가드 후 반환.
    *   - basePrice: structural reference (OB.low / OB.high, swing.price, PDL/PDH 등)
    *   - direction === 'bullish' 시 candidate = basePrice * (1 - 0.001) (price 아래로 0.1% 띄움)
@@ -746,7 +757,7 @@ class IctStrategy {
       tpCandidates.sort((a, b) => a.price - b.price);
 
       // R:R ≥ 1.5 인 첫 후보 채택
-      const match = tpCandidates.find((t) => (t.price - price) / risk >= 1.5);
+      const match = this._findTpAtRR(tpCandidates, price, risk, 1.5);
       if (match) {
         const rr = (match.price - price) / risk;
         tp = rr > maxRR ? price + risk * maxRR : match.price;
@@ -789,7 +800,7 @@ class IctStrategy {
       // 가까운 순 정렬 (내림차순 = 가격에서 가장 가까운 아래쪽부터)
       tpCandidates.sort((a, b) => b.price - a.price);
 
-      const match = tpCandidates.find((t) => (price - t.price) / risk >= 1.5);
+      const match = this._findTpAtRR(tpCandidates, price, risk, 1.5);
       if (match) {
         const rr = (price - match.price) / risk;
         tp = rr > maxRR ? price - risk * maxRR : match.price;

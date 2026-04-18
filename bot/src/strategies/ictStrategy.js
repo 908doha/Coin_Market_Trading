@@ -578,11 +578,15 @@ class IctStrategy {
           }
         }
       }
-      // 2. MTF OB
+      // 2. MTF OB — margin 0.001 통일, maxRiskPct 가드
       if (slCandidates.length === 0) {
         for (let i = mtfStructure.orderBlocks.length - 1; i >= 0; i--) {
           const ob = mtfStructure.orderBlocks[i];
-          if (ob.low < price) { slCandidates.push(ob.low * (1 - slPct * 0.3)); break; }
+          const candidate = ob.low * (1 - 0.001);
+          if (ob.low < price && (price - candidate) / price <= maxRiskPct) {
+            slCandidates.push(candidate);
+            break;
+          }
         }
       }
       // 2.5. IOFED drill candle body (institutional entry pocket) — MTF OB 보다 타이트, LTF swing 보다 구조적
@@ -592,17 +596,25 @@ class IctStrategy {
           slCandidates.push(zoneLow * (1 - 0.001));
         }
       }
-      // 3. LTF Swing Low
+      // 3. LTF Swing Low — maxRiskPct 가드 추가
       if (slCandidates.length === 0 && ltfEntry.swingLows) {
         for (let i = ltfEntry.swingLows.length - 1; i >= 0; i--) {
-          if (ltfEntry.swingLows[i].price < price) { slCandidates.push(ltfEntry.swingLows[i].price * (1 - 0.001)); break; }
+          const swingLow = ltfEntry.swingLows[i].price;
+          const candidate = swingLow * (1 - 0.001);
+          if (swingLow < price && (price - candidate) / price <= maxRiskPct) {
+            slCandidates.push(candidate);
+            break;
+          }
         }
       }
-      // 4. PDL
+      // 4. PDL — maxRiskPct 가드 추가 (강한 추세장에서 PDL 이 멀 때 무제한 risk 차단)
       if (slCandidates.length === 0 && htfBias.pdhl && htfBias.pdhl.pdl < price) {
-        slCandidates.push(htfBias.pdhl.pdl * (1 - 0.001));
+        const candidate = htfBias.pdhl.pdl * (1 - 0.001);
+        if ((price - candidate) / price <= maxRiskPct) {
+          slCandidates.push(candidate);
+        }
       }
-      // 5. 고정
+      // 5. 고정 % 폴백 (모든 구조적 후보 탈락 시 안전망)
       if (slCandidates.length === 0) slCandidates.push(price * (1 - slPct));
 
       sl = slCandidates[0];
@@ -618,10 +630,15 @@ class IctStrategy {
           }
         }
       }
+      // 2. MTF OB — margin 0.001 통일 + maxRiskPct 가드
       if (slCandidates.length === 0) {
         for (let i = mtfStructure.orderBlocks.length - 1; i >= 0; i--) {
           const ob = mtfStructure.orderBlocks[i];
-          if (ob.high > price) { slCandidates.push(ob.high * (1 + slPct * 0.3)); break; }
+          const candidate = ob.high * (1 + 0.001);
+          if (ob.high > price && (candidate - price) / price <= maxRiskPct) {
+            slCandidates.push(candidate);
+            break;
+          }
         }
       }
       // 2.5. IOFED drill candle body (bullish drill = 마지막 양봉 body 상단)
@@ -631,14 +648,25 @@ class IctStrategy {
           slCandidates.push(zoneHigh * (1 + 0.001));
         }
       }
+      // 3. LTF Swing High — maxRiskPct 가드 추가
       if (slCandidates.length === 0 && ltfEntry.swingHighs) {
         for (let i = ltfEntry.swingHighs.length - 1; i >= 0; i--) {
-          if (ltfEntry.swingHighs[i].price > price) { slCandidates.push(ltfEntry.swingHighs[i].price * (1 + 0.001)); break; }
+          const swingHigh = ltfEntry.swingHighs[i].price;
+          const candidate = swingHigh * (1 + 0.001);
+          if (swingHigh > price && (candidate - price) / price <= maxRiskPct) {
+            slCandidates.push(candidate);
+            break;
+          }
         }
       }
+      // 4. PDH — maxRiskPct 가드 추가
       if (slCandidates.length === 0 && htfBias.pdhl && htfBias.pdhl.pdh > price) {
-        slCandidates.push(htfBias.pdhl.pdh * (1 + 0.001));
+        const candidate = htfBias.pdhl.pdh * (1 + 0.001);
+        if ((candidate - price) / price <= maxRiskPct) {
+          slCandidates.push(candidate);
+        }
       }
+      // 5. 고정 % 폴백
       if (slCandidates.length === 0) slCandidates.push(price * (1 + slPct));
 
       sl = slCandidates[0];

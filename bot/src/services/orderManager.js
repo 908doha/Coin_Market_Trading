@@ -36,6 +36,12 @@ class OrderManager {
     // 3회 연속이면 진짜 청산으로 판단
     this.emptyReadCount = new Map();
 
+    // Weekend flatten (Step 2-5): 강제 청산 실패 재시도 카운터 + 알림 중복 방지
+    //   closeAttempts : pair → 누적 실패 횟수 (성공 시 _clearPairState 에서 삭제)
+    //   closeNotified : pair → Set<'warn'|'urgent'|'final'>
+    this.closeAttempts = new Map();
+    this.closeNotified = new Map();
+
     // 영구 저장에서 복원
     this._loadPersistedStats();
   }
@@ -67,6 +73,8 @@ class OrderManager {
     this.tpPrices.delete(contract);
     this.sltpCheckCounter.delete(contract);
     this.openExposureUsdt.delete(contract);
+    this.closeAttempts.delete(contract);
+    this.closeNotified.delete(contract);
   }
 
   /**
@@ -662,25 +670,47 @@ class OrderManager {
     }
 
     // 이전에 있었는데 5회 연속 없음 → SL/TP 체결 또는 수동 청산
+    return await this._finalizePairClose(contract, {
+      logContext: `(${EMPTY_THRESHOLD}회 empty)`,
+    });
+  }
+
+  /**
+   * 포지션 종료 후 정리 작업 공유 헬퍼 (PnL 집계 + Kelly + dailyPnl + state clear).
+   *
+   * monitorPosition 의 close 경로와 closePosition (Step 2-5 예정) 에서 공유.
+   * 기존 monitorPosition L664-714 의 인라인 로직을 그대로 이동 — 행동 불변.
+   *
+   * 실제 실현 PnL 을 청산 이력 API 에서 조회.
+   *   과거엔 lastKnownPositions.unrealisedPnl (직전 폴링 당시 값) 의 부호로
+   *   tp_hit/sl_hit 를 분류했지만, 반등 중 SL hit 등 경계 사례에서 오분류가
+   *   발생해 Kelly 통계와 알림이 오염되었다. 이제는 listPositionClose 로 실제
+   *   실현 PnL 을 집계하고, action 은 'closed' 로 통합한다.
+   *
+   *   시간 필터: 포지션 최초 감지 시각(firstSeenAt) 이후에 발생한 청산만 집계.
+   *   EMPTY_THRESHOLD × cron 주기만큼 감지 지연이 생기므로 고정 60초 윈도우는
+   *   실제 청산 trade 를 놓친다. firstSeenAt 이 없으면 10분 윈도우로 폴백.
+   *
+   * @param {string} contract
+   * @param {{ retryOnEmpty?: boolean, logContext?: string }} opts
+   *   - retryOnEmpty : Gate.io eventual consistency 대응 (Step 2-5 구현 예정,
+   *                    이번 턴은 시그니처만).
+   *   - logContext   : 종료 로그에 삽입할 컨텍스트 문자열 (e.g. "(5회 empty)").
+   * @returns {Promise<{ action: 'closed'|'closed (unknown)', pnl: number, price: number }>}
+   */
+  async _finalizePairClose(contract, opts = {}) {
+    const { retryOnEmpty = false, logContext = '' } = opts;
+
     try {
       await gateClient.cancelAllTriggerOrders(contract);
     } catch {}
 
-    // 실제 실현 PnL 을 청산 이력 API 에서 조회.
-    //   과거엔 lastKnownPositions.unrealisedPnl (직전 폴링 당시 값) 의 부호로
-    //   tp_hit/sl_hit 를 분류했지만, 반등 중 SL hit 등 경계 사례에서 오분류가
-    //   발생해 Kelly 통계와 알림이 오염되었다. 이제는 listPositionClose 로 실제
-    //   실현 PnL 을 집계하고, action 은 'closed' 로 통합한다.
-    //
-    //   시간 필터: 포지션 최초 감지 시각(firstSeenAt) 이후에 발생한 청산만 집계.
-    //   EMPTY_THRESHOLD × cron 주기만큼 감지 지연이 생기므로 고정 60초 윈도우는
-    //   실제 청산 trade 를 놓친다. firstSeenAt 이 없으면 10분 윈도우로 폴백.
     let pnl = 0;
     let unknown = false;
     const known = this.lastKnownPositions.get(contract);
     const sinceMs = (known && known.firstSeenAt) ? known.firstSeenAt : (Date.now() - 600_000);
     try {
-      const closes = await gateClient.getRecentClosedPositions(contract, 20);
+      let closes = await gateClient.getRecentClosedPositions(contract, 20);
       let found = false;
       for (const p of closes) {
         // Gate.io time 은 초(epoch seconds). ms 로 변환.
@@ -691,6 +721,25 @@ class OrderManager {
           found = true;
         }
       }
+
+      // retryOnEmpty: 청산 직후 즉시 조회 시 Gate.io eventual consistency 로
+      //   trade 가 아직 반영되지 않았을 수 있음 — 2초 대기 후 1회 재조회.
+      //   monitorPosition 경로 (EMPTY_THRESHOLD 5틱 지연) 는 retryOnEmpty=false
+      //   (기본값) 로 기존 행동 그대로.
+      if (!found && retryOnEmpty) {
+        logger.debug(`[${contract}] retryOnEmpty: 2초 대기 후 재조회 (eventual consistency)`);
+        await new Promise((r) => setTimeout(r, 2000));
+        closes = await gateClient.getRecentClosedPositions(contract, 20);
+        for (const p of closes) {
+          const tMs = typeof p.time === 'number' ? p.time * 1000 : NaN;
+          if (!Number.isFinite(tMs) || tMs < sinceMs) continue;
+          if (p.pnl != null && Number.isFinite(p.pnl)) {
+            pnl += p.pnl;
+            found = true;
+          }
+        }
+      }
+
       if (!found) {
         unknown = true;
         logger.warn(`[${contract}] 청산 이력에서 실현 PnL 미확인 — 'closed (unknown)' 처리 (sinceMs=${sinceMs})`);
@@ -702,7 +751,8 @@ class OrderManager {
 
     const action = unknown ? 'closed (unknown)' : 'closed';
     const pnlTag = unknown ? 'N/A' : `${pnl.toFixed(2)} USDT`;
-    logger.info(`[${contract}] [포지션 종료] ${action} (${EMPTY_THRESHOLD}회 empty) | PnL: ${pnlTag}`);
+    const ctx = logContext ? ` ${logContext}` : '';
+    logger.info(`[${contract}] [포지션 종료] ${action}${ctx} | PnL: ${pnlTag}`);
 
     if (!unknown) {
       this.dailyPnl += pnl;
@@ -712,6 +762,55 @@ class OrderManager {
     this._clearPairState(contract);
 
     return { action, price: 0, pnl: unknown ? 0 : pnl };
+  }
+
+  /**
+   * Weekend flatten 알림 level 마킹 (중복 방지).
+   * closeNotified Map 은 페어 → Set<'warn'|'urgent'|'final'>.
+   * 성공 청산 시 _clearPairState 에서 전체 Set 삭제됨.
+   */
+  markNotified(pair, level) {
+    const existing = this.closeNotified.get(pair) || new Set();
+    existing.add(level);
+    this.closeNotified.set(pair, existing);
+  }
+
+  /**
+   * 포지션 시장가 강제 청산 (weekend flatten 전용).
+   *
+   * 흐름:
+   *   1. gateClient.closePosition — 시장가 reduce-only 역방향 주문
+   *      (이미 포지션 없으면 null 반환, 실제 throw 아님)
+   *   2. _finalizePairClose (retryOnEmpty:true) — PnL 집계 + Kelly + dailyPnl
+   *      + orphan 트리거 정리 + state clear (closeAttempts/Notified 자동 삭제)
+   *
+   * 에러 정책 (호출자 Step 2-7 이 재시도/알림 담당):
+   *   - 1단계 실패 시 throw 하지 않고 { closed:false, attempts } 반환
+   *   - closeAttempts 증가만, _clearPairState 호출 안 함 (state 보존 → 다음 tick 재시도)
+   *   - 성공 시 attempts=0 반환 (카운터는 _clearPairState 에서 이미 삭제됨)
+   *
+   * @param {string} pair   - 페어 (e.g. 'BTC_USDT')
+   * @param {string} reason - 청산 사유 (로그/알림용, e.g. 'NY PM 마감 3분 전')
+   * @returns {Promise<{ closed: boolean, pnl: number, price: number, reason: string, attempts: number }>}
+   */
+  async closePosition(pair, reason) {
+    try {
+      await gateClient.closePosition(pair);
+    } catch (err) {
+      const attempts = (this.closeAttempts.get(pair) || 0) + 1;
+      this.closeAttempts.set(pair, attempts);
+      logger.error(`[${pair}] 강제 청산 실패 (시도 ${attempts}회, ${reason}): ${err.message}`);
+      return { closed: false, pnl: 0, price: 0, reason, attempts };
+    }
+
+    // 청산 성공 (또는 이미 포지션 없음) → PnL 집계 + state clear.
+    //   _finalizePairClose 내부 try/catch 로 실질 non-throwing.
+    //   _clearPairState 호출되며 closeAttempts/Notified 도 자동 정리됨.
+    const final = await this._finalizePairClose(pair, {
+      retryOnEmpty: true,
+      logContext: `(${reason})`,
+    });
+    return { closed: true, pnl: final.pnl, price: 0, reason, attempts: 0 };
   }
 
   /**

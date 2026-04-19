@@ -36,6 +36,12 @@ class OrderManager {
     // 3회 연속이면 진짜 청산으로 판단
     this.emptyReadCount = new Map();
 
+    // Weekend flatten (Step 2-5): 강제 청산 실패 재시도 카운터 + 알림 중복 방지
+    //   closeAttempts : pair → 누적 실패 횟수 (성공 시 _clearPairState 에서 삭제)
+    //   closeNotified : pair → Set<'warn'|'urgent'|'final'>
+    this.closeAttempts = new Map();
+    this.closeNotified = new Map();
+
     // 영구 저장에서 복원
     this._loadPersistedStats();
   }
@@ -67,6 +73,8 @@ class OrderManager {
     this.tpPrices.delete(contract);
     this.sltpCheckCounter.delete(contract);
     this.openExposureUsdt.delete(contract);
+    this.closeAttempts.delete(contract);
+    this.closeNotified.delete(contract);
   }
 
   /**
@@ -691,7 +699,6 @@ class OrderManager {
    * @returns {Promise<{ action: 'closed'|'closed (unknown)', pnl: number, price: number }>}
    */
   async _finalizePairClose(contract, opts = {}) {
-    // eslint-disable-next-line no-unused-vars
     const { retryOnEmpty = false, logContext = '' } = opts;
 
     try {
@@ -703,7 +710,7 @@ class OrderManager {
     const known = this.lastKnownPositions.get(contract);
     const sinceMs = (known && known.firstSeenAt) ? known.firstSeenAt : (Date.now() - 600_000);
     try {
-      const closes = await gateClient.getRecentClosedPositions(contract, 20);
+      let closes = await gateClient.getRecentClosedPositions(contract, 20);
       let found = false;
       for (const p of closes) {
         // Gate.io time 은 초(epoch seconds). ms 로 변환.
@@ -714,6 +721,25 @@ class OrderManager {
           found = true;
         }
       }
+
+      // retryOnEmpty: 청산 직후 즉시 조회 시 Gate.io eventual consistency 로
+      //   trade 가 아직 반영되지 않았을 수 있음 — 2초 대기 후 1회 재조회.
+      //   monitorPosition 경로 (EMPTY_THRESHOLD 5틱 지연) 는 retryOnEmpty=false
+      //   (기본값) 로 기존 행동 그대로.
+      if (!found && retryOnEmpty) {
+        logger.debug(`[${contract}] retryOnEmpty: 2초 대기 후 재조회 (eventual consistency)`);
+        await new Promise((r) => setTimeout(r, 2000));
+        closes = await gateClient.getRecentClosedPositions(contract, 20);
+        for (const p of closes) {
+          const tMs = typeof p.time === 'number' ? p.time * 1000 : NaN;
+          if (!Number.isFinite(tMs) || tMs < sinceMs) continue;
+          if (p.pnl != null && Number.isFinite(p.pnl)) {
+            pnl += p.pnl;
+            found = true;
+          }
+        }
+      }
+
       if (!found) {
         unknown = true;
         logger.warn(`[${contract}] 청산 이력에서 실현 PnL 미확인 — 'closed (unknown)' 처리 (sinceMs=${sinceMs})`);
@@ -736,6 +762,44 @@ class OrderManager {
     this._clearPairState(contract);
 
     return { action, price: 0, pnl: unknown ? 0 : pnl };
+  }
+
+  /**
+   * 포지션 시장가 강제 청산 (weekend flatten 전용).
+   *
+   * 흐름:
+   *   1. gateClient.closePosition — 시장가 reduce-only 역방향 주문
+   *      (이미 포지션 없으면 null 반환, 실제 throw 아님)
+   *   2. _finalizePairClose (retryOnEmpty:true) — PnL 집계 + Kelly + dailyPnl
+   *      + orphan 트리거 정리 + state clear (closeAttempts/Notified 자동 삭제)
+   *
+   * 에러 정책 (호출자 Step 2-7 이 재시도/알림 담당):
+   *   - 1단계 실패 시 throw 하지 않고 { closed:false, attempts } 반환
+   *   - closeAttempts 증가만, _clearPairState 호출 안 함 (state 보존 → 다음 tick 재시도)
+   *   - 성공 시 attempts=0 반환 (카운터는 _clearPairState 에서 이미 삭제됨)
+   *
+   * @param {string} pair   - 페어 (e.g. 'BTC_USDT')
+   * @param {string} reason - 청산 사유 (로그/알림용, e.g. 'NY PM 마감 3분 전')
+   * @returns {Promise<{ closed: boolean, pnl: number, price: number, reason: string, attempts: number }>}
+   */
+  async closePosition(pair, reason) {
+    try {
+      await gateClient.closePosition(pair);
+    } catch (err) {
+      const attempts = (this.closeAttempts.get(pair) || 0) + 1;
+      this.closeAttempts.set(pair, attempts);
+      logger.error(`[${pair}] 강제 청산 실패 (시도 ${attempts}회, ${reason}): ${err.message}`);
+      return { closed: false, pnl: 0, price: 0, reason, attempts };
+    }
+
+    // 청산 성공 (또는 이미 포지션 없음) → PnL 집계 + state clear.
+    //   _finalizePairClose 내부 try/catch 로 실질 non-throwing.
+    //   _clearPairState 호출되며 closeAttempts/Notified 도 자동 정리됨.
+    const final = await this._finalizePairClose(pair, {
+      retryOnEmpty: true,
+      logContext: `(${reason})`,
+    });
+    return { closed: true, pnl: final.pnl, price: 0, reason, attempts: 0 };
   }
 
   /**

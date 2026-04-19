@@ -723,6 +723,62 @@ class TelegramService {
     ].join('\n'));
   }
 
+  /**
+   * 주말 전 포지션 강제 청산 성공 알림 (weekend flatten).
+   *   ICT 정통: 유동성 공백/갭 리스크 회피를 위한 정책 기반 청산.
+   *   pnl=0 은 Gate.io eventual consistency 로 PnL 미확인인 경우
+   *   (closePosition Case 3) — "미확인" 으로 표기.
+   */
+  async notifyWeekendFlatten(pair, pnl, reason) {
+    const pnlLine = pnl === 0
+      ? `PnL: 미확인 (거래 이력 조회 실패)`
+      : `PnL: ${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)} USDT`;
+    await this.send([
+      `🔔 ━━━ [${this._displayName(pair)}] 주말 전 강제 청산 ━━━`,
+      pnlLine,
+      `사유: ${reason}`,
+      ``,
+      `ICT 정통 — 주말 홀딩 금지`,
+    ].join('\n'));
+  }
+
+  /**
+   * 주말 청산 실패 경고.
+   *   level='warn'   : 3회 누적 실패 (버퍼 기간 내, 🟡)
+   *   level='urgent' : 버퍼 종료 후 연장 기간 진입 (🟠)
+   */
+  async notifyWeekendFlattenFailed(pair, level, attempts) {
+    const isWarn = level === 'warn';
+    const emoji  = isWarn ? '🟡' : '🟠';
+    const header = isWarn ? '주말 청산 경고' : '주말 청산 긴급';
+    const statusLine1 = isWarn ? '상태: 연장 기간 진입 전' : '상태: 버퍼 종료, 연장 기간 진입';
+    const statusLine2 = isWarn ? '다음 tick 재시도 예정' : '연장 30분 내 성공 못 하면 주말 홀딩';
+    const suggestion  = isWarn ? '수동 개입 준비 필요' : 'Gate.io UI 확인 권장';
+
+    await this.send([
+      `${emoji} ━━━ [${this._displayName(pair)}] ${header} ━━━`,
+      `시도 횟수: ${attempts}회 실패`,
+      statusLine1,
+      statusLine2,
+      ``,
+      suggestion,
+    ].join('\n'));
+  }
+
+  /**
+   * 주말 청산 최종 실패 (연장 기간도 초과) — 수동 개입 필수.
+   */
+  async notifyWeekendFlattenHolding(pair) {
+    await this.send([
+      `🚨 ━━━ [${this._displayName(pair)}] 주말 청산 최종 실패 ━━━`,
+      `연장 기간 (30분) 내 청산 실패`,
+      `주말 홀딩 수용`,
+      ``,
+      `🆘 수동 청산 필수`,
+      `  Gate.io UI 또는 /close 명령 사용`,
+    ].join('\n'));
+  }
+
   async notifyError(error) {
     await this.send(`❌ 오류 발생: ${error}`);
   }

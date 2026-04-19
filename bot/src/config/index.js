@@ -97,6 +97,14 @@ const config = {
     iofedValidityBars: 5,      // _analyzeLTF: 최근 N봉 내 IOFED 만 유효 entry 근거
     htfPoiTolerance: 0.003,    // HTF OB/FVG 근접 허용 오차 (activeOBs/FVGs 판정, ±0.3%)
     maxRiskPct: 0.03,          // SL 최대 risk 상한 (진입가 대비, Pass 1-C-4a-1)
+    weekendFlatten: {
+      // 주말 전 포지션 강제 청산 (ICT 정통: 유동성 공백/갭 리스크 회피)
+      //   1차 배포는 enabled:false 로 배포 안정화 확인 후 2차 배포에서 true 전환.
+      enabled:       false,    // 기본 off — 안정화 후 활성화
+      bufferMinutes: 5,        // NY PM 마감 N분 전 ~ 마감까지 강제 청산 (cron 1분 × 5회 여유)
+      extendMinutes: 30,       // 마감 후 N분 연장 청산 기간 (미청산 포지션 재시도)
+      fridayOnly:    true,     // true: 금요일만 (ICT 정통), false: Mon~Fri 매일 NY PM 마감 전
+    },
   },
 };
 

@@ -121,38 +121,65 @@ class TradingBot {
   }
 
   /**
+   * 기존 활성 포지션 모니터링 (SL/TP 체크 + 분기 처리).
+   *
+   * _tickPair 의 원래 "1. 기존 포지션 모니터링" 블록과 weekend flatten (Step 2-7)
+   * 블록에서 공유.
+   *
+   * 분기별 반환:
+   *   - active 없음            : { handled: false }            — fall-through (신규 진입 가능)
+   *   - closed / closed(unknown): notify + delete 후 handled:false — fall-through
+   *   - holding                : { handled: true }             — tick 종료
+   *   - holding_check          : { handled: true }             — tick 종료
+   *   - failed 등              : delete 후 handled:false        — fall-through
+   *
+   * 기존 _tickPair L127-155 의 side effect 순서 (log → notify → delete) 와 return
+   * 분기를 바이트 단위 재현 — 행동 불변.
+   *
+   * @param {string} pair
+   * @returns {Promise<{ handled: boolean, action?: string, result?: Object }>}
+   */
+  async _monitorActive(pair) {
+    const active = this.activePositions.get(pair);
+    if (!active) return { handled: false };
+
+    const result = await this.orderManager.monitorPosition(
+      pair,
+      active.sl,
+      active.tp,
+      active.direction
+    );
+
+    if (result.action === 'closed' || result.action === 'closed (unknown)') {
+      const pnlTag = result.action === 'closed (unknown)'
+        ? 'N/A'
+        : `${result.pnl.toFixed(2)} USDT`;
+      logger.info(`[${pair}] 포지션 종료: ${result.action} | PnL: ${pnlTag}`);
+      // fire-and-forget: 알림이 실패해도 거래 로직 블로킹 금지 (C)
+      this.telegram.notifyClose(pair, result.action, result.pnl, result.price)
+        .catch((err) => logger.error(`notifyClose 실패: ${err.message}`));
+      this.activePositions.delete(pair);
+      return { handled: false, action: result.action, result };
+    }
+    if (result.action === 'holding') {
+      return { handled: true, action: 'holding', result }; // 포지션 유지 중 - 새 진입 안 함
+    }
+    if (result.action === 'holding_check') {
+      // getPosition empty 연속 카운트 중 — 새 진입 금지, 포지션 보호 유지
+      return { handled: true, action: 'holding_check', result };
+    }
+    // failed 등
+    this.activePositions.delete(pair);
+    return { handled: false, action: result.action, result };
+  }
+
+  /**
    * 페어 단위 틱 처리
    */
   async _tickPair(pair) {
     // 1. 기존 포지션 모니터링
-    const active = this.activePositions.get(pair);
-    if (active) {
-      const result = await this.orderManager.monitorPosition(
-        pair,
-        active.sl,
-        active.tp,
-        active.direction
-      );
-
-      if (result.action === 'closed' || result.action === 'closed (unknown)') {
-        const pnlTag = result.action === 'closed (unknown)'
-          ? 'N/A'
-          : `${result.pnl.toFixed(2)} USDT`;
-        logger.info(`[${pair}] 포지션 종료: ${result.action} | PnL: ${pnlTag}`);
-        // fire-and-forget: 알림이 실패해도 거래 로직 블로킹 금지 (C)
-        this.telegram.notifyClose(pair, result.action, result.pnl, result.price)
-          .catch((err) => logger.error(`notifyClose 실패: ${err.message}`));
-        this.activePositions.delete(pair);
-      } else if (result.action === 'holding') {
-        return; // 포지션 유지 중 - 새 진입 안 함
-      } else if (result.action === 'holding_check') {
-        // getPosition empty 연속 카운트 중 — 새 진입 금지, 포지션 보호 유지
-        return;
-      } else {
-        // failed 등
-        this.activePositions.delete(pair);
-      }
-    }
+    const monitor = await this._monitorActive(pair);
+    if (monitor.handled) return;
 
     // 2. 동시 포지션 상한 체크
     if (this.activePositions.size >= config.maxPositions) {

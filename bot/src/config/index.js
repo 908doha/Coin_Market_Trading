@@ -1,9 +1,34 @@
 require('dotenv').config();
 
+// 복수 계좌 파싱: GATEIO_ACCOUNTS 있으면 멀티, 없으면 싱글 (하위호환)
+//   예) GATEIO_ACCOUNTS=main,sub
+//        GATEIO_API_KEY_MAIN=... / GATEIO_API_SECRET_MAIN=...
+//        GATEIO_API_KEY_SUB=...  / GATEIO_API_SECRET_SUB=...
+//   없으면 GATEIO_API_KEY/SECRET 을 id='default' 계좌 1개로 사용.
+function parseAccounts() {
+  const raw = (process.env.GATEIO_ACCOUNTS || '').trim();
+  if (raw) {
+    return raw.split(',').map((id) => id.trim()).filter(Boolean).map((id) => {
+      const upper = id.toUpperCase();
+      return {
+        id,
+        apiKey: process.env[`GATEIO_API_KEY_${upper}`] || '',
+        apiSecret: process.env[`GATEIO_API_SECRET_${upper}`] || '',
+      };
+    }).filter((a) => a.apiKey && a.apiSecret);
+  }
+  const key = process.env.GATEIO_API_KEY || '';
+  const secret = process.env.GATEIO_API_SECRET || '';
+  if (key && secret) return [{ id: 'default', apiKey: key, apiSecret: secret }];
+  return [];
+}
+
 const config = {
-  // Gate.io API
-  apiKey: process.env.GATEIO_API_KEY || '',
-  apiSecret: process.env.GATEIO_API_SECRET || '',
+  // Gate.io API — 복수 계좌 지원
+  accounts: parseAccounts(),
+  // 하위호환: 싱글 계좌 참조용 getter (첫 번째 계좌의 키를 반환)
+  get apiKey() { return this.accounts[0]?.apiKey || ''; },
+  get apiSecret() { return this.accounts[0]?.apiSecret || ''; },
 
   // Trading
   //   TRADE_PAIRS: 콤마 구분 복수 지원 (예: "BTC_USDT,ETH_USDT,XAG_USDT")

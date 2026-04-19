@@ -3,21 +3,71 @@ require('dotenv').config();
 const http   = require('http');
 const cron   = require('node-cron');
 const config = require('./config');
-const gateClient  = require('./api/gateClient');
+const GateClient  = require('./api/gateClient');
 const IctStrategy = require('./strategies/ictStrategy');
 const OrderManager = require('./services/orderManager');
 const TelegramService = require('./services/telegram');
 const indicators  = require('./utils/indicators');
 const logger      = require('./utils/logger');
 
+/** 공정성 — Fisher-Yates 셔플. 매 tick 계좌 순서 랜덤화 */
+function shuffleArray(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
 class TradingBot {
   constructor() {
     this.strategy = new IctStrategy();
-    this.orderManager = new OrderManager();
     this.telegram = new TelegramService(this);
-    this.activePositions = new Map(); // pair → { direction, sl, tp }
     this.validPairs = [];
     this.isRunning = false;
+
+    // 멀티 계좌: accounts Map — accId → { client, orderManager, activePositions }
+    this.accounts = new Map();
+
+    // 시장 데이터 조회용 공용 클라이언트 (첫 번째 계좌 재사용, API 콜 절약)
+    this.marketClient = null;
+
+    this._initAccounts();
+
+    // 하위호환: 싱글 계좌 코드에서 this.orderManager / this.activePositions 참조
+    //   (HTTP API, 기타 legacy 참조) — 첫 계좌 값을 그대로 노출
+    const first = this.accounts.values().next().value;
+    this.orderManager = first ? first.orderManager : null;
+    this.activePositions = first ? first.activePositions : new Map();
+  }
+
+  /** 계좌별 GateClient + OrderManager 초기화 (Kelly 통계는 첫 계좌가 load, 나머지는 공유) */
+  _initAccounts() {
+    if (config.accounts.length === 0) {
+      logger.error('유효한 Gate.io 계좌 없음 — .env 확인 필요');
+      return;
+    }
+
+    let sharedKelly = null;
+    for (let i = 0; i < config.accounts.length; i++) {
+      const acc = config.accounts[i];
+      const client = new GateClient(acc.apiKey, acc.apiSecret, acc.id);
+      const om = new OrderManager(client, acc.id, sharedKelly);
+
+      // 첫 계좌 OM 이 Kelly 통계 파일 load 한 직후, 그 Map 을 공유 객체로 포장
+      if (i === 0) {
+        sharedKelly = { tradeStatsByPair: om.tradeStatsByPair };
+      }
+
+      this.accounts.set(acc.id, {
+        client,
+        orderManager: om,
+        activePositions: new Map(),
+      });
+    }
+
+    this.marketClient = this.accounts.values().next().value.client;
+    logger.info(`계좌 ${this.accounts.size}개 초기화: ${[...this.accounts.keys()].join(', ')}`);
   }
 
   /**
@@ -25,7 +75,8 @@ class TradingBot {
    */
   async start() {
     logger.info('='.repeat(60));
-    logger.info('Gate.io ICT Trading Bot 시작 (Multi-Pair)');
+    logger.info('Gate.io ICT Trading Bot 시작 (Multi-Pair, Multi-Account)');
+    logger.info(`계좌: ${[...this.accounts.keys()].join(', ')} (${this.accounts.size}개)`);
     logger.info(`거래 페어 (설정): ${config.tradePairs.join(', ')}`);
     logger.info(`레버리지: x${config.leverage}`);
     logger.info(
@@ -43,25 +94,27 @@ class TradingBot {
     }
     logger.info('='.repeat(60));
 
-    // API 키 확인
-    if (!config.apiKey || !config.apiSecret) {
-      logger.error('.env 파일에 GATEIO_API_KEY, GATEIO_API_SECRET 설정 필요');
+    // 계좌 유효성 확인
+    if (this.accounts.size === 0) {
+      logger.error('.env 파일에 유효한 API 키 설정 필요');
       process.exit(1);
     }
 
-    // 초기 잔고 확인
-    try {
-      const balance = await gateClient.getBalance();
-      logger.info(`계좌 잔고: ${balance.total.toFixed(2)} USDT (가용: ${balance.available.toFixed(2)} USDT)`);
-    } catch (err) {
-      logger.error(`API 연결 실패: ${err.message}`);
-      process.exit(1);
+    // 계좌별 초기 잔고 확인 — 하나라도 실패 시 종료
+    for (const [accId, acc] of this.accounts) {
+      try {
+        const balance = await acc.client.getBalance();
+        logger.info(`[${accId}] 잔고: ${balance.total.toFixed(2)} USDT (가용: ${balance.available.toFixed(2)} USDT)`);
+      } catch (err) {
+        logger.error(`[${accId}] API 연결 실패: ${err.message}`);
+        process.exit(1);
+      }
     }
 
-    // 페어 검증 (Gate.io 선물에 실제 존재하는지)
+    // 페어 검증 (공용 marketClient 로 1회만 — Gate.io 선물 계약 정보는 계좌 무관)
     for (const pair of config.tradePairs) {
       try {
-        const contract = await gateClient.getContract(pair);
+        const contract = await this.marketClient.getContract(pair);
         this.validPairs.push(pair);
         logger.info(`[${pair}] 검증 OK (multiplier=${contract.quantoMultiplier})`);
       } catch (err) {
@@ -76,28 +129,29 @@ class TradingBot {
 
     logger.info(`거래 페어 (유효): ${this.validPairs.join(', ')}`);
 
-    // 기존 포지션 감지 (유효한 페어별로)
-    for (const pair of this.validPairs) {
-      try {
-        const position = await gateClient.getPosition(pair);
-        if (position && position.size !== 0) {
-          const direction = position.size > 0 ? 'long' : 'short';
-          this.activePositions.set(pair, {
-            direction,
-            sl: null, // 수동 SL/TP일 수 있으므로 null
-            tp: null,
-            existing: true,
-          });
-          await this.orderManager.registerExistingPosition(pair, position);
-          logger.info(`[${pair}] 기존 포지션 감지: ${direction.toUpperCase()} size=${position.size} entry=${position.entryPrice}`);
+    // 계좌별 기존 포지션 감지 (각자 독립)
+    for (const [accId, acc] of this.accounts) {
+      for (const pair of this.validPairs) {
+        try {
+          const position = await acc.client.getPosition(pair);
+          if (position && position.size !== 0) {
+            const direction = position.size > 0 ? 'long' : 'short';
+            acc.activePositions.set(pair, {
+              direction,
+              sl: null,
+              tp: null,
+              existing: true,
+            });
+            await acc.orderManager.registerExistingPosition(pair, position);
+            logger.info(`[${accId}][${pair}] 기존 포지션 감지: ${direction.toUpperCase()} size=${position.size} entry=${position.entryPrice}`);
+          }
+        } catch {
+          // 포지션 없음
         }
-      } catch {
-        // 포지션 없음
       }
-    }
-
-    if (this.activePositions.size > 0) {
-      logger.info(`기존 활성 포지션 ${this.activePositions.size}개 자동 모니터링 시작`);
+      if (acc.activePositions.size > 0) {
+        logger.info(`[${accId}] 기존 활성 포지션 ${acc.activePositions.size}개 자동 모니터링 시작`);
+      }
     }
 
     // 텔레그램 봇 초기화
@@ -128,29 +182,27 @@ class TradingBot {
   }
 
   /**
-   * 기존 활성 포지션 모니터링 (SL/TP 체크 + 분기 처리).
+   * 기존 활성 포지션 모니터링 (계좌별) — SL/TP 체크 + 분기 처리.
    *
-   * _tickPair 의 원래 "1. 기존 포지션 모니터링" 블록과 weekend flatten (Step 2-7)
-   * 블록에서 공유.
+   * 멀티 계좌: (accId, acc) 를 명시적으로 받아 해당 계좌 범위에서만 조작.
+   * weekend flatten 의 buffer/extend phase 에서도 공유.
    *
    * 분기별 반환:
-   *   - active 없음            : { handled: false }            — fall-through (신규 진입 가능)
-   *   - closed / closed(unknown): notify + delete 후 handled:false — fall-through
-   *   - holding                : { handled: true }             — tick 종료
-   *   - holding_check          : { handled: true }             — tick 종료
-   *   - failed 등              : delete 후 handled:false        — fall-through
+   *   - active 없음            : { handled: false }
+   *   - closed / closed(unknown): notify + delete 후 handled:false
+   *   - holding                : { handled: true }
+   *   - holding_check          : { handled: true }
+   *   - failed 등              : delete 후 handled:false
    *
-   * 기존 _tickPair L127-155 의 side effect 순서 (log → notify → delete) 와 return
-   * 분기를 바이트 단위 재현 — 행동 불변.
-   *
+   * @param {string} accId
+   * @param {{orderManager: OrderManager, activePositions: Map}} acc
    * @param {string} pair
-   * @returns {Promise<{ handled: boolean, action?: string, result?: Object }>}
    */
-  async _monitorActive(pair) {
-    const active = this.activePositions.get(pair);
+  async _monitorActive(accId, acc, pair) {
+    const active = acc.activePositions.get(pair);
     if (!active) return { handled: false };
 
-    const result = await this.orderManager.monitorPosition(
+    const result = await acc.orderManager.monitorPosition(
       pair,
       active.sl,
       active.tp,
@@ -161,124 +213,40 @@ class TradingBot {
       const pnlTag = result.action === 'closed (unknown)'
         ? 'N/A'
         : `${result.pnl.toFixed(2)} USDT`;
-      logger.info(`[${pair}] 포지션 종료: ${result.action} | PnL: ${pnlTag}`);
-      // fire-and-forget: 알림이 실패해도 거래 로직 블로킹 금지 (C)
-      this.telegram.notifyClose(pair, result.action, result.pnl, result.price)
+      logger.info(`[${accId}][${pair}] 포지션 종료: ${result.action} | PnL: ${pnlTag}`);
+      // fire-and-forget: 알림 실패가 거래 로직을 블로킹하지 못하게
+      this.telegram.notifyClose(pair, result.action, result.pnl, result.price, accId)
         .catch((err) => logger.error(`notifyClose 실패: ${err.message}`));
-      this.activePositions.delete(pair);
+      acc.activePositions.delete(pair);
       return { handled: false, action: result.action, result };
     }
     if (result.action === 'holding') {
-      return { handled: true, action: 'holding', result }; // 포지션 유지 중 - 새 진입 안 함
+      return { handled: true, action: 'holding', result };
     }
     if (result.action === 'holding_check') {
-      // getPosition empty 연속 카운트 중 — 새 진입 금지, 포지션 보호 유지
       return { handled: true, action: 'holding_check', result };
     }
     // failed 등
-    this.activePositions.delete(pair);
+    acc.activePositions.delete(pair);
     return { handled: false, action: result.action, result };
   }
 
   /**
-   * 페어 단위 틱 처리
+   * 페어 단위 틱 처리 — 캔들/신호 1회, 계좌별 병렬 실행.
+   *
+   * 흐름:
+   *   1. 공용 marketClient 로 캔들 조회 (1회)
+   *   2. 전략 분석 (1회, 공유 signal)
+   *   3. 계좌 배열 Fisher-Yates 셔플 (공정성)
+   *   4. Promise.allSettled 로 각 계좌에 대해 monitor/execute 병렬 실행
+   *      — 각 작업을 try/catch 로 감싸 다른 계좌로 에러 전파 차단
    */
   async _tickPair(pair) {
-    // 0. 주말 전 포지션 강제 청산 (ICT 정통 — 주말 홀딩 금지)
-    //
-    //   순서 / 정책:
-    //     phase='none'   : 윈도우 밖. urgent 알림까지 갔던 페어는 final 알림 1회 후
-    //                      fall-through (주말 홀딩 수용, 기존 monitorPosition 경로).
-    //     phase='buffer' : NY PM 마감 전 버퍼. 신규 진입 차단.
-    //                      _monitorActive 먼저 (SL/TP 자연 히트 허용) →
-    //                      holding 이면 closePosition 강제 청산 →
-    //                      3회 누적 실패 시 warn 알림 (1회).
-    //     phase='extend' : 버퍼 종료 후 연장 기간. 신규 진입 차단.
-    //                      urgent 알림 (1회) + _monitorActive →
-    //                      holding 이면 closePosition 재시도.
-    //   알림은 fire-and-forget (.catch 로 send 실패 시 tick 블로킹 방지).
-    const wf = config.ict.weekendFlatten;
-    if (wf && wf.enabled) {
-      const window = indicators.isInWeekendFlattenWindow(new Date(), wf);
-
-      if (window.phase === 'none') {
-        // phase='none' + 포지션 활성 + urgent 이력 → 최종 실패 알림 (1회) 후 fall-through
-        if (this.activePositions.has(pair)) {
-          const notified = this.orderManager.closeNotified.get(pair);
-          if (notified && notified.has('urgent') && !notified.has('final')) {
-            this.telegram.notifyWeekendFlattenHolding(pair)
-              .catch((err) => logger.error(`notifyWeekendFlattenHolding 실패: ${err.message}`));
-            this.orderManager.markNotified(pair, 'final');
-          }
-        }
-        // fall-through: 기존 _monitorActive / maxPositions / 신규 진입 로직 그대로
-      } else {
-        // phase='buffer' or 'extend' — 신규 진입 차단
-        if (!this.activePositions.has(pair)) return;
-
-        if (window.phase === 'buffer') {
-          // SL/TP 자연 히트 허용 — _monitorActive 가 closed/failed 처리 시
-          //   notifyClose + delete 이미 수행 → monitor.action='closed*' or 'failed' 로 반환
-          // 'holding' 만 강제 청산 대상. 'holding_check' 는 empty 연속 중 → 다음 tick 대기
-          const monitor = await this._monitorActive(pair);
-          if (monitor.action !== 'holding') return;
-
-          const result = await this.orderManager.closePosition(pair, window.reason);
-          if (result.closed) {
-            this.telegram.notifyWeekendFlatten(pair, result.pnl, window.reason)
-              .catch((err) => logger.error(`notifyWeekendFlatten 실패: ${err.message}`));
-            this.activePositions.delete(pair);
-          } else if (result.attempts >= 3) {
-            const notified = this.orderManager.closeNotified.get(pair);
-            if (!notified || !notified.has('warn')) {
-              this.telegram.notifyWeekendFlattenFailed(pair, 'warn', result.attempts)
-                .catch((err) => logger.error(`notifyWeekendFlattenFailed 실패: ${err.message}`));
-              this.orderManager.markNotified(pair, 'warn');
-            }
-          }
-          return;
-        }
-
-        if (window.phase === 'extend') {
-          // 진입 시 urgent 알림 (1회)
-          const notified = this.orderManager.closeNotified.get(pair);
-          if (!notified || !notified.has('urgent')) {
-            const attemptsSoFar = this.orderManager.closeAttempts.get(pair) || 0;
-            this.telegram.notifyWeekendFlattenFailed(pair, 'urgent', attemptsSoFar)
-              .catch((err) => logger.error(`notifyWeekendFlattenFailed 실패: ${err.message}`));
-            this.orderManager.markNotified(pair, 'urgent');
-          }
-
-          // SL/TP 자연 히트 먼저, holding 이면 강제 청산
-          const monitor = await this._monitorActive(pair);
-          if (monitor.action !== 'holding') return;
-
-          const result = await this.orderManager.closePosition(pair, window.reason);
-          if (result.closed) {
-            this.telegram.notifyWeekendFlatten(pair, result.pnl, window.reason)
-              .catch((err) => logger.error(`notifyWeekendFlatten 실패: ${err.message}`));
-            this.activePositions.delete(pair);
-          }
-          return;
-        }
-      }
-    }
-
-    // 1. 기존 포지션 모니터링
-    const monitor = await this._monitorActive(pair);
-    if (monitor.handled) return;
-
-    // 2. 동시 포지션 상한 체크
-    if (this.activePositions.size >= config.maxPositions) {
-      logger.debug(`[${pair}] 동시 포지션 상한 도달 (${this.activePositions.size}/${config.maxPositions}) - 새 진입 스킵`);
-      return;
-    }
-
-    // 3. 멀티 타임프레임 캔들 데이터 조회
+    // 1. 캔들 데이터 (공용 1회)
     const [htfCandles, mtfCandles, ltfCandles] = await Promise.all([
-      gateClient.getCandles(pair, config.timeframes.htf, 200),
-      gateClient.getCandles(pair, config.timeframes.mtf, 200),
-      gateClient.getCandles(pair, config.timeframes.ltf, 200),
+      this.marketClient.getCandles(pair, config.timeframes.htf, 200),
+      this.marketClient.getCandles(pair, config.timeframes.mtf, 200),
+      this.marketClient.getCandles(pair, config.timeframes.ltf, 200),
     ]);
 
     if (!htfCandles || htfCandles.length < 50 ||
@@ -288,36 +256,129 @@ class TradingBot {
       return;
     }
 
-    // 4. ICT 멀티 타임프레임 전략 분석
+    // 2. 전략 분석 (1회, 공유)
     const signal = this.strategy.analyze({
       htf: htfCandles,
       mtf: mtfCandles,
       ltf: ltfCandles,
     });
 
-    if (!signal.signal) {
-      logger.debug(`[${pair}] 신호 없음: ${signal.reason}`);
+    // 3. 계좌 셔플 → 4. 병렬 실행 (공정성 + 에러 격리)
+    const accountsList = shuffleArray([...this.accounts.entries()]);
+
+    await Promise.allSettled(
+      accountsList.map(async ([accId, acc]) => {
+        try {
+          await this._tickPairForAccount(accId, acc, pair, signal);
+        } catch (err) {
+          logger.error(`[${accId}][${pair}] 계좌 tick 에러 (다른 계좌 계속): ${err.message}`);
+        }
+      })
+    );
+  }
+
+  /**
+   * (계좌 단위) weekend flatten + monitor + execute.
+   * _tickPair 의 핵심 로직을 계좌별로 실행. 기존 로직 바이트 단위 보존.
+   */
+  async _tickPairForAccount(accId, acc, pair, signal) {
+    // 0. 주말 전 포지션 강제 청산 (ICT 정통 — 주말 홀딩 금지)
+    //
+    //   순서 / 정책은 원래 로직과 동일. this.orderManager/this.activePositions 참조를
+    //   계좌별 acc.orderManager/acc.activePositions 로 교체. notify 에 accId 전달.
+    const wf = config.ict.weekendFlatten;
+    if (wf && wf.enabled) {
+      const window = indicators.isInWeekendFlattenWindow(new Date(), wf);
+
+      if (window.phase === 'none') {
+        if (acc.activePositions.has(pair)) {
+          const notified = acc.orderManager.closeNotified.get(pair);
+          if (notified && notified.has('urgent') && !notified.has('final')) {
+            this.telegram.notifyWeekendFlattenHolding(pair, accId)
+              .catch((err) => logger.error(`notifyWeekendFlattenHolding 실패: ${err.message}`));
+            acc.orderManager.markNotified(pair, 'final');
+          }
+        }
+        // fall-through
+      } else {
+        // phase='buffer' or 'extend' — 신규 진입 차단
+        if (!acc.activePositions.has(pair)) return;
+
+        if (window.phase === 'buffer') {
+          const monitor = await this._monitorActive(accId, acc, pair);
+          if (monitor.action !== 'holding') return;
+
+          const result = await acc.orderManager.closePosition(pair, window.reason);
+          if (result.closed) {
+            this.telegram.notifyWeekendFlatten(pair, result.pnl, window.reason, accId)
+              .catch((err) => logger.error(`notifyWeekendFlatten 실패: ${err.message}`));
+            acc.activePositions.delete(pair);
+          } else if (result.attempts >= 3) {
+            const notified = acc.orderManager.closeNotified.get(pair);
+            if (!notified || !notified.has('warn')) {
+              this.telegram.notifyWeekendFlattenFailed(pair, 'warn', result.attempts, accId)
+                .catch((err) => logger.error(`notifyWeekendFlattenFailed 실패: ${err.message}`));
+              acc.orderManager.markNotified(pair, 'warn');
+            }
+          }
+          return;
+        }
+
+        if (window.phase === 'extend') {
+          const notified = acc.orderManager.closeNotified.get(pair);
+          if (!notified || !notified.has('urgent')) {
+            const attemptsSoFar = acc.orderManager.closeAttempts.get(pair) || 0;
+            this.telegram.notifyWeekendFlattenFailed(pair, 'urgent', attemptsSoFar, accId)
+              .catch((err) => logger.error(`notifyWeekendFlattenFailed 실패: ${err.message}`));
+            acc.orderManager.markNotified(pair, 'urgent');
+          }
+
+          const monitor = await this._monitorActive(accId, acc, pair);
+          if (monitor.action !== 'holding') return;
+
+          const result = await acc.orderManager.closePosition(pair, window.reason);
+          if (result.closed) {
+            this.telegram.notifyWeekendFlatten(pair, result.pnl, window.reason, accId)
+              .catch((err) => logger.error(`notifyWeekendFlatten 실패: ${err.message}`));
+            acc.activePositions.delete(pair);
+          }
+          return;
+        }
+      }
+    }
+
+    // 1. 기존 포지션 모니터링
+    const monitor = await this._monitorActive(accId, acc, pair);
+    if (monitor.handled) return;
+
+    // 2. 동시 포지션 상한 (계좌별)
+    if (acc.activePositions.size >= config.maxPositions) {
+      logger.debug(`[${accId}][${pair}] 동시 포지션 상한 (${acc.activePositions.size}/${config.maxPositions})`);
       return;
     }
 
-    // 5. 주문 실행
-    const result = await this.orderManager.executeSignal(signal, pair);
+    // 3. 신호 없으면 스킵 (캔들/분석은 상위 함수에서 이미 수행)
+    if (!signal.signal) {
+      logger.debug(`[${accId}][${pair}] 신호 없음: ${signal.reason}`);
+      return;
+    }
+
+    // 4. 주문 실행
+    const result = await acc.orderManager.executeSignal(signal, pair);
 
     if (result.executed) {
-      this.activePositions.set(pair, {
+      acc.activePositions.set(pair, {
         direction: result.direction,
         sl: result.sl,
         tp: result.tp,
       });
-      logger.info(`[${pair}] 포지션 진입 완료: ${result.direction} | SL: ${result.sl} | TP: ${result.tp}`);
-      // fire-and-forget (C)
-      this.telegram.notifyEntry(pair, signal, result)
+      logger.info(`[${accId}][${pair}] 포지션 진입 완료: ${result.direction} | SL: ${result.sl} | TP: ${result.tp}`);
+      this.telegram.notifyEntry(pair, signal, result, accId)
         .catch((err) => logger.error(`notifyEntry 실패: ${err.message}`));
     } else {
-      logger.debug(`[${pair}] 주문 미실행: ${result.reason}`);
+      logger.debug(`[${accId}][${pair}] 주문 미실행: ${result.reason}`);
       if (result.reason === '일일 최대 손실 한도 도달') {
-        // fire-and-forget (C)
-        this.telegram.notifyDailyLossLimit(this.orderManager.dailyPnl)
+        this.telegram.notifyDailyLossLimit(acc.orderManager.dailyPnl, accId)
           .catch((err) => logger.error(`notifyDailyLossLimit 실패: ${err.message}`));
       }
     }
@@ -330,10 +391,12 @@ class TradingBot {
     this.isRunning = false;
     logger.info('봇 정지 중...');
 
-    if (this.activePositions.size > 0) {
-      logger.warn(`활성 포지션 ${this.activePositions.size}개 존재 - 수동 청산 필요 가능`);
-      for (const [pair, pos] of this.activePositions.entries()) {
-        logger.warn(`  [${pair}] ${pos.direction}`);
+    for (const [accId, acc] of this.accounts) {
+      if (acc.activePositions.size > 0) {
+        logger.warn(`[${accId}] 활성 포지션 ${acc.activePositions.size}개 — 수동 청산 필요 가능`);
+        for (const [pair, pos] of acc.activePositions.entries()) {
+          logger.warn(`  [${pair}] ${pos.direction}`);
+        }
       }
     }
 
@@ -348,10 +411,11 @@ class TradingBot {
  * Telegram의 _analyzePairDetail()과 동일한 데이터, 앱 표시용
  */
 async function analyzeContractJson(contract) {
+  const mc = bot.marketClient;
   const [htfCandles, mtfCandles, ltfCandles] = await Promise.all([
-    gateClient.getCandles(contract, config.timeframes.htf, 200),
-    gateClient.getCandles(contract, config.timeframes.mtf, 200),
-    gateClient.getCandles(contract, config.timeframes.ltf, 200),
+    mc.getCandles(contract, config.timeframes.htf, 200),
+    mc.getCandles(contract, config.timeframes.mtf, 200),
+    mc.getCandles(contract, config.timeframes.ltf, 200),
   ]);
 
   const currentPrice = ltfCandles[ltfCandles.length - 1].close;
@@ -494,12 +558,18 @@ function startHttpServer(botInstance) {
     const url = new URL(req.url, `http://localhost:${PORT}`);
 
     try {
-      // GET /bot/status
+      // GET /bot/status — 하위호환: activePositions = 첫 계좌 / 신규: accounts 필드
       if (url.pathname === '/bot/status') {
+        const firstAcc = botInstance.accounts.values().next().value;
+        const accountsObj = {};
+        for (const [accId, acc] of botInstance.accounts) {
+          accountsObj[accId] = Object.fromEntries(acc.activePositions);
+        }
         res.writeHead(200).end(JSON.stringify({
           running:         botInstance.isRunning,
           pairs:           botInstance.validPairs,
-          activePositions: Object.fromEntries(botInstance.activePositions),
+          activePositions: firstAcc ? Object.fromEntries(firstAcc.activePositions) : {},
+          accounts:        accountsObj,
         }));
         return;
       }

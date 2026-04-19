@@ -1,24 +1,37 @@
 const GateApi = require('gate-api');
-const config = require('../config');
 const logger = require('../utils/logger');
 
-const client = new GateApi.ApiClient();
-client.setApiKeySecret(config.apiKey, config.apiSecret);
-
-const futuresApi = new GateApi.FuturesApi(client);
 const SETTLE = 'usdt'; // USDT 마진 선물
 
 /**
- * Gate.io 선물 API 클라이언트
+ * Gate.io 선물 API 클라이언트 (멀티 계좌 지원)
+ *
+ * 이전: 싱글톤 객체 (const gateClient = { ... }; module.exports = gateClient;)
+ * 현재: 클래스 — 계좌별 인스턴스 생성, bot.js 에서 DI
+ *
+ * 모든 기존 메서드 시그니처/동작은 그대로 유지. 내부 futuresApi 참조만
+ * this.futuresApi 로 변경. 로그는 label 이 'default' 가 아닐 때만 prefix 표시.
  */
-const gateClient = {
+class GateClient {
+  constructor(apiKey, apiSecret, label = 'default') {
+    this.label = label;
+    this.client = new GateApi.ApiClient();
+    this.client.setApiKeySecret(apiKey, apiSecret);
+    this.futuresApi = new GateApi.FuturesApi(this.client);
+  }
+
+  /** 계좌 라벨을 로그 메시지 앞에 붙여주는 헬퍼 (싱글 계좌면 그대로) */
+  _lg(msg) {
+    return this.label === 'default' ? msg : `[${this.label}] ${msg}`;
+  }
+
   /**
    * 캔들(K선) 데이터 조회
    */
   async getCandles(contract, interval, limit = 200) {
     try {
       const opts = { interval, limit };
-      const { body } = await futuresApi.listFuturesCandlesticks(SETTLE, contract, opts);
+      const { body } = await this.futuresApi.listFuturesCandlesticks(SETTLE, contract, opts);
       return body.map((c) => ({
         timestamp: c.t * 1000,
         open: parseFloat(c.o),
@@ -31,14 +44,14 @@ const gateClient = {
       logger.error(`캔들 조회 실패: ${err.message}`);
       throw err;
     }
-  },
+  }
 
   /**
    * 현재가 조회
    */
   async getTicker(contract) {
     try {
-      const { body } = await futuresApi.listFuturesTickers(SETTLE, { contract });
+      const { body } = await this.futuresApi.listFuturesTickers(SETTLE, { contract });
       if (!Array.isArray(body) || body.length === 0 || !body[0]) {
         throw new Error(`티커 응답 없음: ${contract}`);
       }
@@ -53,14 +66,14 @@ const gateClient = {
       logger.error(`티커 조회 실패: ${err.message}`);
       throw err;
     }
-  },
+  }
 
   /**
    * 선물 계약 정보 조회
    */
   async getContract(contract) {
     try {
-      const { body } = await futuresApi.getFuturesContract(SETTLE, contract);
+      const { body } = await this.futuresApi.getFuturesContract(SETTLE, contract);
       return {
         name: body.name,
         quantoMultiplier: parseFloat(body.quantoMultiplier),
@@ -74,7 +87,7 @@ const gateClient = {
       logger.error(`계약 정보 조회 실패: ${err.message}`);
       throw err;
     }
-  },
+  }
 
   /**
    * 레버리지 설정
@@ -85,7 +98,7 @@ const gateClient = {
 
     // 방법 1: 싱글 모드 (leverage를 문자열로)
     try {
-      await futuresApi.updatePositionLeverage(SETTLE, contract, levStr);
+      await this.futuresApi.updatePositionLeverage(SETTLE, contract, levStr);
       logger.info(`레버리지 설정 완료: ${contract} x${leverage}`);
       return;
     } catch (err) {
@@ -94,7 +107,7 @@ const gateClient = {
 
     // 방법 2: 듀얼 모드
     try {
-      await futuresApi.updateDualModePositionLeverage(SETTLE, contract, levStr);
+      await this.futuresApi.updateDualModePositionLeverage(SETTLE, contract, levStr);
       logger.info(`레버리지 설정 완료 (듀얼): ${contract} x${leverage}`);
       return;
     } catch (err) {
@@ -103,7 +116,7 @@ const gateClient = {
 
     // 방법 3: 크로스 레버리지
     try {
-      await futuresApi.updatePositionLeverage(SETTLE, contract, '0', {
+      await this.futuresApi.updatePositionLeverage(SETTLE, contract, '0', {
         crossLeverageLimit: levStr,
       });
       logger.info(`레버리지 설정 완료 (크로스): ${contract} x${leverage}`);
@@ -114,7 +127,7 @@ const gateClient = {
 
     // 모든 방법 실패 시 경고만 (주문은 계속 진행)
     logger.warn(`레버리지 설정 실패 - 거래소 기본 레버리지로 진행: ${contract}`);
-  },
+  }
 
   /**
    * 선물 주문 (시장가)
@@ -127,14 +140,14 @@ const gateClient = {
       order.price = '0'; // 시장가
       order.tif = 'ioc'; // Immediate or Cancel
 
-      const { body } = await futuresApi.createFuturesOrder(SETTLE, order);
+      const { body } = await this.futuresApi.createFuturesOrder(SETTLE, order);
       logger.info(`주문 체결: ${side} ${contract} size=${size} id=${body.id}`);
       return body;
     } catch (err) {
       logger.error(`주문 실패: ${err.message}`);
       throw err;
     }
-  },
+  }
 
   /**
    * 지정가 주문
@@ -147,14 +160,14 @@ const gateClient = {
       order.price = price.toString();
       order.tif = 'gtc'; // Good Till Cancel
 
-      const { body } = await futuresApi.createFuturesOrder(SETTLE, order);
+      const { body } = await this.futuresApi.createFuturesOrder(SETTLE, order);
       logger.info(`지정가 주문: ${side} ${contract} @ ${price} size=${size} id=${body.id}`);
       return body;
     } catch (err) {
       logger.error(`지정가 주문 실패: ${err.message}`);
       throw err;
     }
-  },
+  }
 
   /**
    * 현재 포지션 조회
@@ -184,7 +197,7 @@ const gateClient = {
     // 싱글 모드 시도
     let singleParsed = null;
     try {
-      const { body } = await futuresApi.getPosition(SETTLE, contract);
+      const { body } = await this.futuresApi.getPosition(SETTLE, contract);
       logger.debug(`포지션 원본(single): ${JSON.stringify(body)}`);
       singleParsed = parsePosition(body);
       if (singleParsed.size !== 0) return singleParsed;
@@ -199,7 +212,7 @@ const gateClient = {
 
     // 듀얼 모드 시도
     try {
-      const { body } = await futuresApi.getDualModePosition(SETTLE, contract);
+      const { body } = await this.futuresApi.getDualModePosition(SETTLE, contract);
       if (Array.isArray(body)) {
         for (const pos of body) {
           const parsed = parsePosition(pos);
@@ -217,7 +230,7 @@ const gateClient = {
 
     // 둘 다 size=0 이면 빈 포지션 (single 모드 기준 구조라도 반환)
     return singleParsed && singleParsed.size === 0 ? null : null;
-  },
+  }
 
   /**
    * 포지션 청산 (전량)
@@ -236,7 +249,7 @@ const gateClient = {
       logger.error(`포지션 청산 실패: ${err.message}`);
       throw err;
     }
-  },
+  }
 
   /**
    * 최근 청산 이력 조회 (실현 PnL 확인용)
@@ -253,7 +266,7 @@ const gateClient = {
    */
   async getRecentClosedPositions(contract, limit = 20) {
     try {
-      const { body } = await futuresApi.listPositionClose(SETTLE, { contract, limit });
+      const { body } = await this.futuresApi.listPositionClose(SETTLE, { contract, limit });
       if (!Array.isArray(body)) return [];
       return body.map((p) => ({
         time:          p.time != null ? Number(p.time) : null,
@@ -272,14 +285,14 @@ const gateClient = {
       logger.debug(`청산 이력 조회 실패 [${contract}]: ${err.message}`);
       return [];
     }
-  },
+  }
 
   /**
    * 잔고 조회
    */
   async getBalance() {
     try {
-      const { body } = await futuresApi.listFuturesAccounts(SETTLE);
+      const { body } = await this.futuresApi.listFuturesAccounts(SETTLE);
       return {
         total: parseFloat(body.total),
         available: parseFloat(body.available),
@@ -289,21 +302,21 @@ const gateClient = {
       logger.error(`잔고 조회 실패: ${err.message}`);
       throw err;
     }
-  },
+  }
 
   /**
    * 미체결 주문 전체 취소
    */
   async cancelAllOrders(contract) {
     try {
-      await futuresApi.cancelFuturesOrders(SETTLE, contract, { side: 'ask' });
-      await futuresApi.cancelFuturesOrders(SETTLE, contract, { side: 'bid' });
+      await this.futuresApi.cancelFuturesOrders(SETTLE, contract, { side: 'ask' });
+      await this.futuresApi.cancelFuturesOrders(SETTLE, contract, { side: 'bid' });
       logger.info(`미체결 주문 전체 취소: ${contract}`);
     } catch (err) {
       logger.error(`주문 취소 실패: ${err.message}`);
       throw err;
     }
-  },
+  }
 
   /**
    * SL/TP 지정가 주문 세트 등록
@@ -389,7 +402,7 @@ const gateClient = {
 
     logger.info(`SL/TP 등록 완료: SL=${slRounded} TP=${tpRounded} (mode=${isDual ? 'dual' : 'single'})`);
     return results;
-  },
+  }
 
   /**
    * Gate.io Price Triggered Order 생성
@@ -428,7 +441,7 @@ const gateClient = {
       order.trigger = trigger;
       order.orderType = orderType;
 
-      const { body } = await futuresApi.createPriceTriggeredOrder(SETTLE, order);
+      const { body } = await this.futuresApi.createPriceTriggeredOrder(SETTLE, order);
       logger.info(`조건부 주문 등록: ${orderType} trigger=${triggerPrice} id=${body.id}`);
       return body;
     } catch (err) {
@@ -451,7 +464,7 @@ const gateClient = {
       logger.error(`조건부 주문 실패 [${orderType}]: ${err.message} | 상세: ${detailStr}`);
       throw err;
     }
-  },
+  }
 
   /**
    * 조건부 주문 목록 조회 (특정 페어 / 상태별)
@@ -466,14 +479,14 @@ const gateClient = {
    */
   async listTriggerOrders(contract, status = 'open') {
     try {
-      const { body } = await futuresApi.listPriceTriggeredOrders(SETTLE, status, { contract });
+      const { body } = await this.futuresApi.listPriceTriggeredOrders(SETTLE, status, { contract });
       if (!Array.isArray(body)) return [];
       return body.filter((o) => o && o.initial && o.initial.contract === contract);
     } catch (err) {
       logger.error(`조건부 주문 목록 조회 실패 [${contract}]: ${err.message}`);
       return [];
     }
-  },
+  }
 
   /**
    * 조건부 주문 개별 취소 (주문 ID 지정)
@@ -484,7 +497,7 @@ const gateClient = {
   async cancelTriggerOrder(orderId) {
     if (orderId == null) return false;
     try {
-      await futuresApi.cancelPriceTriggeredOrder(SETTLE, String(orderId));
+      await this.futuresApi.cancelPriceTriggeredOrder(SETTLE, String(orderId));
       return true;
     } catch (err) {
       const label = err && err.body && err.body.label;
@@ -495,7 +508,7 @@ const gateClient = {
       logger.error(`조건부 주문 취소 실패 [${orderId}]: ${err.message}`);
       return false;
     }
-  },
+  }
 
   /**
    * 페어별 조건부 주문 전체 취소 (안전 버전)
@@ -538,7 +551,7 @@ const gateClient = {
     } catch (err) {
       logger.error(`조건부 주문 취소 실패 [${contract}]: ${err.message}`);
     }
-  },
-};
+  }
+}
 
-module.exports = gateClient;
+module.exports = GateClient;

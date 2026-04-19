@@ -1,6 +1,5 @@
 const TelegramBot = require('node-telegram-bot-api');
 const config = require('../config');
-const gateClient = require('../api/gateClient');
 const indicators = require('../utils/indicators');
 const logger = require('../utils/logger');
 
@@ -73,14 +72,44 @@ class TelegramService {
     return pair.split('_')[0] + '.P';
   }
 
+  /** 공용 시장 데이터 클라이언트 (캔들/티커/계약정보) */
+  _marketClient() {
+    return this.tradingBot.marketClient;
+  }
+
+  /** 멀티 계좌 여부 — 단일 계좌면 라벨 표기 생략 */
+  _isMulti() {
+    return this.tradingBot.accounts.size > 1;
+  }
+
+  /** 계좌 라벨 prefix — 멀티일 때만 "[accId] " */
+  _accTag(accId) {
+    return this._isMulti() ? `[${accId}] ` : '';
+  }
+
   /**
-   * SL/TP 표시용 값 해석
-   *  - bot.activePositions.sl/tp 우선 (신규 진입 시 전략 계산값)
-   *  - 없으면 orderManager.slPrices/tpPrices (Phase B/C 에서 감지/저장한 실제 값)
-   *  - 둘 다 없으면 null (호출부에서 '(수동)' 등으로 표기)
+   * "accId:pair" 또는 "pair" 입력 파싱.
+   * @returns {{accId: string|null, pair: string|null}}
    */
-  _resolveSLTP(pair, active) {
-    const om = this.tradingBot && this.tradingBot.orderManager;
+  _parseAccountPair(input) {
+    if (!input) return { accId: null, pair: null };
+    const raw = input.trim();
+    if (raw.includes(':')) {
+      const [accPart, pairPart] = raw.split(':', 2);
+      const accId = this.tradingBot.accounts.has(accPart) ? accPart : null;
+      return { accId, pair: this._resolvePair(pairPart) };
+    }
+    return { accId: null, pair: this._resolvePair(raw) };
+  }
+
+  /**
+   * SL/TP 표시용 값 해석 (계좌 단위)
+   *  - active.sl/tp 우선 (신규 진입 시 전략 계산값)
+   *  - 없으면 해당 계좌 orderManager.slPrices/tpPrices (Phase B/C)
+   *  - acc 생략 시 tradingBot.orderManager (첫 계좌, 하위호환)
+   */
+  _resolveSLTP(pair, active, acc = null) {
+    const om = acc ? acc.orderManager : (this.tradingBot && this.tradingBot.orderManager);
     const activeSl = active && active.sl != null ? active.sl : null;
     const activeTp = active && active.tp != null ? active.tp : null;
     const storedSl = om ? om.slPrices.get(pair) : null;
@@ -102,25 +131,27 @@ class TelegramService {
       return true;
     };
 
-    // /status - 봇 상태
+    // /status - 봇 상태 (멀티 계좌: 계좌별 섹션)
     this.bot.onText(/^\/status/, async (msg) => {
       if (!auth(msg)) return;
       try {
         const running = this.tradingBot.isRunning ? '🟢 실행 중' : '🔴 정지됨';
-        const activePositions = this.tradingBot.activePositions;
 
         const lines = [
           `━━━ 봇 상태 ━━━`,
           running,
+          `계좌: ${[...this.tradingBot.accounts.keys()].join(', ')}`,
           `거래 페어: ${this.tradingBot.validPairs.map((p) => this._displayName(p)).join(', ')}`,
           `레버리지: x${config.leverage}`,
           `타임프레임: ${config.timeframes.htf}/${config.timeframes.mtf}/${config.timeframes.ltf}`,
-          `활성 포지션: ${activePositions.size}/${config.maxPositions}`,
         ];
 
-        if (activePositions.size > 0) {
-          for (const [pair, pos] of activePositions.entries()) {
-            const { sl, tp } = this._resolveSLTP(pair, pos);
+        for (const [accId, acc] of this.tradingBot.accounts) {
+          lines.push('');
+          const header = this._isMulti() ? accId : '활성 포지션';
+          lines.push(`━━ ${header}: ${acc.activePositions.size}/${config.maxPositions} ━━`);
+          for (const [pair, pos] of acc.activePositions.entries()) {
+            const { sl, tp } = this._resolveSLTP(pair, pos, acc);
             const slTp = (sl != null && tp != null)
               ? `SL: ${sl} / TP: ${tp}`
               : '(수동 SL/TP 또는 미등록)';
@@ -134,13 +165,16 @@ class TelegramService {
       }
     });
 
-    // /pairs - 유효 페어 목록
+    // /pairs - 유효 페어 목록 (전 계좌 중 하나라도 열려있으면 🟢)
     this.bot.onText(/^\/pairs/, async (msg) => {
       if (!auth(msg)) return;
       try {
         const lines = [`━━━ 거래 페어 ━━━`];
         for (const p of this.tradingBot.validPairs) {
-          const active = this.tradingBot.activePositions.has(p);
+          let active = false;
+          for (const acc of this.tradingBot.accounts.values()) {
+            if (acc.activePositions.has(p)) { active = true; break; }
+          }
           lines.push(`${active ? '🟢' : '⚪'} ${this._displayName(p)}`);
         }
         await this.send(lines.join('\n'));
@@ -155,122 +189,145 @@ class TelegramService {
       const arg = match && match[1];
 
       if (!arg) {
-        // 전체 요약
-        const activePositions = this.tradingBot.activePositions;
-        if (activePositions.size === 0) {
+        // 전체 요약 — 계좌별 섹션
+        let totalCount = 0;
+        for (const acc of this.tradingBot.accounts.values()) totalCount += acc.activePositions.size;
+        if (totalCount === 0) {
           await this.bot.sendMessage(chatId, '📊 현재 열린 포지션 없음');
           return;
         }
 
-        const lines = [`━━━ 활성 포지션 (${activePositions.size}) ━━━`];
-        for (const [pair, active] of activePositions.entries()) {
-          try {
-            const pos = await gateClient.getPosition(pair);
-            if (!pos || pos.size === 0) continue;
-            const dirEmoji = pos.size > 0 ? '📈' : '📉';
-            const dirText = pos.size > 0 ? 'LONG' : 'SHORT';
-            const dn = this._displayName(pair);
-            const contractInfo = await gateClient.getContract(pair);
-            const baseCoin = pair.split('_')[0];
-            const coinAmount = Math.abs(pos.size) * Math.abs(contractInfo.quantoMultiplier);
-            const { sl, tp } = this._resolveSLTP(pair, active);
-            const slText = sl != null ? sl : '(수동)';
-            const tpText = tp != null ? tp : '(수동)';
-            const pnlSign = pos.unrealisedPnl >= 0 ? '+' : '';
-
+        const lines = [`━━━ 활성 포지션 (${totalCount}) ━━━`];
+        for (const [accId, acc] of this.tradingBot.accounts) {
+          if (acc.activePositions.size === 0) continue;
+          if (this._isMulti()) {
             lines.push('');
-            lines.push(`${dirEmoji} [${dn}]`);
-            lines.push(`  방향: ${dirText}`);
-            lines.push(`  수량: ${coinAmount.toFixed(4)} ${baseCoin}`);
-            lines.push(`  진입가: ${pos.entryPrice > 0 ? pos.entryPrice.toFixed(2) : '-'}`);
-            lines.push(`  SL: ${slText} | TP: ${tpText}`);
-            lines.push(`  PnL: ${pnlSign}${pos.unrealisedPnl.toFixed(2)} USDT`);
-          } catch (err) {
-            lines.push(`\n[${this._displayName(pair)}] ❌ ${err.message}`);
+            lines.push(`━━ ${accId} (${acc.activePositions.size}) ━━`);
+          }
+          for (const [pair, active] of acc.activePositions.entries()) {
+            try {
+              const pos = await acc.client.getPosition(pair);
+              if (!pos || pos.size === 0) continue;
+              const dirEmoji = pos.size > 0 ? '📈' : '📉';
+              const dirText = pos.size > 0 ? 'LONG' : 'SHORT';
+              const dn = this._displayName(pair);
+              const contractInfo = await this._marketClient().getContract(pair);
+              const baseCoin = pair.split('_')[0];
+              const coinAmount = Math.abs(pos.size) * Math.abs(contractInfo.quantoMultiplier);
+              const { sl, tp } = this._resolveSLTP(pair, active, acc);
+              const slText = sl != null ? sl : '(수동)';
+              const tpText = tp != null ? tp : '(수동)';
+              const pnlSign = pos.unrealisedPnl >= 0 ? '+' : '';
+
+              lines.push('');
+              lines.push(`${dirEmoji} [${dn}]`);
+              lines.push(`  방향: ${dirText}`);
+              lines.push(`  수량: ${coinAmount.toFixed(4)} ${baseCoin}`);
+              lines.push(`  진입가: ${pos.entryPrice > 0 ? pos.entryPrice.toFixed(2) : '-'}`);
+              lines.push(`  SL: ${slText} | TP: ${tpText}`);
+              lines.push(`  PnL: ${pnlSign}${pos.unrealisedPnl.toFixed(2)} USDT`);
+            } catch (err) {
+              lines.push(`  [${this._displayName(pair)}] ❌ ${err.message}`);
+            }
           }
         }
         await this.bot.sendMessage(chatId, lines.join('\n'));
         return;
       }
 
-      // 특정 페어 상세
-      const pair = this._resolvePair(arg);
-      if (!pair) {
+      // 특정 페어 상세 — "accId:pair" 도 지원
+      const parsed = this._parseAccountPair(arg);
+      if (!parsed.pair) {
         await this.bot.sendMessage(chatId, `❌ 유효하지 않은 페어: ${arg}`);
         return;
       }
+      const pair = parsed.pair;
+      const accountsToShow = parsed.accId
+        ? [[parsed.accId, this.tradingBot.accounts.get(parsed.accId)]]
+        : [...this.tradingBot.accounts.entries()];
 
-      try {
-        const pos = await gateClient.getPosition(pair);
-        if (!pos || pos.size === 0) {
-          await this.bot.sendMessage(chatId, `📊 [${this._displayName(pair)}] 열린 포지션 없음`);
-          return;
+      const outLines = [];
+      for (const [accId, acc] of accountsToShow) {
+        try {
+          const pos = await acc.client.getPosition(pair);
+          if (!pos || pos.size === 0) {
+            outLines.push(`${this._accTag(accId)}📊 [${this._displayName(pair)}] 열린 포지션 없음`);
+            continue;
+          }
+          const dirEmoji = pos.size > 0 ? '📈' : '📉';
+          const dirText = pos.size > 0 ? 'LONG' : 'SHORT';
+          const dn = this._displayName(pair);
+          const lev = pos.leverage || '-';
+          const contractInfo = await this._marketClient().getContract(pair);
+          const baseCoin = pair.split('_')[0];
+          const coinAmount = Math.abs(pos.size) * Math.abs(contractInfo.quantoMultiplier);
+          const active = acc.activePositions.get(pair);
+          const { sl, tp } = this._resolveSLTP(pair, active, acc);
+          const slText = sl != null ? sl : '(수동)';
+          const tpText = tp != null ? tp : '(수동)';
+          const pnlSign = pos.unrealisedPnl >= 0 ? '+' : '';
+
+          outLines.push(`━━━ ${this._accTag(accId)}[${dn}] 포지션 ━━━`);
+          outLines.push(`${dirEmoji} 방향: ${dirText}`);
+          outLines.push(`수량: ${coinAmount.toFixed(4)} ${baseCoin}`);
+          outLines.push(`진입가: ${pos.entryPrice > 0 ? pos.entryPrice.toFixed(2) : '-'}`);
+          outLines.push(`현재가: ${pos.markPrice > 0 ? pos.markPrice.toFixed(2) : '-'}`);
+          outLines.push(`SL: ${slText} | TP: ${tpText}`);
+          outLines.push(`PnL: ${pnlSign}${pos.unrealisedPnl.toFixed(2)} USDT`);
+          outLines.push(`레버리지: x${lev}`);
+          outLines.push('');
+        } catch (err) {
+          outLines.push(`${this._accTag(accId)}❌ 포지션 조회 실패: ${err.message}`);
         }
-
-        const dirEmoji = pos.size > 0 ? '📈' : '📉';
-        const dirText = pos.size > 0 ? 'LONG' : 'SHORT';
-        const dn = this._displayName(pair);
-        const lev = pos.leverage || '-';
-        const contractInfo = await gateClient.getContract(pair);
-        const baseCoin = pair.split('_')[0];
-        const coinAmount = Math.abs(pos.size) * Math.abs(contractInfo.quantoMultiplier);
-        const active = this.tradingBot.activePositions.get(pair);
-        const { sl, tp } = this._resolveSLTP(pair, active);
-        const slText = sl != null ? sl : '(수동)';
-        const tpText = tp != null ? tp : '(수동)';
-        const pnlSign = pos.unrealisedPnl >= 0 ? '+' : '';
-
-        await this.bot.sendMessage(chatId, [
-          `━━━ [${dn}] 포지션 정보 ━━━`,
-          `${dirEmoji} 방향: ${dirText}`,
-          `수량: ${coinAmount.toFixed(4)} ${baseCoin}`,
-          `진입가: ${pos.entryPrice > 0 ? pos.entryPrice.toFixed(2) : '-'}`,
-          `현재가: ${pos.markPrice > 0 ? pos.markPrice.toFixed(2) : '-'}`,
-          `SL: ${slText} | TP: ${tpText}`,
-          `PnL: ${pnlSign}${pos.unrealisedPnl.toFixed(2)} USDT`,
-          `레버리지: x${lev}`,
-        ].join('\n'));
-      } catch (err) {
-        await this.bot.sendMessage(chatId, `❌ 포지션 조회 실패: ${err.message}`);
       }
+      await this.bot.sendMessage(chatId, outLines.join('\n'));
     });
 
-    // /balance
+    // /balance — 계좌별 병렬 조회
     this.bot.onText(/^\/balance/, async (msg) => {
       if (!auth(msg)) return;
-      try {
-        const bal = await gateClient.getBalance();
-        const totalExposure = this.tradingBot.orderManager.getTotalOpenExposure();
-        const maxTotal = bal.total * config.kelly.maxTotalExposure;
-        await this.bot.sendMessage(chatId, [
-          `━━━ 잔고 정보 ━━━`,
-          `💰 총 잔고: ${bal.total.toFixed(2)} USDT`,
-          `✅ 가용 잔고: ${bal.available.toFixed(2)} USDT`,
-          `📊 미실현 PnL: ${bal.unrealisedPnl.toFixed(2)} USDT`,
-          `📈 총 노출: ${totalExposure.toFixed(2)} / ${maxTotal.toFixed(2)} USDT (${((totalExposure / maxTotal) * 100 || 0).toFixed(1)}%)`,
-        ].join('\n'));
-      } catch (err) {
-        await this.bot.sendMessage(chatId, `❌ 잔고 조회 실패: ${err.message}`);
+      const lines = [`━━━ 잔고 정보 ━━━`];
+      const results = await Promise.allSettled(
+        [...this.tradingBot.accounts.entries()].map(async ([accId, acc]) => {
+          const bal = await acc.client.getBalance();
+          const exposure = acc.orderManager.getTotalOpenExposure();
+          const maxTotal = bal.total * config.kelly.maxTotalExposure;
+          return { accId, bal, exposure, maxTotal };
+        })
+      );
+      for (const r of results) {
+        if (r.status === 'fulfilled') {
+          const { accId, bal, exposure, maxTotal } = r.value;
+          if (this._isMulti()) lines.push('', `━━ ${accId} ━━`);
+          lines.push(`💰 총 잔고: ${bal.total.toFixed(2)} USDT`);
+          lines.push(`✅ 가용: ${bal.available.toFixed(2)} USDT`);
+          lines.push(`📊 미실현 PnL: ${bal.unrealisedPnl.toFixed(2)} USDT`);
+          lines.push(`📈 노출: ${exposure.toFixed(2)}/${maxTotal.toFixed(2)} USDT (${((exposure / maxTotal) * 100 || 0).toFixed(1)}%)`);
+        } else {
+          lines.push(`❌ 잔고 조회 실패: ${r.reason && r.reason.message}`);
+        }
       }
+      await this.bot.sendMessage(chatId, lines.join('\n'));
     });
 
-    // /pnl
+    // /pnl - 계좌별 일일 PnL + 공유 Kelly 통계
     this.bot.onText(/^\/pnl/, async (msg) => {
       if (!auth(msg)) return;
       try {
+        const lines = [`━━━ 오늘 손익 ━━━`];
+        for (const [accId, acc] of this.tradingBot.accounts) {
+          const om = acc.orderManager;
+          const pnlEmoji = om.dailyPnl >= 0 ? '🟢' : '🔴';
+          const limitPct = ((Math.abs(om.dailyPnl) / config.maxDailyLossUsdt) * 100).toFixed(1);
+          if (this._isMulti()) lines.push('', `━━ ${accId} ━━`);
+          lines.push(`${pnlEmoji} 일일 PnL: ${om.dailyPnl.toFixed(2)} USDT`);
+          lines.push(`📊 한도: ${config.maxDailyLossUsdt} USDT (사용 ${limitPct}%)`);
+        }
+
+        // Kelly 통계는 전 계좌 공유 (첫 계좌 om 사용)
         const om = this.tradingBot.orderManager;
-        const pnlEmoji = om.dailyPnl >= 0 ? '🟢' : '🔴';
-        const limitPct = ((Math.abs(om.dailyPnl) / config.maxDailyLossUsdt) * 100).toFixed(1);
-
-        const lines = [
-          `━━━ 오늘 손익 ━━━`,
-          `${pnlEmoji} 일일 PnL: ${om.dailyPnl.toFixed(2)} USDT`,
-          `📊 일일 손실 한도: ${config.maxDailyLossUsdt} USDT`,
-          `⚠️ 한도 사용: ${limitPct}%`,
-          ``,
-          `━━━ 페어별 Kelly 통계 ━━━`,
-        ];
-
+        lines.push('');
+        lines.push(`━━━ 페어별 Kelly 통계 ${this._isMulti() ? '(전 계좌 공유)' : ''} ━━━`);
         for (const pair of this.tradingBot.validPairs) {
           const s = om._getStats(pair);
           const total = s.wins + s.losses;
@@ -287,51 +344,81 @@ class TelegramService {
       }
     });
 
-    // /close — 청산 (페어 필수, 또는 all)
+    // /close — 청산
+    //   /close BTC         → 모든 계좌의 BTC 병렬 청산
+    //   /close main:BTC    → main 계좌의 BTC 만
+    //   /close all         → 모든 계좌의 모든 활성 포지션 병렬 청산
     this.bot.onText(/^\/close(?:\s+(\S+))?/, async (msg, match) => {
       if (!auth(msg)) return;
       const arg = match && match[1];
 
       if (!arg) {
+        const allKeys = new Set();
+        for (const acc of this.tradingBot.accounts.values()) {
+          for (const k of acc.activePositions.keys()) allKeys.add(k);
+        }
         await this.bot.sendMessage(chatId, [
           '❓ 청산할 페어를 지정해주세요',
-          '예: /close BTC 또는 /close all',
-          `현재 활성: ${[...this.tradingBot.activePositions.keys()].join(', ') || '없음'}`,
+          '예: /close BTC | /close main:BTC | /close all',
+          `현재 활성: ${[...allKeys].join(', ') || '없음'}`,
         ].join('\n'));
         return;
       }
 
-      const targets = [];
+      // (accId, acc, pair) 작업 목록 수집
+      const tasks = [];
       if (arg.toLowerCase() === 'all') {
-        targets.push(...this.tradingBot.activePositions.keys());
-        if (targets.length === 0) {
+        for (const [accId, acc] of this.tradingBot.accounts) {
+          for (const pair of acc.activePositions.keys()) tasks.push([accId, acc, pair]);
+        }
+        if (tasks.length === 0) {
           await this.bot.sendMessage(chatId, '📊 청산할 활성 포지션 없음');
           return;
         }
       } else {
-        const pair = this._resolvePair(arg);
-        if (!pair) {
+        const parsed = this._parseAccountPair(arg);
+        if (!parsed.pair) {
           await this.bot.sendMessage(chatId, `❌ 유효하지 않은 페어: ${arg}`);
           return;
         }
-        targets.push(pair);
-      }
-
-      const results = [];
-      for (const pair of targets) {
-        try {
-          const result = await this.tradingBot.orderManager.closeAndCleanup(pair);
-          if (result) {
-            this.tradingBot.activePositions.delete(pair);
-            results.push(`✅ [${this._displayName(pair)}] 청산 완료`);
-          } else {
-            results.push(`📊 [${this._displayName(pair)}] 청산할 포지션 없음`);
-          }
-        } catch (err) {
-          results.push(`❌ [${this._displayName(pair)}] 청산 실패: ${err.message}`);
+        if (parsed.accId) {
+          const acc = this.tradingBot.accounts.get(parsed.accId);
+          tasks.push([parsed.accId, acc, parsed.pair]);
+        } else {
+          // 전 계좌
+          for (const [accId, acc] of this.tradingBot.accounts) tasks.push([accId, acc, parsed.pair]);
         }
       }
-      await this.bot.sendMessage(chatId, results.join('\n'));
+
+      // 공정성 — 셔플
+      for (let i = tasks.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [tasks[i], tasks[j]] = [tasks[j], tasks[i]];
+      }
+
+      // 병렬 청산 + 에러 격리
+      const results = await Promise.allSettled(
+        tasks.map(async ([accId, acc, pair]) => {
+          const result = await acc.orderManager.closeAndCleanup(pair);
+          acc.activePositions.delete(pair);
+          return { accId, pair, success: !!result };
+        })
+      );
+
+      const lines = [];
+      for (let i = 0; i < results.length; i++) {
+        const [accId, , pair] = tasks[i];
+        const r = results[i];
+        const tag = this._accTag(accId);
+        if (r.status === 'fulfilled') {
+          lines.push(r.value.success
+            ? `✅ ${tag}[${this._displayName(pair)}] 청산 완료`
+            : `📊 ${tag}[${this._displayName(pair)}] 청산할 포지션 없음`);
+        } else {
+          lines.push(`❌ ${tag}[${this._displayName(pair)}] 청산 실패: ${r.reason && r.reason.message}`);
+        }
+      }
+      await this.bot.sendMessage(chatId, lines.join('\n'));
     });
 
     // /stop
@@ -421,10 +508,11 @@ class TelegramService {
    * 페어 한 줄 요약 (전체 /analyze 용)
    */
   async _analyzePairSummary(pair) {
+    const mc = this._marketClient();
     const [htfCandles, mtfCandles, ltfCandles] = await Promise.all([
-      gateClient.getCandles(pair, config.timeframes.htf, 200),
-      gateClient.getCandles(pair, config.timeframes.mtf, 200),
-      gateClient.getCandles(pair, config.timeframes.ltf, 200),
+      mc.getCandles(pair, config.timeframes.htf, 200),
+      mc.getCandles(pair, config.timeframes.mtf, 200),
+      mc.getCandles(pair, config.timeframes.ltf, 200),
     ]);
     const currentPrice = ltfCandles[ltfCandles.length - 1].close;
     const signal = this.tradingBot.strategy.analyze({ htf: htfCandles, mtf: mtfCandles, ltf: ltfCandles });
@@ -442,10 +530,11 @@ class TelegramService {
    * 페어 상세 분석 (인자 있는 /analyze 용)
    */
   async _analyzePairDetail(pair) {
+    const mc = this._marketClient();
     const [htfCandles, mtfCandles, ltfCandles] = await Promise.all([
-      gateClient.getCandles(pair, config.timeframes.htf, 200),
-      gateClient.getCandles(pair, config.timeframes.mtf, 200),
-      gateClient.getCandles(pair, config.timeframes.ltf, 200),
+      mc.getCandles(pair, config.timeframes.htf, 200),
+      mc.getCandles(pair, config.timeframes.mtf, 200),
+      mc.getCandles(pair, config.timeframes.ltf, 200),
     ]);
 
     const currentPrice = ltfCandles[ltfCandles.length - 1].close;
@@ -637,11 +726,11 @@ class TelegramService {
   /**
    * 포지션 진입 알림 (pair 지정)
    */
-  async notifyEntry(pair, signal, result) {
+  async notifyEntry(pair, signal, result, accId = null) {
     const emoji = signal.signal === 'long' ? '📈' : '📉';
     let qtyText = `${result.size} 계약`;
     try {
-      const contractInfo = await gateClient.getContract(pair);
+      const contractInfo = await this._marketClient().getContract(pair);
       const baseCoin = pair.split('_')[0];
       const coinAmount = Math.abs(result.size) * Math.abs(contractInfo.quantoMultiplier);
       qtyText = `${coinAmount.toFixed(4)} ${baseCoin}`;
@@ -668,8 +757,9 @@ class TelegramService {
 
     const scoreLabel = ss ? `📊 Setup: ${ss.score}/100 — ${ss.label}` : '';
 
+    const accTag = accId && this._isMulti() ? `[${accId}]` : '';
     await this.send([
-      `${emoji} ━━━ [${this._displayName(pair)}] 포지션 진입 ━━━`,
+      `${emoji} ━━━ ${accTag}[${this._displayName(pair)}] 포지션 진입 ━━━`,
       `방향: ${signal.signal.toUpperCase()}`,
       `진입가: ${signal.entry}`,
       `손절(SL): ${signal.sl}`,
@@ -692,10 +782,11 @@ class TelegramService {
    *   - 'closed'           : PnL 확인됨 (부호로 익절/손절 판단)
    *   - 'closed (unknown)' : PnL 조회 실패 — "청산됨 (PnL 미확인)" 으로 표기
    */
-  async notifyClose(pair, action, pnl, price) {
+  async notifyClose(pair, action, pnl, price, accId = null) {
+    const accTag = accId && this._isMulti() ? `[${accId}]` : '';
     if (action === 'closed (unknown)') {
       await this.send([
-        `⚪ ━━━ [${this._displayName(pair)}] 청산 감지 ━━━`,
+        `⚪ ━━━ ${accTag}[${this._displayName(pair)}] 청산 감지 ━━━`,
         `청산가: ${price}`,
         `PnL: 미확인 (거래 이력 조회 실패)`,
       ].join('\n'));
@@ -708,18 +799,19 @@ class TelegramService {
     const pnlSign = isProfit ? '+' : '';
 
     await this.send([
-      `${emoji} ━━━ [${this._displayName(pair)}] ${label} 청산 ━━━`,
+      `${emoji} ━━━ ${accTag}[${this._displayName(pair)}] ${label} 청산 ━━━`,
       `청산가: ${price}`,
       `PnL: ${pnlSign}${pnl.toFixed(2)} USDT`,
     ].join('\n'));
   }
 
-  async notifyDailyLossLimit(dailyPnl) {
+  async notifyDailyLossLimit(dailyPnl, accId = null) {
+    const accTag = accId && this._isMulti() ? `[${accId}] ` : '';
     await this.send([
-      `🚨 ━━━ 일일 손실 한도 도달 ━━━`,
+      `🚨 ━━━ ${accTag}일일 손실 한도 도달 ━━━`,
       `일일 PnL: ${dailyPnl.toFixed(2)} USDT`,
       `한도: -${config.maxDailyLossUsdt} USDT`,
-      `⚠️ 오늘 매매가 자동 중단됩니다.`,
+      `⚠️ 해당 계좌 오늘 매매가 자동 중단됩니다.`,
     ].join('\n'));
   }
 
@@ -729,12 +821,13 @@ class TelegramService {
    *   pnl=0 은 Gate.io eventual consistency 로 PnL 미확인인 경우
    *   (closePosition Case 3) — "미확인" 으로 표기.
    */
-  async notifyWeekendFlatten(pair, pnl, reason) {
+  async notifyWeekendFlatten(pair, pnl, reason, accId = null) {
+    const accTag = accId && this._isMulti() ? `[${accId}]` : '';
     const pnlLine = pnl === 0
       ? `PnL: 미확인 (거래 이력 조회 실패)`
       : `PnL: ${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)} USDT`;
     await this.send([
-      `🔔 ━━━ [${this._displayName(pair)}] 주말 전 강제 청산 ━━━`,
+      `🔔 ━━━ ${accTag}[${this._displayName(pair)}] 주말 전 강제 청산 ━━━`,
       pnlLine,
       `사유: ${reason}`,
       ``,
@@ -747,7 +840,8 @@ class TelegramService {
    *   level='warn'   : 3회 누적 실패 (버퍼 기간 내, 🟡)
    *   level='urgent' : 버퍼 종료 후 연장 기간 진입 (🟠)
    */
-  async notifyWeekendFlattenFailed(pair, level, attempts) {
+  async notifyWeekendFlattenFailed(pair, level, attempts, accId = null) {
+    const accTag = accId && this._isMulti() ? `[${accId}]` : '';
     const isWarn = level === 'warn';
     const emoji  = isWarn ? '🟡' : '🟠';
     const header = isWarn ? '주말 청산 경고' : '주말 청산 긴급';
@@ -756,7 +850,7 @@ class TelegramService {
     const suggestion  = isWarn ? '수동 개입 준비 필요' : 'Gate.io UI 확인 권장';
 
     await this.send([
-      `${emoji} ━━━ [${this._displayName(pair)}] ${header} ━━━`,
+      `${emoji} ━━━ ${accTag}[${this._displayName(pair)}] ${header} ━━━`,
       `시도 횟수: ${attempts}회 실패`,
       statusLine1,
       statusLine2,
@@ -768,9 +862,10 @@ class TelegramService {
   /**
    * 주말 청산 최종 실패 (연장 기간도 초과) — 수동 개입 필수.
    */
-  async notifyWeekendFlattenHolding(pair) {
+  async notifyWeekendFlattenHolding(pair, accId = null) {
+    const accTag = accId && this._isMulti() ? `[${accId}]` : '';
     await this.send([
-      `🚨 ━━━ [${this._displayName(pair)}] 주말 청산 최종 실패 ━━━`,
+      `🚨 ━━━ ${accTag}[${this._displayName(pair)}] 주말 청산 최종 실패 ━━━`,
       `연장 기간 (30분) 내 청산 실패`,
       `주말 홀딩 수용`,
       ``,

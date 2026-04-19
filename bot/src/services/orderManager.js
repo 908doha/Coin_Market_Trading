@@ -1,49 +1,59 @@
-const gateClient = require('../api/gateClient');
 const config = require('../config');
 const logger = require('../utils/logger');
 const kellyPersistence = require('../utils/kellyPersistence');
 
 /**
- * 주문 실행 및 포지션 관리 서비스 (멀티 페어 지원)
+ * 주문 실행 및 포지션 관리 서비스 (멀티 페어 + 멀티 계좌 지원)
  *
- * 페어별 독립 상태:
- *  - slOrderIds / tpOrderIds / lastKnownPositions : pair → value Map
- *  - tradeStatsByPair                            : pair → Kelly 통계 (영구 저장)
- *  - openExposureUsdt                            : pair → leveraged notional (USDT)
+ * 계좌별 독립 상태:
+ *  - slOrderIds / tpOrderIds / lastKnownPositions / openExposureUsdt
+ *  - slPrices / tpPrices / sltpCheckCounter / emptyReadCount
+ *  - closeAttempts / closeNotified (weekend flatten)
+ *  - dailyPnl (계좌별 일일 손익 한도)
  *
- * 전역 상태:
- *  - dailyPnl (전 페어 합산 일일 손익, maxDailyLossUsdt 한도 적용, 영구 저장)
+ * 전 계좌 공유 상태:
+ *  - tradeStatsByPair (Kelly 통계는 전략 성과 기반 — 계좌 무관)
+ *
+ * @param {GateClient} gateClient   계좌별 Gate.io 클라이언트 인스턴스 (DI)
+ * @param {string} accountId        로그 prefix/라벨용
+ * @param {Object|null} sharedKelly 전 계좌 공유 Kelly 객체 { tradeStatsByPair: Map }
+ *                                  null 이면 첫 계좌 — 파일에서 로드 (owner)
  */
 class OrderManager {
-  constructor() {
-    // 페어별 상태 (런타임)
+  constructor(gateClient, accountId = 'default', sharedKelly = null) {
+    this.gateClient = gateClient;
+    this.accountId = accountId;
+
+    // 페어별 상태 (런타임, 계좌별 독립)
     this.slOrderIds = new Map();
     this.tpOrderIds = new Map();
     this.lastKnownPositions = new Map();
-    this.tradeStatsByPair = new Map();
     this.openExposureUsdt = new Map();
-
-    // Phase B/C: SL/TP 트리거 가격 저장 (복원/재등록용)
-    // 주문 ID만 있으면 취소는 가능하지만 재등록하려면 가격이 필요하다.
     this.slPrices = new Map();
     this.tpPrices = new Map();
-
-    // Phase C: 주기적 SL/TP 존재 검증 카운터 (페어별)
     this.sltpCheckCounter = new Map();
-
-    // race condition 방지: 포지션 조회 empty 연속 횟수
-    // 1-2회 null은 Gate.io 일시 장애/eventual consistency로 보고 무시,
-    // 3회 연속이면 진짜 청산으로 판단
     this.emptyReadCount = new Map();
-
-    // Weekend flatten (Step 2-5): 강제 청산 실패 재시도 카운터 + 알림 중복 방지
-    //   closeAttempts : pair → 누적 실패 횟수 (성공 시 _clearPairState 에서 삭제)
-    //   closeNotified : pair → Set<'warn'|'urgent'|'final'>
     this.closeAttempts = new Map();
     this.closeNotified = new Map();
 
-    // 영구 저장에서 복원
-    this._loadPersistedStats();
+    // Kelly 통계 — 전 계좌 공유 (sharedKelly 주어지면 그 Map 참조)
+    if (sharedKelly && sharedKelly.tradeStatsByPair) {
+      this.tradeStatsByPair = sharedKelly.tradeStatsByPair;
+      this._kellyOwner = false;
+    } else {
+      this.tradeStatsByPair = new Map();
+      this._kellyOwner = true;
+    }
+
+    // dailyPnl 은 계좌별 독립 (각자 일일 손실 한도)
+    this.dailyPnl = 0;
+    this.dailyPnlResetDate = new Date().toDateString();
+
+    // 첫 계좌 (kellyOwner) 만 Kelly 통계 + dailyPnl 을 파일에서 로드.
+    // 다른 계좌는 기본값 0 으로 시작 (공유 tradeStatsByPair 는 이미 로드됨).
+    if (this._kellyOwner) {
+      this._loadPersistedStats();
+    }
   }
 
   // ===== Phase B/C 공통 헬퍼: SL/TP 상태 저장/정리 =====
@@ -273,7 +283,7 @@ class OrderManager {
     });
 
     try {
-      const contractInfo = await gateClient.getContract(pair);
+      const contractInfo = await this.gateClient.getContract(pair);
       const contractValue = Math.abs(contractInfo.quantoMultiplier) * (position.entryPrice || position.markPrice || 0);
       const notional = Math.abs(position.size) * contractValue; // leveraged notional
       if (notional > 0) this.openExposureUsdt.set(pair, notional);
@@ -307,7 +317,7 @@ class OrderManager {
       return;
     }
 
-    const existing = await gateClient.listTriggerOrders(pair, 'open');
+    const existing = await this.gateClient.listTriggerOrders(pair, 'open');
 
     if (existing.length > 0) {
       // 기존 트리거가 있으면 분류해서 저장만 함 (사용자가 수동 배치한 경우 존중)
@@ -348,7 +358,7 @@ class OrderManager {
     );
 
     try {
-      const result = await gateClient.placeSLTP(pair, size, direction, sl, tp);
+      const result = await this.gateClient.placeSLTP(pair, size, direction, sl, tp);
       this._storeSLTP(pair, result.slOrder, result.tpOrder, sl, tp);
       logger.info(`[${pair}] 폴백 SL/TP 등록 완료`);
     } catch (err) {
@@ -394,12 +404,12 @@ class OrderManager {
    */
   async calculatePositionSize(contract, price, poiBoost = 1.0) {
     try {
-      const contractInfo = await gateClient.getContract(contract);
+      const contractInfo = await this.gateClient.getContract(contract);
       const multiplier = contractInfo.quantoMultiplier;
       const contractValue = Math.abs(multiplier) * price;
 
       const kellyFrac = this.calculateKellyFraction(contract);
-      const balance = await gateClient.getBalance();
+      const balance = await this.gateClient.getBalance();
 
       const effectiveFrac = kellyFrac > 0 ? kellyFrac : config.kelly.defaultFraction;
       let marginBudget = balance.total * effectiveFrac * poiBoost;
@@ -462,21 +472,21 @@ class OrderManager {
     }
 
     // 기존 포지션 확인 (해당 페어)
-    const existingPosition = await gateClient.getPosition(contract);
+    const existingPosition = await this.gateClient.getPosition(contract);
     if (existingPosition && existingPosition.size !== 0) {
       logger.info(`[${contract}] 이미 포지션 보유 중: size=${existingPosition.size}`);
       return { executed: false, reason: '기존 포지션 보유 중' };
     }
 
     // 잔고 확인
-    const balance = await gateClient.getBalance();
+    const balance = await this.gateClient.getBalance();
     if (!balance || balance.available <= 0 || balance.total <= 0) {
       logger.warn(`[${contract}] 잔고 부족: available=${balance?.available ?? 0} total=${balance?.total ?? 0}`);
       return { executed: false, reason: '잔고 부족' };
     }
 
     // 레버리지 설정
-    await gateClient.setLeverage(contract, config.leverage);
+    await this.gateClient.setLeverage(contract, config.leverage);
 
     // HTF POI 가중치: POI 안이면 full, 밖이면 half (옵션 3-A)
     const poiBoost = signal.hasHtfPoi ? 1.0 : 0.5;
@@ -498,13 +508,13 @@ class OrderManager {
     logger.info('='.repeat(60));
 
     // 1. 시장가 진입 주문
-    const order = await gateClient.createOrder(contract, size, side);
+    const order = await this.gateClient.createOrder(contract, size, side);
 
     // 2. 실제 체결된 포지션 조회 (최대 6회 재시도)
     await new Promise(r => setTimeout(r, 1000));
     let actualPosition = null;
     for (let i = 0; i < 6; i++) {
-      actualPosition = await gateClient.getPosition(contract);
+      actualPosition = await this.gateClient.getPosition(contract);
       if (actualPosition && actualPosition.size !== 0) break;
       await new Promise(r => setTimeout(r, 1000));
     }
@@ -546,7 +556,7 @@ class OrderManager {
     let sltpSuccess = false;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const sltpResult = await gateClient.placeSLTP(contract, actualSize, direction, sl, tp);
+        const sltpResult = await this.gateClient.placeSLTP(contract, actualSize, direction, sl, tp);
         // Phase B/C: ID 뿐 아니라 가격도 저장 — 재등록 시 필요
         this._storeSLTP(contract, sltpResult.slOrder, sltpResult.tpOrder, sl, tp);
         logger.info(`[${contract}] SL 주문 ID: ${this.slOrderIds.get(contract)} | TP 주문 ID: ${this.tpOrderIds.get(contract)}`);
@@ -586,7 +596,7 @@ class OrderManager {
    *          존재하는지 확인하고, 사라졌으면 저장된 가격으로 재등록.
    */
   async monitorPosition(contract, sl, tp, direction) {
-    const position = await gateClient.getPosition(contract);
+    const position = await this.gateClient.getPosition(contract);
 
     // 포지션 살아 있음 → 카운터 초기화
     if (position && position.size !== 0) {
@@ -620,7 +630,7 @@ class OrderManager {
     // 포지션 empty — 즉시 재조회 (2초 후) 후 카운트
     // Gate.io API가 소형 포지션(1계약)을 간헐적으로 누락하는 문제 대응
     await new Promise((r) => setTimeout(r, 2000));
-    const retryPosition = await gateClient.getPosition(contract);
+    const retryPosition = await this.gateClient.getPosition(contract);
 
     if (retryPosition && retryPosition.size !== 0) {
       // 재조회 성공 → 일시적 API 장애였음, 정상 복귀
@@ -663,7 +673,7 @@ class OrderManager {
     if (!this.lastKnownPositions.has(contract)) {
       logger.warn(`[${contract}] 포지션 확인 불가 (${EMPTY_THRESHOLD}회 연속 empty) - 조건부 주문 정리`);
       try {
-        await gateClient.cancelAllTriggerOrders(contract);
+        await this.gateClient.cancelAllTriggerOrders(contract);
       } catch {}
       this._clearPairState(contract);
       return { action: 'failed', reason: '포지션 조회 실패' };
@@ -702,7 +712,7 @@ class OrderManager {
     const { retryOnEmpty = false, logContext = '' } = opts;
 
     try {
-      await gateClient.cancelAllTriggerOrders(contract);
+      await this.gateClient.cancelAllTriggerOrders(contract);
     } catch {}
 
     let pnl = 0;
@@ -710,7 +720,7 @@ class OrderManager {
     const known = this.lastKnownPositions.get(contract);
     const sinceMs = (known && known.firstSeenAt) ? known.firstSeenAt : (Date.now() - 600_000);
     try {
-      let closes = await gateClient.getRecentClosedPositions(contract, 20);
+      let closes = await this.gateClient.getRecentClosedPositions(contract, 20);
       let found = false;
       for (const p of closes) {
         // Gate.io time 은 초(epoch seconds). ms 로 변환.
@@ -729,7 +739,7 @@ class OrderManager {
       if (!found && retryOnEmpty) {
         logger.debug(`[${contract}] retryOnEmpty: 2초 대기 후 재조회 (eventual consistency)`);
         await new Promise((r) => setTimeout(r, 2000));
-        closes = await gateClient.getRecentClosedPositions(contract, 20);
+        closes = await this.gateClient.getRecentClosedPositions(contract, 20);
         for (const p of closes) {
           const tMs = typeof p.time === 'number' ? p.time * 1000 : NaN;
           if (!Number.isFinite(tMs) || tMs < sinceMs) continue;
@@ -795,7 +805,7 @@ class OrderManager {
    */
   async closePosition(pair, reason) {
     try {
-      await gateClient.closePosition(pair);
+      await this.gateClient.closePosition(pair);
     } catch (err) {
       const attempts = (this.closeAttempts.get(pair) || 0) + 1;
       this.closeAttempts.set(pair, attempts);
@@ -831,7 +841,7 @@ class OrderManager {
     const entry = (known && known.entryPrice) || position.entryPrice || 0;
     const mark = position.markPrice || entry;
 
-    const triggers = await gateClient.listTriggerOrders(contract, 'open');
+    const triggers = await this.gateClient.listTriggerOrders(contract, 'open');
     const { sl: foundSl, tp: foundTp } = this._classifyTriggers(triggers, direction, entry);
 
     // 케이스 1: 둘 다 존재 → IDs/가격 갱신 후 종료
@@ -873,14 +883,14 @@ class OrderManager {
 
     // 기존 orphan 트리거 정리 (Phase D 안전 버전) → 원자적 재등록
     try {
-      await gateClient.cancelAllTriggerOrders(contract);
+      await this.gateClient.cancelAllTriggerOrders(contract);
     } catch (err) {
       logger.warn(`[${contract}] 재등록 전 orphan 정리 실패 (계속 진행): ${err.message}`);
     }
 
     try {
       const size = Math.abs(position.size);
-      const result = await gateClient.placeSLTP(contract, size, direction, sl, tp);
+      const result = await this.gateClient.placeSLTP(contract, size, direction, sl, tp);
       this._storeSLTP(contract, result.slOrder, result.tpOrder, sl, tp);
       logger.info(`[${contract}] SL/TP 재등록 완료`);
     } catch (err) {
@@ -892,11 +902,11 @@ class OrderManager {
 
   async closeAndCleanup(contract) {
     try {
-      await gateClient.cancelAllTriggerOrders(contract);
+      await this.gateClient.cancelAllTriggerOrders(contract);
       logger.info(`[${contract}] SL/TP 조건부 주문 취소 완료`);
     } catch {}
 
-    const result = await gateClient.closePosition(contract);
+    const result = await this.gateClient.closePosition(contract);
 
     this.lastKnownPositions.delete(contract);
     this.emptyReadCount.delete(contract);

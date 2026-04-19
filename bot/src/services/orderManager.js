@@ -662,19 +662,42 @@ class OrderManager {
     }
 
     // 이전에 있었는데 5회 연속 없음 → SL/TP 체결 또는 수동 청산
+    return await this._finalizePairClose(contract, {
+      logContext: `(${EMPTY_THRESHOLD}회 empty)`,
+    });
+  }
+
+  /**
+   * 포지션 종료 후 정리 작업 공유 헬퍼 (PnL 집계 + Kelly + dailyPnl + state clear).
+   *
+   * monitorPosition 의 close 경로와 closePosition (Step 2-5 예정) 에서 공유.
+   * 기존 monitorPosition L664-714 의 인라인 로직을 그대로 이동 — 행동 불변.
+   *
+   * 실제 실현 PnL 을 청산 이력 API 에서 조회.
+   *   과거엔 lastKnownPositions.unrealisedPnl (직전 폴링 당시 값) 의 부호로
+   *   tp_hit/sl_hit 를 분류했지만, 반등 중 SL hit 등 경계 사례에서 오분류가
+   *   발생해 Kelly 통계와 알림이 오염되었다. 이제는 listPositionClose 로 실제
+   *   실현 PnL 을 집계하고, action 은 'closed' 로 통합한다.
+   *
+   *   시간 필터: 포지션 최초 감지 시각(firstSeenAt) 이후에 발생한 청산만 집계.
+   *   EMPTY_THRESHOLD × cron 주기만큼 감지 지연이 생기므로 고정 60초 윈도우는
+   *   실제 청산 trade 를 놓친다. firstSeenAt 이 없으면 10분 윈도우로 폴백.
+   *
+   * @param {string} contract
+   * @param {{ retryOnEmpty?: boolean, logContext?: string }} opts
+   *   - retryOnEmpty : Gate.io eventual consistency 대응 (Step 2-5 구현 예정,
+   *                    이번 턴은 시그니처만).
+   *   - logContext   : 종료 로그에 삽입할 컨텍스트 문자열 (e.g. "(5회 empty)").
+   * @returns {Promise<{ action: 'closed'|'closed (unknown)', pnl: number, price: number }>}
+   */
+  async _finalizePairClose(contract, opts = {}) {
+    // eslint-disable-next-line no-unused-vars
+    const { retryOnEmpty = false, logContext = '' } = opts;
+
     try {
       await gateClient.cancelAllTriggerOrders(contract);
     } catch {}
 
-    // 실제 실현 PnL 을 청산 이력 API 에서 조회.
-    //   과거엔 lastKnownPositions.unrealisedPnl (직전 폴링 당시 값) 의 부호로
-    //   tp_hit/sl_hit 를 분류했지만, 반등 중 SL hit 등 경계 사례에서 오분류가
-    //   발생해 Kelly 통계와 알림이 오염되었다. 이제는 listPositionClose 로 실제
-    //   실현 PnL 을 집계하고, action 은 'closed' 로 통합한다.
-    //
-    //   시간 필터: 포지션 최초 감지 시각(firstSeenAt) 이후에 발생한 청산만 집계.
-    //   EMPTY_THRESHOLD × cron 주기만큼 감지 지연이 생기므로 고정 60초 윈도우는
-    //   실제 청산 trade 를 놓친다. firstSeenAt 이 없으면 10분 윈도우로 폴백.
     let pnl = 0;
     let unknown = false;
     const known = this.lastKnownPositions.get(contract);
@@ -702,7 +725,8 @@ class OrderManager {
 
     const action = unknown ? 'closed (unknown)' : 'closed';
     const pnlTag = unknown ? 'N/A' : `${pnl.toFixed(2)} USDT`;
-    logger.info(`[${contract}] [포지션 종료] ${action} (${EMPTY_THRESHOLD}회 empty) | PnL: ${pnlTag}`);
+    const ctx = logContext ? ` ${logContext}` : '';
+    logger.info(`[${contract}] [포지션 종료] ${action}${ctx} | PnL: ${pnlTag}`);
 
     if (!unknown) {
       this.dailyPnl += pnl;

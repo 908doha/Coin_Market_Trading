@@ -765,6 +765,17 @@ class OrderManager {
   }
 
   /**
+   * Weekend flatten 알림 level 마킹 (중복 방지).
+   * closeNotified Map 은 페어 → Set<'warn'|'urgent'|'final'>.
+   * 성공 청산 시 _clearPairState 에서 전체 Set 삭제됨.
+   */
+  markNotified(pair, level) {
+    const existing = this.closeNotified.get(pair) || new Set();
+    existing.add(level);
+    this.closeNotified.set(pair, existing);
+  }
+
+  /**
    * 포지션 시장가 강제 청산 (weekend flatten 전용).
    *
    * 흐름:

@@ -34,6 +34,13 @@ class TradingBot {
     logger.info(`총 노출 상한: ${(config.kelly.maxTotalExposure * 100).toFixed(0)}% (전 페어 합산 leveraged notional)`);
     logger.info(`타임프레임: HTF=${config.timeframes.htf} MTF=${config.timeframes.mtf} LTF=${config.timeframes.ltf}`);
     logger.info(`스케줄: ${config.cronSchedule}`);
+    if (config.ict.weekendFlatten && config.ict.weekendFlatten.enabled) {
+      const wf = config.ict.weekendFlatten;
+      logger.info(
+        `주말 전 강제 청산: ${wf.fridayOnly ? '금요일만' : 'Mon~Fri 매일'} ` +
+        `NY PM 마감 ${wf.bufferMinutes}분 전 (연장 ${wf.extendMinutes}분)`
+      );
+    }
     logger.info('='.repeat(60));
 
     // API 키 확인
@@ -177,6 +184,86 @@ class TradingBot {
    * 페어 단위 틱 처리
    */
   async _tickPair(pair) {
+    // 0. 주말 전 포지션 강제 청산 (ICT 정통 — 주말 홀딩 금지)
+    //
+    //   순서 / 정책:
+    //     phase='none'   : 윈도우 밖. urgent 알림까지 갔던 페어는 final 알림 1회 후
+    //                      fall-through (주말 홀딩 수용, 기존 monitorPosition 경로).
+    //     phase='buffer' : NY PM 마감 전 버퍼. 신규 진입 차단.
+    //                      _monitorActive 먼저 (SL/TP 자연 히트 허용) →
+    //                      holding 이면 closePosition 강제 청산 →
+    //                      3회 누적 실패 시 warn 알림 (1회).
+    //     phase='extend' : 버퍼 종료 후 연장 기간. 신규 진입 차단.
+    //                      urgent 알림 (1회) + _monitorActive →
+    //                      holding 이면 closePosition 재시도.
+    //   알림은 fire-and-forget (.catch 로 send 실패 시 tick 블로킹 방지).
+    const wf = config.ict.weekendFlatten;
+    if (wf && wf.enabled) {
+      const window = indicators.isInWeekendFlattenWindow(new Date(), wf);
+
+      if (window.phase === 'none') {
+        // phase='none' + 포지션 활성 + urgent 이력 → 최종 실패 알림 (1회) 후 fall-through
+        if (this.activePositions.has(pair)) {
+          const notified = this.orderManager.closeNotified.get(pair);
+          if (notified && notified.has('urgent') && !notified.has('final')) {
+            this.telegram.notifyWeekendFlattenHolding(pair)
+              .catch((err) => logger.error(`notifyWeekendFlattenHolding 실패: ${err.message}`));
+            this.orderManager.markNotified(pair, 'final');
+          }
+        }
+        // fall-through: 기존 _monitorActive / maxPositions / 신규 진입 로직 그대로
+      } else {
+        // phase='buffer' or 'extend' — 신규 진입 차단
+        if (!this.activePositions.has(pair)) return;
+
+        if (window.phase === 'buffer') {
+          // SL/TP 자연 히트 허용 — _monitorActive 가 closed/failed 처리 시
+          //   notifyClose + delete 이미 수행 → monitor.action='closed*' or 'failed' 로 반환
+          // 'holding' 만 강제 청산 대상. 'holding_check' 는 empty 연속 중 → 다음 tick 대기
+          const monitor = await this._monitorActive(pair);
+          if (monitor.action !== 'holding') return;
+
+          const result = await this.orderManager.closePosition(pair, window.reason);
+          if (result.closed) {
+            this.telegram.notifyWeekendFlatten(pair, result.pnl, window.reason)
+              .catch((err) => logger.error(`notifyWeekendFlatten 실패: ${err.message}`));
+            this.activePositions.delete(pair);
+          } else if (result.attempts >= 3) {
+            const notified = this.orderManager.closeNotified.get(pair);
+            if (!notified || !notified.has('warn')) {
+              this.telegram.notifyWeekendFlattenFailed(pair, 'warn', result.attempts)
+                .catch((err) => logger.error(`notifyWeekendFlattenFailed 실패: ${err.message}`));
+              this.orderManager.markNotified(pair, 'warn');
+            }
+          }
+          return;
+        }
+
+        if (window.phase === 'extend') {
+          // 진입 시 urgent 알림 (1회)
+          const notified = this.orderManager.closeNotified.get(pair);
+          if (!notified || !notified.has('urgent')) {
+            const attemptsSoFar = this.orderManager.closeAttempts.get(pair) || 0;
+            this.telegram.notifyWeekendFlattenFailed(pair, 'urgent', attemptsSoFar)
+              .catch((err) => logger.error(`notifyWeekendFlattenFailed 실패: ${err.message}`));
+            this.orderManager.markNotified(pair, 'urgent');
+          }
+
+          // SL/TP 자연 히트 먼저, holding 이면 강제 청산
+          const monitor = await this._monitorActive(pair);
+          if (monitor.action !== 'holding') return;
+
+          const result = await this.orderManager.closePosition(pair, window.reason);
+          if (result.closed) {
+            this.telegram.notifyWeekendFlatten(pair, result.pnl, window.reason)
+              .catch((err) => logger.error(`notifyWeekendFlatten 실패: ${err.message}`));
+            this.activePositions.delete(pair);
+          }
+          return;
+        }
+      }
+    }
+
     // 1. 기존 포지션 모니터링
     const monitor = await this._monitorActive(pair);
     if (monitor.handled) return;

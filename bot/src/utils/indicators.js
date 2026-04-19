@@ -725,6 +725,70 @@ const indicators = {
     return { active: false, session: null, reason: '세션 외 시간' };
   },
 
+  /**
+   * 주말 전 포지션 강제 청산 윈도우 판정 (ICT 정통).
+   *   - 버퍼: NY PM 마감 전 N분, 강제 청산 시도
+   *   - 연장: NY PM 마감 후 N분, 미청산 포지션 재시도
+   *
+   * NY 기준 요일 판정: UTC getUTCDay 는 금요일 NY 저녁이 UTC 토요일 이라 틀린다.
+   * Intl.DateTimeFormat 으로 NY 로컬 요일 추출.
+   *
+   * 윈도우 앵커: config.sessions.ny.full.end ('16:00' NY). _sessionTimeToUtc 재사용.
+   *
+   * @param {Date} now - 현재 시각
+   * @param {Object} cfg - config.ict.weekendFlatten
+   * @returns {{
+   *   inWindow: boolean, inExtend: boolean,
+   *   phase: 'none'|'buffer'|'extend',
+   *   minutesLeft: number, reason: string,
+   * }}
+   */
+  isInWeekendFlattenWindow(now, cfg) {
+    const NONE = { inWindow: false, inExtend: false, phase: 'none', minutesLeft: 0, reason: '' };
+
+    if (!cfg || !cfg.enabled) return NONE;
+
+    const nyWeekday = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York', weekday: 'short',
+    }).format(now);
+
+    const isTradingDay = cfg.fridayOnly
+      ? nyWeekday === 'Fri'
+      : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(nyWeekday);
+    if (!isTradingDay) return NONE;
+
+    const pmEnd = this._sessionTimeToUtc(
+      config.sessions.ny.full.end,
+      config.sessions.ny.timezone,
+      now,
+    );
+    const pmEndMs = pmEnd.getTime();
+    const nowMs = now.getTime();
+    const bufferMs = cfg.bufferMinutes * 60000;
+    const extendMs = cfg.extendMinutes * 60000;
+    const windowStart = pmEndMs - bufferMs;
+    const extendEnd = pmEndMs + extendMs;
+
+    if (nowMs >= windowStart && nowMs < pmEndMs) {
+      const minutesLeft = Math.ceil((pmEndMs - nowMs) / 60000);
+      return {
+        inWindow: true, inExtend: false, phase: 'buffer',
+        minutesLeft,
+        reason: `NY PM 마감 ${minutesLeft}분 전`,
+      };
+    }
+    if (nowMs >= pmEndMs && nowMs < extendEnd) {
+      const minutesLeft = Math.ceil((extendEnd - nowMs) / 60000);
+      const minutesAfter = Math.floor((nowMs - pmEndMs) / 60000);
+      return {
+        inWindow: false, inExtend: true, phase: 'extend',
+        minutesLeft,
+        reason: `연장 청산 기간 (NY PM 마감 후 ${minutesAfter}분)`,
+      };
+    }
+    return NONE;
+  },
+
   // 하위 호환: isInKillZone → getActiveSession 래핑
   isInKillZone(now) {
     const session = this.getActiveSession(now);

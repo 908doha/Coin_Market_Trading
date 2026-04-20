@@ -451,3 +451,104 @@
 ---
 
 3-1 완료
+
+### 3-2. Medium × (상태/동시성 + 보안/비밀 관리 + 코드 구조)
+
+> Cat4 (보안/비밀 관리) 는 1단계 인벤토리 기준 해당 항목 없음 (본 리뷰 범위 밖, `gateClient.js`/`config/index.js` 별도 리뷰 필요).
+
+---
+
+#### STATE-02 [Medium / Cat3] `candles` 입력 mutation 방어 없음
+
+- **위치**: `ictStrategy.js` — indicators 호출 전반 (L168, L191, L241, L242, L299 등)
+- **재현 조건**:
+  - `bot.js` 멀티 계좌 구조 (L29 `accounts` Map) 에서 동일 `candleData` 를 여러 계좌의 `analyze()` 로 공유 전달할 수 있음.
+  - `indicators.*` 구현 중 하나가 `candles.sort()` / `candles[i].X = ...` 등 mutation 을 수행하면 다른 계좌 호출 결과 오염.
+  - 현재 코드 상 mutation 은 관찰되지 않았지만 **계약상 보장 없음**.
+- **예상 임팩트**:
+  - 현재 시점 실제 버그는 확인되지 않음 — "잠재 위험" 수준.
+  - 추정 근거 부족.
+- **수정안**:
+  ```js
+  // analyze() 진입부 — 방어적 freeze (deep freeze 불필요, shape만 고정)
+  Object.freeze(htf); Object.freeze(mtf); Object.freeze(ltf);
+  ```
+  - 또는 indicators 레이어에서 mutation 금지를 문서화 + unit test 로 강제.
+- **의존성**: 없음. STRUCT-04 (테스트 seam) 와 함께 진행하면 test 로 mutation 검출 자동화 가능.
+- **테스트 방법**:
+  - 유닛 — 동일 candles 배열로 `analyze()` 2회 호출 후 배열 참조/값 불변 확인.
+
+---
+
+#### STATE-03 [Medium / Cat3] 미완성 봉(live candle) 처리 보장 없음
+
+- **위치**: `ictStrategy.js:41` (`currentPrice = ltf[ltf.length - 1].close`)
+- **재현 조건**:
+  - 호출자가 아직 닫히지 않은 현재 봉을 포함한 배열을 넘길 경우
+  - `currentPrice` 가 tick 마다 변동 → `atCE` / `fillPercent` / `inRange` / OB 거리 필터 결과가 tick 단위로 요동.
+  - 5분 봉 진행 중 2분 30초 시점에 entry, 4분 시점에 skip 등 비일관 동작.
+- **예상 임팩트**:
+  - 동일 봉 내 중복 신호 / 신호 소멸 반복 → 로그 노이즈 + STATE-01 dedup 효과 저하.
+  - 체결 영향은 호출자 dedup 구현에 따라 다름.
+- **수정안**:
+  ```js
+  // analyze() 진입부 — 마지막 봉이 닫혔는지 검증
+  const last = ltf[ltf.length - 1];
+  if (last.isClosed === false) return { signal: null, reason: 'live candle — skip' };
+  // 또는 호출자 계약 문서화: "닫힌 봉만 전달"
+  ```
+  - 현실적으로는 `last.isClosed` 플래그가 indicators/Gate.io 파서에서 주어져야 함 → 호출자 계약 명시가 최소 침습.
+- **의존성**: ICT-03 (FVG Fill reaction 캔들 검증) 과 상호작용. STATE-03 선행 시 ICT-03 의 reaction 판정 안정화.
+- **테스트 방법**:
+  - 유닛 — `isClosed: false` 봉 포함 시 signal=null.
+  - 페이퍼트레이딩 — 동일 봉 내 신호 토글 이벤트 로그 부재 확인.
+
+---
+
+#### STRUCT-02 [Medium / Cat5] 매직넘버 산재
+
+- **위치**: `ictStrategy.js:114, 125, 130` (confluence 컷오프), `:760, 803` (TP R:R 하한 1.5), `:879-881` (보너스 임계 4.0/3.0/2.5), `:891-897` (등급 임계 90/80/70/60/50/40)
+- **재현 조건**:
+  - 튜닝 시 여러 지점 동시 수정 필요 → 일관성 깨짐 위험.
+  - 전략 A/B 테스트 시 코드 분기 필요.
+- **예상 임팩트**:
+  - 직접적 PnL 영향 없음. 유지보수/튜닝 비용.
+  - 추정 근거 부족.
+- **수정안**:
+  ```js
+  const S = config.ict.scoring;    // { weakCutoff:5, strongCutoff:6, minRR:{weak:2.5,medium:2.0,strong:1.5}, ... }
+  const G = config.ict.grades;     // [{min:90, grade:'S', label:'ELITE'}, ...]
+  // 코드 내 상수들을 S.*, G.* 참조로 교체
+  ```
+  - RISK-04 와 같은 config 섹션에 묶어서 한 커밋.
+- **의존성**: RISK-04 와 동반 처리 권장 (config 스키마 한 번에 확정).
+- **테스트 방법**:
+  - 유닛 — 기본값으로 기존 동작 스냅샷 유지 확인. config override 시 반영 확인.
+
+---
+
+#### STRUCT-03 [Medium / Cat5] `_calculateSLTP` 200줄 단일 함수, 양방향 비대칭 위험
+
+- **위치**: `ictStrategy.js:620-820`
+- **재현 조건**:
+  - Bullish / Bearish 블록이 거울 분기로 풀려 있음 (L630-666 vs L669-704, L725-768 vs L770-812).
+  - 과거 주석 L638 `"margin 0.001 통일"` 에서 한쪽만 수정되었던 흔적 — 재발 가능.
+  - RISK-01 등 수정 시 한쪽만 반영되는 실수 위험.
+- **예상 임팩트**:
+  - 리팩토링 실수로 인한 long/short 비대칭 — 방향 편향 버그.
+  - 직접 체결 영향은 실수 시점에 비례.
+- **수정안**:
+  ```js
+  _collectSLCandidates(price, dir, htfBias, mtf, ltf, maxRiskPct) { /* dir-agnostic */ }
+  _collectTPCandidates(price, dir, htfBias, mtf) { /* 수집만, 정렬은 호출자 */ }
+  ```
+  - 기존 함수는 이 두 헬퍼 호출로 축소. bullish/bearish 분기는 sign/비교연산만 주입.
+  - **주의**: 동작 불변 보장이 목표 — 동일 입력에 대해 변경 전/후 sl/tp/rr 스냅샷 일치.
+- **의존성**: RISK-01, RISK-02, RISK-05 가 `_calculateSLTP` 반환 계약을 수정함 → 이들 선행 후 **마지막에** 본 리팩터 수행 권장 (반대로 하면 머지 충돌).
+- **테스트 방법**:
+  - 유닛 — 고정 입력 10종 (bullish/bearish 각 5) 스냅샷 비교.
+  - RISK-01/02/05 의 테스트 케이스 재실행 (회귀 검증).
+
+---
+
+3-2 완료

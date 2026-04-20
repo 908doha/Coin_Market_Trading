@@ -7,7 +7,7 @@
 **진행 상태**:
 - [x] 1단계 — 이슈 인벤토리 (요약 테이블)
 - [x] 2단계 — Critical + High 상세 계획
-- [ ] 3단계 — Medium + Low 상세 계획
+- [x] 3단계 — Medium + Low 상세 계획
 
 **리뷰 범위 한계**: 카테고리 4 (보안/비밀 관리) 는 본 리뷰 대상 파일 범위 밖. API 키/서명/rate limit 은 `bot/src/api/gateClient.js`, `bot/src/config/index.js` 별도 리뷰 필요.
 
@@ -350,3 +350,104 @@
 ---
 
 ## 3단계 — Medium + Low 상세 계획 *(TODO)*
+
+### 3-1. Medium × (ICT 로직 정확성 + 리스크 관리)
+
+---
+
+#### ICT-04 [Medium / Cat1] OB 식별에 displacement/MSS 조건 없음
+
+- **위치**: `bot/src/utils/indicators.js:146-192` (`findOrderBlocks`)
+- **재현 조건**:
+  - 변동성 높은 구간에서 단일 캔들 0.2% 이상 이동이 흔함 (BTC 5m 기준).
+  - "prev 음봉 + curr 양봉 + 0.2% 이동" 조건만 만족하면 OB 로 간주 → ICT 정의의 "이후 BOS/displacement 를 만든 OB" 가 아님.
+  - 결과: `blocks.bullish` / `blocks.bearish` 에 false positive 누적, `relevantOBs` 후보 폭증.
+- **예상 임팩트**:
+  - ICT-02 (OB 거리 상한 없음) 와 결합 시 SL/TP 후보 품질 저하.
+  - 정량 추정 근거 부족 — 실제 OB false positive 비율은 심볼/타임프레임별 candle 분포에 의존.
+- **수정안**:
+  ```js
+  // displacement 조건: curr 다음 N봉 내 close 가 OB high/low 를 의미있게 돌파
+  const displacement = candles.slice(i+1, i+1+config.ict.obDisplacementBars)
+    .some(c => c.close > prev.open * (1 + config.ict.obDisplacementPct));
+  if (prevBearish && currBullish && strongMove && displacement) { ... }
+  ```
+  - bullish/bearish 거울 대칭으로 추가. `obDisplacementBars=3`, `obDisplacementPct=0.005` 기본값 제안 (config 외부화).
+- **의존성**: ICT-02 선행 또는 동반. ICT-02 의 거리 상한이 stale OB 를 걸러주므로 displacement 조건을 강제하지 않아도 실용 영향은 완화됨 → **ICT-02 먼저 적용 후 본 이슈 효과 재측정** 권장.
+- **테스트 방법**:
+  - 유닛 — displacement 없는 후보 제외되는지 확인.
+  - 백테스트 — `relevantOBs.length` 분포 비교 (변경 전/후).
+
+---
+
+#### ICT-05 [Medium / Cat1] IOFED 단독 entry 허용
+
+- **위치**: `ictStrategy.js:520-535` (`_analyzeLTF` IOFED 블록)
+- **재현 조건**:
+  - LTF FVG CE/Fill 미충족 상태에서 IOFED 감지 → 단독으로 `entryConfirmed=true`.
+  - ICT 정통은 IOFED 를 **sweep 직후의 drill** 로 해석 → 단독 IOFED 는 단순 반전 캔들일 수 있음.
+- **예상 임팩트**:
+  - 반전 없는 되돌림 구간에서 IOFED 만으로 entry → SL 체결 가능성 ↑.
+  - 정량 추정 근거 부족 — IOFED 단독 entry 빈도 실측 필요.
+- **수정안**:
+  ```js
+  // L520-535 — sweep 정렬 또는 LTF MSS 정렬 동반 시에만 허용
+  // 단, 현재 코드에서 sweep/MSS 계산이 IOFED 블록 이후에 있음 → 순서 재배치 선행.
+  if (candles.length - latest.index <= config.ict.iofedValidityBars
+      && (relevantSweep || ltfMssAligned)) { ... }
+  ```
+  - 구현 순서: (1) sweep / MSS 계산을 IOFED 블록 앞으로 이동 → (2) 가드 추가.
+- **의존성**: 없음 (단일 함수 내 순서 재배치). STATE-03 (미완성 봉 처리) 과 독립.
+- **테스트 방법**:
+  - 유닛 — sweep/MSS 없는 상태에서 IOFED 만으로 entry=false 확인.
+
+---
+
+#### RISK-04 [Medium / Cat2] `maxRR` / `fallbackRR` 매직넘버
+
+- **위치**: `ictStrategy.js:623-624` (`_calculateSLTP` 상단)
+- **재현 조건**:
+  - 매매 규모/심볼별로 최적 R:R 상한이 다른데 코드 상수 `5.0`, `2.5` 가 하드코딩.
+  - 변경 시 코드 수정 + 재배포 필요.
+- **예상 임팩트**:
+  - 튜닝 속도 저하. 직접적 PnL 영향은 없음 — 값 자체가 문제라기보단 외부화 부재가 문제.
+  - 추정 근거 부족 (튜닝 빈도에 의존).
+- **수정안**:
+  ```js
+  const maxRR      = config.ict.maxRR      ?? 5.0;
+  const fallbackRR = config.ict.fallbackRR ?? 2.5;
+  ```
+  - `config/index.js` 에 `ict.maxRR`, `ict.fallbackRR` 추가. 기존 동작 보존 기본값.
+- **의존성**: 없음. STRUCT-02 (매직넘버 산재) 와 한 커밋에 묶어도 됨.
+- **테스트 방법**:
+  - 유닛 — config override 로 다른 값 주입 시 반영 확인.
+
+---
+
+#### RISK-05 [Medium / Cat2] `maxRR` 캡 발동 시 R:R 보너스 과대 적용
+
+- **위치**: `ictStrategy.js:763, 806` (cap 적용) + `877-885` (보너스 계산)
+- **재현 조건**:
+  - 타겟이 `maxRR(5.0)` 초과 → `tp = price ± risk × maxRR` 로 캡.
+  - 결과 `actualRR = 5.0` → setup score 에 `rr >= 4.0` 보너스 +8 자동 적용.
+  - "구조적 타겟이 멀어 강제 축소" 인데 점수만 최상급 보너스 수령.
+- **예상 임팩트**:
+  - Setup score 과대평가 → `minRR` 필터 완화로 weak setup 통과 가능.
+  - 직접 체결 영향은 ICT-02/RISK-01 보다 작음.
+- **수정안**:
+  ```js
+  // L763/806 — cap 여부를 반환
+  tpSource = rr > maxRR ? `${match.source} (캡 ${maxRR})` : match.source;
+  const capped = rr > maxRR;
+  return { sl, tp, rr: actualRR, tpSource, capped };
+  // L878 근처 — 캡 시 보너스 skip
+  let rrBonus = 0;
+  if (!capped) { if (rr >= 4.0) rrBonus = 8; else if (rr >= 3.0) rrBonus = 5; else if (rr >= 2.5) rrBonus = 3; }
+  ```
+- **의존성**: RISK-04 (maxRR 외부화) 선행 권장 — 외부화 후 값 변경 시 본 이슈 효과도 함께 관측 용이.
+- **테스트 방법**:
+  - 유닛 — 멀리 있는 opposing OB 배치 → cap 발동 + score breakdown 에서 `R:R bonus` 항목 부재 확인.
+
+---
+
+3-1 완료

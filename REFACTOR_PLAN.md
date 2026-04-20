@@ -552,3 +552,37 @@
 ---
 
 3-2 완료
+
+### 3-3. Medium × (성능 + 관측성/로깅)
+
+> Cat7 (관측성/로깅) 은 1단계 인벤토리 기준 Medium 해당 항목 없음 (OBS-01 은 Low, 3-4 에서 처리 예정).
+
+---
+
+#### PERF-01 [Medium / Cat6] OB broken 판정 O(n²)
+
+- **위치**: `bot/src/utils/indicators.js:156-160` (bullish), `:178-181` (bearish)
+- **재현 조건**:
+  - `findOrderBlocks` 가 lookback 윈도우 내 모든 OB 후보 (최대 수십개) 각각에 대해 `for (let k = i+1; k < candles.length; k++)` 로 broken 검사 → O(lookback²).
+  - 현재 `orderBlockLookback` (기본값 추정 ~100-200) 기준 5분 tick 주기에선 ms 단위로 무시 가능.
+  - lookback 을 500+ 로 확대하거나 tick 주기를 1분/1초로 줄이면 체감.
+- **예상 임팩트**:
+  - 현재 설정에선 실측 영향 없음 — 선제적 최적화.
+  - 추정 근거 부족. 실제 병목 여부는 프로파일링 필요.
+- **수정안**:
+  ```js
+  // 단일 순회 prefix-min/max — bullish OB 는 "이후 close min", bearish 는 "이후 close max"
+  const suffixMin = new Array(candles.length);
+  for (let k = candles.length - 1; k >= 0; k--)
+    suffixMin[k] = Math.min(candles[k].close, suffixMin[k+1] ?? Infinity);
+  // OB 후보마다 suffixMin[i+1] < prev.close 이면 broken
+  ```
+  - bearish 는 `suffixMax` 로 대칭 구현.
+- **의존성**: ICT-04 (OB displacement 조건) 와 같은 함수 내 수정 → **동반 커밋 권장** (두 번 변경 회피).
+- **테스트 방법**:
+  - 유닛 — 동일 candle 배열로 변경 전/후 `findOrderBlocks` 결과 완전 일치 확인.
+  - 마이크로 벤치 — lookback 1000 으로 10k 회 호출 실행 시간 비교 (선택).
+
+---
+
+3-3 완료

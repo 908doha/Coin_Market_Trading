@@ -495,9 +495,10 @@ class IctStrategy {
     });
 
     // ===== 진입 근거 1: FVG CE (정확히 CE 근처) =====
-    // CE = FVG 중간값. 현재가가 CE에서 fvgCeThreshold(0.15%) 이내일 때만
+    // CE = FVG 중간값. 현재가가 CE에서 fvgCeThreshold(0.15%) 이내 + FVG 내부일 때만.
+    // inRange 가드 없이는 currentPrice > top 이어도 CE 절대값 근접으로 entry 발동되는 버그.
     for (const fvg of unfilledFVGs) {
-      if (fvg.atCE) {
+      if (fvg.atCE && fvg.inRange) {
         confluence.push(`LTF FVG CE @ ${fvg.ce.toFixed(2)} (진입가 ${currentPrice.toFixed(2)})`);
         entryConfirmed = true;
         entryType = 'FVG_CE';

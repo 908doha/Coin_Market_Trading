@@ -106,6 +106,12 @@ class IctStrategy {
       currentPrice, direction, mtfStructure, ltfEntry, htfBias
     );
 
+    // SL 계산 실패 (risk-cap-violation, risk-zero) 시 entry 차단.
+    // tpSource 가 self-documenting reason 으로 전달됨.
+    if (sl == null) {
+      return { signal: null, reason: tpSource || 'SL calculation failed', confluence };
+    }
+
     // ========== Weak setup + fallback TP skip ==========
     // ICT: "구조적 liquidity draw 없으면 매매 skip". weak setup (hasHtfPoi 없고
     // confluence < 5) 과 fallback TP (구조적 타겟 전부 탈락) 의 이중 약점 조합은
@@ -660,8 +666,17 @@ class IctStrategy {
         const c = this._slCandidateWithRisk(price, htfBias.pdhl.pdl, 'bullish', maxRiskPct);
         if (c !== null) slCandidates.push(c);
       }
-      // 5. 고정 % 폴백 (모든 구조적 후보 탈락 시 안전망)
-      if (slCandidates.length === 0) slCandidates.push(price * (1 - slPct));
+      // 5. 고정 % 폴백 (모든 구조적 후보 탈락 시 안전망) — maxRiskPct 가드 적용.
+      //    폴백도 가드 초과 시 sl=null 반환으로 entry 차단.
+      if (slCandidates.length === 0) {
+        const fallback = price * (1 - slPct);
+        const fallbackRisk = Math.abs(fallback - price) / price;
+        if (fallbackRisk > maxRiskPct) {
+          logger.warn(`[SL] 폴백 SL risk ${(fallbackRisk*100).toFixed(2)}% > maxRiskPct ${(maxRiskPct*100).toFixed(2)}% → entry 차단`);
+          return { sl: null, tp: null, rr: 0, tpSource: 'risk-cap-violation' };
+        }
+        slCandidates.push(fallback);
+      }
 
       sl = slCandidates[0];
       if (sl >= price) sl = price * (1 - slPct);
@@ -697,8 +712,16 @@ class IctStrategy {
         const c = this._slCandidateWithRisk(price, htfBias.pdhl.pdh, 'bearish', maxRiskPct);
         if (c !== null) slCandidates.push(c);
       }
-      // 5. 고정 % 폴백
-      if (slCandidates.length === 0) slCandidates.push(price * (1 + slPct));
+      // 5. 고정 % 폴백 — maxRiskPct 가드 적용 (bullish 블록과 대칭).
+      if (slCandidates.length === 0) {
+        const fallback = price * (1 + slPct);
+        const fallbackRisk = Math.abs(fallback - price) / price;
+        if (fallbackRisk > maxRiskPct) {
+          logger.warn(`[SL] 폴백 SL risk ${(fallbackRisk*100).toFixed(2)}% > maxRiskPct ${(maxRiskPct*100).toFixed(2)}% → entry 차단`);
+          return { sl: null, tp: null, rr: 0, tpSource: 'risk-cap-violation' };
+        }
+        slCandidates.push(fallback);
+      }
 
       sl = slCandidates[0];
       if (sl <= price) sl = price * (1 + slPct);

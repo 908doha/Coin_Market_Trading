@@ -122,20 +122,25 @@ if (sl == null) {
 
 ### 수집 지표 (PM2 로그 grep)
 
-| 지표 | 추출 패턴 | 기대값 |
-|------|-----------|--------|
-| FVG_CE entry 수 | `[ICT v2] (LONG\|SHORT) .* FVG_CE` | 배포 전 대비 감소 |
-| `risk-cap-violation` 카운트 | `[SL] 폴백 SL risk .* → entry 차단` | **0** (현재 config 기준) |
-| `risk-zero` 카운트 | `[SL/TP] risk=0 감지` | **0** (설정 실수 없을 시) |
-| 전체 entry 빈도 | `[ICT v2] (LONG\|SHORT) .* - R:R` | 배포 전 대비 소폭 감소 |
+| 지표 | 추출 패턴 (grep) | 기대값 |
+|------|------------------|--------|
+| FVG_CE entry 수 | `grep "FVG_CE"` | 배포 전 대비 감소 |
+| `risk-cap-violation` 카운트 | `grep "폴백 SL risk"` | **0** (현재 config 기준) |
+| `risk-zero` 카운트 | `grep "risk=0 감지"` | **0** (설정 실수 없을 시) |
+| 전체 entry 빈도 | `grep "ICT v2"` (signal 출력 라인) | 배포 전 대비 소폭 감소 |
 | Entry type 분포 | entryType 필드 집계 | FVG_CE 비율 ↓, 나머지 ↑ |
+
+> **Note**: 대괄호 (`[SL]`, `[ICT v2]`) 는 grep 문자 클래스로 해석되어 이스케이프 필요하고, PM2 로그 프리픽스와도 충돌 가능. 고정 문자열 매칭이 실무적.
 
 ### 중단 조건 (즉시 롤백)
 
 - 전체 entry 빈도 **-50% 이상** 감소 → 과도한 skip
 - `risk-cap-violation` or `risk-zero` **≥ 1** 건 → 현재 config 예상과 불일치, 즉시 원인 조사
 - FVG_CE entry **2주간 0 건** → `inRange` 과도 차단 가능성, indicators 측 계산 버그 점검
-- 승률 유의미한 하락 → 수기 점검 (P&L 집계 파이프라인 존재 불확실, 데이터 가용 시에만)
+
+### 관찰 지표 (중단 조건 아님)
+
+- **승률 변화**: P&L 집계 파이프라인 부재로 자동 중단 트리거 불가. 주간 수기 점검으로 추세 관찰만. Phase 5 `OBS-01` 이후 정량 지표로 승격 예정.
 
 ### 지표 추출 방식
 - PM2 로그 파일 tail + grep (일회성).
@@ -153,7 +158,7 @@ if (sl == null) {
 | Phase | 대상 이슈 | 의존 조건 |
 |-------|-----------|-----------|
 | **Phase 2** | `STATE-01` (setupKey 반환), `RISK-03` (일일/연속 손실 한도) | `bot.js` dedup + `orderManager.js` 손실 cap 선행 조사 |
-| **Phase 3** | `ICT-02` (POI 거리 상한), `ICT-03` (FVG Fill reaction 캔들), `ICT-05` (IOFED sweep 동반), `STATE-03` (미완성 봉) | — |
+| **Phase 3** | `ICT-02`, `ICT-03`, `ICT-05`, `STATE-03` (※ Phase 3 내부 실행 순서: `STATE-03` → `ICT-03` 선행, `REFACTOR_PLAN.md` 의존성 그래프 참조) | — |
 | **Phase 4** | `RISK-04`/`STRUCT-02`/`RISK-06` (config 외부화), `RISK-05` (cap bonus 제외) | 한 커밋에 묶어 config 섹션 확장 |
 | **Phase 5** | `STRUCT-01` (score 태그화), `STATE-02`/`STRUCT-04` (mutation/test seam), `ICT-06` (FVG 갭 상한), `ICT-04`+`PERF-01` (OB displacement + broken 판정 O(n)) | `STRUCT-01` 은 기계적이지만 전 push 지점 수정 |
 | **Phase 6** | `STRUCT-03` (`_calculateSLTP` 분리) | `RISK-01/02/05` 반환 계약 선행 — 본 PR 이 그 첫 step |

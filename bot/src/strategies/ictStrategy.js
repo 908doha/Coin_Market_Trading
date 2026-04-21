@@ -708,12 +708,10 @@ class IctStrategy {
 
     // risk 가 0 이면 (SL이 진입가와 일치 — 부동소수점 오차나 slPct=0 설정 시)
     // 후속 R:R 계산이 Infinity/NaN 이 되어 잘못된 TP 가 선택된다.
-    // 이 경우 고정 % 기반 SL/TP 로 즉시 반환한다.
+    // 폴백 rr=fallbackRR(2.5) 반환은 minRR 필터를 조용히 통과시키므로 entry 차단이 안전.
     if (risk <= 0) {
-      const fallbackSl = direction === 'bullish' ? price * (1 - slPct) : price * (1 + slPct);
-      const fallbackTp = direction === 'bullish' ? price * (1 + slPct * fallbackRR) : price * (1 - slPct * fallbackRR);
-      logger.warn(`[SL/TP] risk=0 감지 — 고정 % 폴백: SL=${fallbackSl.toFixed(2)} TP=${fallbackTp.toFixed(2)}`);
-      return { sl: fallbackSl, tp: fallbackTp, rr: fallbackRR, tpSource: 'fallback (risk=0)' };
+      logger.warn(`[SL/TP] risk=0 감지 — entry 차단 (slPct=${slPct}, price=${price}, sl=${sl})`);
+      return { sl: null, tp: null, rr: 0, tpSource: 'risk-zero' };
     }
 
     // ===== TP 계산 (구조적 타겟 — ICT Liquidity Draw) =====

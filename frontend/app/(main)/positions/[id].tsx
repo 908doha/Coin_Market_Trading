@@ -4,7 +4,7 @@ import { PositionDetailSkeleton, AnimatedNumber } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
-import { formatKRW } from '@/utils/format';
+import { formatKRW, formatUsdPrice } from '@/utils/format';
 import { useAccounts } from '@/store/accounts';
 import { PositionDetailView } from '@/components/PositionDetailView';
 import type { IctAnalysis } from '@/components/IctAnalysisCard';
@@ -24,8 +24,7 @@ function parseEntryAtTs(s?: string): number | undefined {
   return undefined;
 }
 
-const fmt$ = (v: number) =>
-  `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fmt$ = formatUsdPrice;
 
 export default function PositionDetail() {
   const { id, from } = useLocalSearchParams<{ id: string; from?: string }>();

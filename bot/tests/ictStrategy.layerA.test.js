@@ -19,16 +19,35 @@ const { priceSeries, uptrend } = require('./helpers/candles');
 /**
  * analyze() 가 FVG CE entry 경로까지 도달하도록 세팅된 indicators mock.
  * FVG 는 호출자가 overrides.fvg 로 주입.
+ *
+ * swingsFarFromPrice=true: swingHighs/Lows 를 price(≈100) 에서 크게 떨어뜨려
+ *   _calculateSLTP 의 LTF swing SL 후보 체인이 maxRiskPct 가드에서 전부 탈락하도록 함.
+ *   → "폴백 경로 도달 → RISK-01 가드 발동" 검증용.
+ *   기본값 false 는 현실적 근접 swing (FVG CE 해피 패스 검증용).
  */
-function makeIndicatorsMock({ fvg, session = { active: true, session: 'ny', name: 'NY AM' } } = {}) {
-  const swingHighs = [
-    { index: 10, price: 99.5, timestamp: 0 },
-    { index: 30, price: 100.5, timestamp: 0 },  // HH
-  ];
-  const swingLows = [
-    { index: 5,  price: 98,  timestamp: 0 },
-    { index: 25, price: 99,  timestamp: 0 },    // HL → bullish swing pattern
-  ];
+function makeIndicatorsMock({
+  fvg,
+  session = { active: true, session: 'ny', name: 'NY AM' },
+  swingsFarFromPrice = false,
+} = {}) {
+  const swingHighs = swingsFarFromPrice
+    ? [
+        { index: 10, price: 50, timestamp: 0 },
+        { index: 30, price: 60, timestamp: 0 },   // HH (둘 다 price 대비 훨씬 아래)
+      ]
+    : [
+        { index: 10, price: 99.5,  timestamp: 0 },
+        { index: 30, price: 100.5, timestamp: 0 }, // HH
+      ];
+  const swingLows = swingsFarFromPrice
+    ? [
+        { index: 5,  price: 50, timestamp: 0 },
+        { index: 25, price: 60, timestamp: 0 },   // HL (price 대비 멀어서 maxRiskPct 초과 확정)
+      ]
+    : [
+        { index: 5,  price: 98, timestamp: 0 },
+        { index: 25, price: 99, timestamp: 0 },   // HL → bullish swing pattern
+      ];
 
   return {
     getActiveSession:   () => session,
@@ -107,11 +126,19 @@ test('ICT-01 (b): FVG 내부 + CE 근접 → FVG_CE entry 정상 발동 (happy p
 
 // ───────────────────────────────────────────────────────────────────────────
 // 공통 계약 — _calculateSLTP sl=null 반환 → analyze signal=null
+//   트리거 경로: RISK-01 폴백 차단 (fallbackRisk > maxRiskPct).
+//   향후 ICT-01 / RISK-02 경로별 sl=null 통합 검증 추가 여지 남김.
 // ───────────────────────────────────────────────────────────────────────────
-test('공통 계약: _calculateSLTP 가 sl=null 반환하면 analyze 도 signal=null 반환', () => {
-  // FVG CE 정상 발동 → _calculateSLTP 호출까지 도달
-  // 단 config.stopLossPercent=5, maxRiskPct=0.03 으로 세팅 →
-  //   구조 후보 빈 mock 상태에서 폴백 5% 가 가드 3% 초과 → sl=null → signal=null
+test('공통 계약: _calculateSLTP 가 sl=null 반환 시 analyze() 가 signal=null 반환 (RISK-01 폴백 차단 경로로 트리거)', () => {
+  // FVG CE 정상 발동 → _calculateSLTP 호출까지 도달.
+  //
+  // sl=null 유도 경로:
+  //   price=100.025, maxRiskPct=3% → _slCandidateWithRisk 허용 범위 ≈ [97.02, 103.08]
+  //   swingLows=[50, 60] 은 maxRiskPct 를 명확히 초과 → _slCandidateWithRisk 가 null 반환
+  //   → 모든 구조적 SL 후보 체인 탈락 (HTF OB=[], MTF OB=[], IOFED=null, LTF swing 탈락, PDL=null)
+  //   → 폴백 경로 도달 → fallback=price*(1-slPct)=95.024, fallbackRisk=5% > maxRiskPct=3%
+  //   → RISK-01 가드 발동 → sl=null, tpSource='risk-cap-violation'
+  //   → analyze() L108 skip 분기 → signal=null, reason='risk-cap-violation'.
   const currentPrice = 100.025;
   const fvg = {
     bottom: 99.95, top: 100.10, ce: 100.025,
@@ -121,7 +148,7 @@ test('공통 계약: _calculateSLTP 가 sl=null 반환하면 analyze 도 signal=
 
   const { strategy } = loadStrategy({
     config: { stopLossPercent: 5, ict: { maxRiskPct: 0.03 } },
-    indicatorsPatch: makeIndicatorsMock({ fvg }),
+    indicatorsPatch: makeIndicatorsMock({ fvg, swingsFarFromPrice: true }),
   });
 
   const candles = makeCandles(currentPrice);
@@ -129,7 +156,7 @@ test('공통 계약: _calculateSLTP 가 sl=null 반환하면 analyze 도 signal=
 
   assert.equal(result.signal, null,
     `sl=null 이면 signal 반드시 null. 받은 값: signal=${result.signal}, reason=${result.reason}`);
-  // reason 은 SL 계산 실패 관련이어야 함
-  assert.ok(/SL|risk/.test(result.reason || ''),
-    `reason 에 'SL' 또는 'risk' 포함되어야 함. 받은 reason: ${result.reason}`);
+  // reason 은 self-documenting tpSource 전달. RISK-01 경로는 'risk-cap-violation'.
+  assert.equal(result.reason, 'risk-cap-violation',
+    `RISK-01 경로는 reason='risk-cap-violation' 이어야 함. 받은 reason: ${result.reason}`);
 });

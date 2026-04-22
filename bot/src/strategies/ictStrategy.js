@@ -106,6 +106,12 @@ class IctStrategy {
       currentPrice, direction, mtfStructure, ltfEntry, htfBias
     );
 
+    // SL 계산 실패 (risk-cap-violation, risk-zero) 시 entry 차단.
+    // tpSource 가 self-documenting reason 으로 전달됨.
+    if (sl == null) {
+      return { signal: null, reason: tpSource || 'SL calculation failed', confluence };
+    }
+
     // ========== Weak setup + fallback TP skip ==========
     // ICT: "구조적 liquidity draw 없으면 매매 skip". weak setup (hasHtfPoi 없고
     // confluence < 5) 과 fallback TP (구조적 타겟 전부 탈락) 의 이중 약점 조합은
@@ -495,9 +501,10 @@ class IctStrategy {
     });
 
     // ===== 진입 근거 1: FVG CE (정확히 CE 근처) =====
-    // CE = FVG 중간값. 현재가가 CE에서 fvgCeThreshold(0.15%) 이내일 때만
+    // CE = FVG 중간값. 현재가가 CE에서 fvgCeThreshold(0.15%) 이내 + FVG 내부일 때만.
+    // inRange 가드 없이는 currentPrice > top 이어도 CE 절대값 근접으로 entry 발동되는 버그.
     for (const fvg of unfilledFVGs) {
-      if (fvg.atCE) {
+      if (fvg.atCE && fvg.inRange) {
         confluence.push(`LTF FVG CE @ ${fvg.ce.toFixed(2)} (진입가 ${currentPrice.toFixed(2)})`);
         entryConfirmed = true;
         entryType = 'FVG_CE';
@@ -659,8 +666,17 @@ class IctStrategy {
         const c = this._slCandidateWithRisk(price, htfBias.pdhl.pdl, 'bullish', maxRiskPct);
         if (c !== null) slCandidates.push(c);
       }
-      // 5. 고정 % 폴백 (모든 구조적 후보 탈락 시 안전망)
-      if (slCandidates.length === 0) slCandidates.push(price * (1 - slPct));
+      // 5. 고정 % 폴백 (모든 구조적 후보 탈락 시 안전망) — maxRiskPct 가드 적용.
+      //    폴백도 가드 초과 시 sl=null 반환으로 entry 차단.
+      if (slCandidates.length === 0) {
+        const fallback = price * (1 - slPct);
+        const fallbackRisk = Math.abs(fallback - price) / price;
+        if (fallbackRisk > maxRiskPct) {
+          logger.warn(`[SL] 폴백 SL risk ${(fallbackRisk*100).toFixed(2)}% > maxRiskPct ${(maxRiskPct*100).toFixed(2)}% → entry 차단`);
+          return { sl: null, tp: null, rr: 0, tpSource: 'risk-cap-violation' };
+        }
+        slCandidates.push(fallback);
+      }
 
       sl = slCandidates[0];
       if (sl >= price) sl = price * (1 - slPct);
@@ -696,8 +712,16 @@ class IctStrategy {
         const c = this._slCandidateWithRisk(price, htfBias.pdhl.pdh, 'bearish', maxRiskPct);
         if (c !== null) slCandidates.push(c);
       }
-      // 5. 고정 % 폴백
-      if (slCandidates.length === 0) slCandidates.push(price * (1 + slPct));
+      // 5. 고정 % 폴백 — maxRiskPct 가드 적용 (bullish 블록과 대칭).
+      if (slCandidates.length === 0) {
+        const fallback = price * (1 + slPct);
+        const fallbackRisk = Math.abs(fallback - price) / price;
+        if (fallbackRisk > maxRiskPct) {
+          logger.warn(`[SL] 폴백 SL risk ${(fallbackRisk*100).toFixed(2)}% > maxRiskPct ${(maxRiskPct*100).toFixed(2)}% → entry 차단`);
+          return { sl: null, tp: null, rr: 0, tpSource: 'risk-cap-violation' };
+        }
+        slCandidates.push(fallback);
+      }
 
       sl = slCandidates[0];
       if (sl <= price) sl = price * (1 + slPct);
@@ -707,12 +731,10 @@ class IctStrategy {
 
     // risk 가 0 이면 (SL이 진입가와 일치 — 부동소수점 오차나 slPct=0 설정 시)
     // 후속 R:R 계산이 Infinity/NaN 이 되어 잘못된 TP 가 선택된다.
-    // 이 경우 고정 % 기반 SL/TP 로 즉시 반환한다.
+    // 폴백 rr=fallbackRR(2.5) 반환은 minRR 필터를 조용히 통과시키므로 entry 차단이 안전.
     if (risk <= 0) {
-      const fallbackSl = direction === 'bullish' ? price * (1 - slPct) : price * (1 + slPct);
-      const fallbackTp = direction === 'bullish' ? price * (1 + slPct * fallbackRR) : price * (1 - slPct * fallbackRR);
-      logger.warn(`[SL/TP] risk=0 감지 — 고정 % 폴백: SL=${fallbackSl.toFixed(2)} TP=${fallbackTp.toFixed(2)}`);
-      return { sl: fallbackSl, tp: fallbackTp, rr: fallbackRR, tpSource: 'fallback (risk=0)' };
+      logger.warn(`[SL/TP] risk=0 감지 — entry 차단 (slPct=${slPct}, price=${price}, sl=${sl})`);
+      return { sl: null, tp: null, rr: 0, tpSource: 'risk-zero' };
     }
 
     // ===== TP 계산 (구조적 타겟 — ICT Liquidity Draw) =====

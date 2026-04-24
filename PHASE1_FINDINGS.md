@@ -39,3 +39,22 @@
 **권장**:
 - Phase 4 (config 외부화) 에서 fallbackRR 외부화 + 폴백 TP 차단 옵션 추가 검토
 - 또는 Phase 5 (관측성) 에서 `fallback` tpSource 카운트 알림 추가
+
+## F-02 — REFACTOR_PLAN.md STRUCT-02 에 FRAGILE 등급 누락
+
+**심각도**: Low (문서 불일치)
+**카테고리**: 문서
+
+**위치**: `bot/src/strategies/ictStrategy.js:919`
+```js
+else { grade = 'F'; label = 'FRAGILE'; }
+```
+
+**발견 경로**: Phase 1 첫 48시간 모니터링 중 로그에서 FRAGILE 등급 관측
+**관측**: 2026-04-24 05:26~29 사이 3건 (BTC_USDT LONG)
+
+**코드 상태**: 6개 등급 (ELITE/STRONG/SOLID/MODERATE/WEAK/FRAGILE)
+**REFACTOR_PLAN.md STRUCT-02 명세**: 5개 (FRAGILE 누락)
+
+**영향**: 없음. 코드 동작 정상.
+**권장**: Phase 4 STRUCT-02 (매직넘버 config 외부화) 작업 시 등급 임계 배열에 FRAGILE 포함해서 6단계로 정리.

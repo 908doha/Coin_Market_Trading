@@ -13,7 +13,7 @@ import Animated, {
   useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS,
 } from 'react-native-reanimated';
 import Svg, { Path, Polygon, Rect, Text as SvgText, Circle } from 'react-native-svg';
-import { Text, FadeTabView, AnimatedNumber, Skeleton, PressableScale } from '@/design-system';
+import { Text, FadeTabView, AnimatedNumber, Skeleton, PressableScale, CurrencyToggle } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType, ExchangeAccount } from '@/store/accounts';
 import { tradesService } from '@/services';
@@ -359,7 +359,6 @@ export default function Analysis() {
   const [tickersLoading, setTickersLoading] = useState(true);
   const [search,  setSearch]    = useState('');
   const [sortBy,  setSortBy]    = useState<'volume' | 'ict'>('volume');
-  const [sortMenuOpen, setSortMenuOpen] = useState(false);
   // contract → { score, direction }. undefined = 미조회, null = 실패
   const [ictScores, setIctScores] = useState<Record<string, { score: number; direction: 'LONG' | 'SHORT' | null } | null>>({});
   const [ictScanProgress, setIctScanProgress] = useState<{ done: number; total: number } | null>(null);
@@ -615,45 +614,21 @@ export default function Analysis() {
                 </Svg>
               </Pressable>
 
-              {/* 정렬 드롭다운 */}
+              {/* 정렬 토글 — CurrencyToggle 을 재사용해 UI 통일 */}
               {scanExpanded && (
-                <View style={{ position: 'relative' }}>
-                  <Pressable
-                    style={st.sortBtn}
-                    onPress={() => setSortMenuOpen((v) => !v)}
-                  >
-                    <Text style={st.sortBtnText}>
-                      {sortBy === 'volume' ? '거래량 순' : 'ICT 점수 순'}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  {ictScanProgress && sortBy === 'ict' && (
+                    <Text style={st.sortBtnProgress}>
+                      {ictScanProgress.done}/{ictScanProgress.total}
                     </Text>
-                    <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
-                      <Path d="M6 9l6 6 6-6" stroke="#6B6B6B" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-                    </Svg>
-                    {ictScanProgress && sortBy === 'ict' && (
-                      <Text style={st.sortBtnProgress}>
-                        {ictScanProgress.done}/{ictScanProgress.total}
-                      </Text>
-                    )}
-                  </Pressable>
-                  {sortMenuOpen && (
-                    <View style={st.sortMenu}>
-                      <Pressable
-                        style={st.sortMenuItem}
-                        onPress={() => { setSortBy('volume'); setSortMenuOpen(false); }}
-                      >
-                        <Text style={[st.sortMenuText, sortBy === 'volume' && st.sortMenuTextActive]}>
-                          거래량 순
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        style={st.sortMenuItem}
-                        onPress={() => { setSortBy('ict'); setSortMenuOpen(false); }}
-                      >
-                        <Text style={[st.sortMenuText, sortBy === 'ict' && st.sortMenuTextActive]}>
-                          ICT 점수 순
-                        </Text>
-                      </Pressable>
-                    </View>
                   )}
+                  <CurrencyToggle
+                    showUsd={sortBy === 'ict'}
+                    onToggle={() => setSortBy((s) => (s === 'volume' ? 'ict' : 'volume'))}
+                    leftLabel="거래량"
+                    rightLabel="ICT"
+                    pillWidth={54}
+                  />
                 </View>
               )}
             </View>
@@ -752,13 +727,7 @@ const st = StyleSheet.create({
   scanHeader:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 18 },
   scanTitle:    { fontSize: 17, fontWeight: '700', color: '#191919' },
 
-  sortBtn:      { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: colors.bg.elevated, borderRadius: 8 },
-  sortBtnText:  { fontSize: 13, fontWeight: '600', color: '#191919' },
-  sortBtnProgress: { fontSize: 11, color: colors.text.tertiary, marginLeft: 4 },
-  sortMenu:     { position: 'absolute', top: 36, right: 0, backgroundColor: '#FFFFFF', borderRadius: 10, paddingVertical: 4, minWidth: 130, borderWidth: 1, borderColor: '#E5E5E5', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.08, shadowRadius: 12, elevation: 6, zIndex: 10 },
-  sortMenuItem: { paddingHorizontal: 14, paddingVertical: 10 },
-  sortMenuText: { fontSize: 14, color: colors.text.secondary },
-  sortMenuTextActive: { color: '#191919', fontWeight: '700' },
+  sortBtnProgress: { fontSize: 11, color: colors.text.tertiary, fontWeight: '600' },
 
   searchWrap:  { marginHorizontal: 20, marginBottom: 8 },
   searchInput: {

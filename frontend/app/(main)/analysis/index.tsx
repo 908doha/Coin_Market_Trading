@@ -361,7 +361,7 @@ export default function Analysis() {
 
   const kelly = useMemo(() => computeKelly(trades), [trades]);
 
-  // CoinGecko 시가총액 상위 50개 로드
+  // 시장 스캔 종목 로드 (서버: Gate.io tickers 전량 → fallback: CoinGecko top 50)
   useEffect(() => {
     const COINGECKO =
       'https://api.coingecko.com/api/v3/coins/markets' +

@@ -274,15 +274,14 @@ function TickerRow({
       ? colors.market.fall
       : colors.text.secondary;
 
-  const scoreColor =
-    ictScore == null    ? colors.text.tertiary :
-    ictScore >= 75      ? colors.market.rise :
-    ictScore >= 55      ? '#F59E0B' :
-                          colors.text.secondary;
-  const dirColor =
-    ictDirection === 'LONG'  ? colors.market.rise :
-    ictDirection === 'SHORT' ? colors.market.fall :
-                               colors.text.tertiary;
+  // 점수 등급별 팔레트 (거래내역 뱃지 톤과 통일)
+  const scoreChip =
+    ictScore == null     ? { bg: '#F5F5F5', fg: colors.text.tertiary } :
+    ictScore >= 75       ? { bg: '#EAF6F0', fg: '#1AC24E' } :
+    ictScore >= 55       ? { bg: '#FFF6E5', fg: '#F59E0B' } :
+                           { bg: '#F5F5F5', fg: colors.text.secondary };
+
+  const showIct = ictScore !== undefined;
 
   return (
     <PressableScale style={[!isLast && tr.border]} onPress={onPress}>
@@ -309,21 +308,28 @@ function TickerRow({
         </Text>
       </View>
 
-      {/* 우측: 변동률 + (ICT 점수 모드일 때) 점수/방향 배지 */}
-      <View style={{ alignItems: 'flex-end', gap: 2 }}>
+      {/* 우측: 변동률 + (ICT 점수 모드일 때) 방향/점수 뱃지 카드 */}
+      <View style={{ alignItems: 'flex-end', gap: 4 }}>
         <Text style={[tr.change, { color: changeColor }]}>
           {ticker.change24h > 0 ? '+' : ''}{ticker.change24h.toFixed(2)}%
         </Text>
-        {ictScore !== undefined && (
+        {showIct && (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-            {ictDirection && (
-              <Text style={[tr.dirBadge, { color: dirColor }]}>
-                {ictDirection === 'LONG' ? '▲' : '▼'}
-              </Text>
+            {ictDirection === 'LONG' && (
+              <View style={[tr.chip, { backgroundColor: '#EAF6F0' }]}>
+                <Text style={[tr.chipText, { color: '#1AC24E' }]}>롱</Text>
+              </View>
             )}
-            <Text style={[tr.score, { color: scoreColor }]}>
-              {ictScore == null ? '—' : `${ictScore}`}
-            </Text>
+            {ictDirection === 'SHORT' && (
+              <View style={[tr.chip, { backgroundColor: '#FFF0F0' }]}>
+                <Text style={[tr.chipText, { color: '#FF4747' }]}>숏</Text>
+              </View>
+            )}
+            <View style={[tr.chip, { backgroundColor: scoreChip.bg }]}>
+              <Text style={[tr.chipText, { color: scoreChip.fg }]}>
+                {ictScore == null ? '—' : ictScore}
+              </Text>
+            </View>
           </View>
         )}
       </View>
@@ -343,8 +349,8 @@ const tr = StyleSheet.create({
   vol:        { fontSize: 12, color: colors.text.tertiary },
   price:      { fontSize: 13, color: colors.text.secondary, marginTop: 2 },
   change:     { fontSize: 14, fontWeight: '600' },
-  score:      { fontSize: 12, fontWeight: '700', minWidth: 24, textAlign: 'right' },
-  dirBadge:   { fontSize: 11, fontWeight: '700' },
+  chip:       { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, minWidth: 28, alignItems: 'center' },
+  chipText:   { fontSize: 12, fontWeight: '700' },
 });
 
 // ─── 메인 ─────────────────────────────────────────────────────────────────────

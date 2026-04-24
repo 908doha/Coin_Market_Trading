@@ -260,17 +260,29 @@ function formatVol(usd: number): string {
 // ─── 종목 행 (포지션 현황과 동일한 디자인) ─────────────────────────────────────
 
 function TickerRow({
-  ticker, idx, onPress, isLast,
+  ticker, idx, onPress, isLast, ictScore, ictDirection,
 }: {
   ticker: Ticker; idx: number;
   onPress: () => void;
   isLast: boolean;
+  ictScore?:     number | null;
+  ictDirection?: 'LONG' | 'SHORT' | null;
 }) {
   const changeColor = ticker.change24h > 0
     ? colors.market.rise
     : ticker.change24h < 0
       ? colors.market.fall
       : colors.text.secondary;
+
+  const scoreColor =
+    ictScore == null    ? colors.text.tertiary :
+    ictScore >= 75      ? colors.market.rise :
+    ictScore >= 55      ? '#F59E0B' :
+                          colors.text.secondary;
+  const dirColor =
+    ictDirection === 'LONG'  ? colors.market.rise :
+    ictDirection === 'SHORT' ? colors.market.fall :
+                               colors.text.tertiary;
 
   return (
     <PressableScale style={[!isLast && tr.border]} onPress={onPress}>
@@ -297,11 +309,23 @@ function TickerRow({
         </Text>
       </View>
 
-      {/* 우측: 변동률만 표시 (분석은 행 전체 탭으로) */}
-      <View style={{ alignItems: 'flex-end' }}>
+      {/* 우측: 변동률 + (ICT 점수 모드일 때) 점수/방향 배지 */}
+      <View style={{ alignItems: 'flex-end', gap: 2 }}>
         <Text style={[tr.change, { color: changeColor }]}>
           {ticker.change24h > 0 ? '+' : ''}{ticker.change24h.toFixed(2)}%
         </Text>
+        {ictScore !== undefined && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            {ictDirection && (
+              <Text style={[tr.dirBadge, { color: dirColor }]}>
+                {ictDirection === 'LONG' ? '▲' : '▼'}
+              </Text>
+            )}
+            <Text style={[tr.score, { color: scoreColor }]}>
+              {ictScore == null ? '—' : `${ictScore}`}
+            </Text>
+          </View>
+        )}
       </View>
       </View>
     </PressableScale>
@@ -319,6 +343,8 @@ const tr = StyleSheet.create({
   vol:        { fontSize: 12, color: colors.text.tertiary },
   price:      { fontSize: 13, color: colors.text.secondary, marginTop: 2 },
   change:     { fontSize: 14, fontWeight: '600' },
+  score:      { fontSize: 12, fontWeight: '700', minWidth: 24, textAlign: 'right' },
+  dirBadge:   { fontSize: 11, fontWeight: '700' },
 });
 
 // ─── 메인 ─────────────────────────────────────────────────────────────────────
@@ -332,6 +358,11 @@ export default function Analysis() {
   const [tickers, setTickers]   = useState<Ticker[]>([]);
   const [tickersLoading, setTickersLoading] = useState(true);
   const [search,  setSearch]    = useState('');
+  const [sortBy,  setSortBy]    = useState<'volume' | 'ict'>('volume');
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
+  // contract → { score, direction }. undefined = 미조회, null = 실패
+  const [ictScores, setIctScores] = useState<Record<string, { score: number; direction: 'LONG' | 'SHORT' | null } | null>>({});
+  const [ictScanProgress, setIctScanProgress] = useState<{ done: number; total: number } | null>(null);
 
   const { accounts, balances, totalBalance } = useAccounts();
 
@@ -401,11 +432,83 @@ export default function Analysis() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toUpperCase();
-    if (!q) return tickers;
-    return tickers.filter(
+    const base = !q ? tickers : tickers.filter(
       (t) => t.coin.includes(q) || t.symbol.includes(q) || (t.name?.toUpperCase().includes(q) ?? false),
     );
-  }, [tickers, search]);
+    if (sortBy !== 'ict') return base;
+    // ICT 점수 desc 정렬. 미조회/실패 항목은 하단으로.
+    return [...base].sort((a, b) => {
+      const sa = ictScores[a.contract];
+      const sb = ictScores[b.contract];
+      const va = sa?.score ?? -1;
+      const vb = sb?.score ?? -1;
+      if (vb !== va) return vb - va;
+      return b.volume24hUsd - a.volume24hUsd;  // tie-breaker
+    });
+  }, [tickers, search, sortBy, ictScores]);
+
+  // ICT 점수 일괄 스캔 — sortBy='ict' 진입 시 top N 티커에 대해 병렬 배치 실행.
+  // 사용자 API 키 1개로 Gate.io 를 거치므로 동시 요청 수 제한.
+  useEffect(() => {
+    if (sortBy !== 'ict' || !tickers.length) return;
+    const account = accounts.find((a) => a.apiKey && a.apiSecret);
+    if (!account) { setIctScanProgress(null); return; }
+
+    const SCAN_LIMIT  = 30;   // 거래량 상위 30종
+    const CONCURRENCY = 5;
+    const targets = tickers
+      .slice(0, SCAN_LIMIT)
+      .filter((t) => ictScores[t.contract] === undefined);
+    if (!targets.length) { setIctScanProgress(null); return; }
+
+    let cancelled = false;
+    let done      = 0;
+    setIctScanProgress({ done: 0, total: targets.length });
+
+    const runOne = async (contract: string) => {
+      try {
+        const res = await fetch(`${API_BASE}/api/ict-analyze`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ apiKey: account.apiKey, apiSecret: account.apiSecret, contract }),
+        });
+        if (!res.ok) throw new Error(String(res.status));
+        const data = await res.json();
+        if (cancelled) return;
+        if (typeof data?.score !== 'number') {
+          setIctScores((prev) => ({ ...prev, [contract]: null }));
+          return;
+        }
+        const dir = data?.htf?.direction;
+        setIctScores((prev) => ({
+          ...prev,
+          [contract]: {
+            score:     data.score,
+            direction: dir === 'LONG' || dir === 'SHORT' ? dir : null,
+          },
+        }));
+      } catch {
+        if (!cancelled) setIctScores((prev) => ({ ...prev, [contract]: null }));
+      } finally {
+        if (!cancelled) {
+          done += 1;
+          setIctScanProgress({ done, total: targets.length });
+        }
+      }
+    };
+
+    // 간단한 concurrency pool
+    const queue = [...targets.map((t) => t.contract)];
+    const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
+      while (!cancelled && queue.length) {
+        const c = queue.shift();
+        if (c) await runOne(c);
+      }
+    });
+    Promise.all(workers).finally(() => { if (!cancelled) setIctScanProgress(null); });
+
+    return () => { cancelled = true; };
+  }, [sortBy, tickers, accounts]);
 
   const analyze = useCallback((contract: string) => {
     router.push(`/(main)/analysis/ict/${encodeURIComponent(contract)}` as any);
@@ -492,24 +595,68 @@ export default function Analysis() {
 
           {/* ICT 종목 스캔 섹션 */}
           <View style={st.scanSection}>
-            <Pressable
-              style={st.scanHeader}
-              onPress={() => {
-                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                setScanExpanded((v) => !v);
-              }}
-            >
-              <Text style={st.scanTitle}>ICT 종목 스캔</Text>
-              <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-                <Path
-                  d={scanExpanded ? 'M18 15l-6-6-6 6' : 'M6 9l6 6 6-6'}
-                  stroke="#AEAEB2"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </Svg>
-            </Pressable>
+            <View style={st.scanHeader}>
+              <Pressable
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                onPress={() => {
+                  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                  setScanExpanded((v) => !v);
+                }}
+              >
+                <Text style={st.scanTitle}>ICT 종목 스캔</Text>
+                <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+                  <Path
+                    d={scanExpanded ? 'M18 15l-6-6-6 6' : 'M6 9l6 6 6-6'}
+                    stroke="#AEAEB2"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </Svg>
+              </Pressable>
+
+              {/* 정렬 드롭다운 */}
+              {scanExpanded && (
+                <View style={{ position: 'relative' }}>
+                  <Pressable
+                    style={st.sortBtn}
+                    onPress={() => setSortMenuOpen((v) => !v)}
+                  >
+                    <Text style={st.sortBtnText}>
+                      {sortBy === 'volume' ? '거래량 순' : 'ICT 점수 순'}
+                    </Text>
+                    <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
+                      <Path d="M6 9l6 6 6-6" stroke="#6B6B6B" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                    </Svg>
+                    {ictScanProgress && sortBy === 'ict' && (
+                      <Text style={st.sortBtnProgress}>
+                        {ictScanProgress.done}/{ictScanProgress.total}
+                      </Text>
+                    )}
+                  </Pressable>
+                  {sortMenuOpen && (
+                    <View style={st.sortMenu}>
+                      <Pressable
+                        style={st.sortMenuItem}
+                        onPress={() => { setSortBy('volume'); setSortMenuOpen(false); }}
+                      >
+                        <Text style={[st.sortMenuText, sortBy === 'volume' && st.sortMenuTextActive]}>
+                          거래량 순
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        style={st.sortMenuItem}
+                        onPress={() => { setSortBy('ict'); setSortMenuOpen(false); }}
+                      >
+                        <Text style={[st.sortMenuText, sortBy === 'ict' && st.sortMenuTextActive]}>
+                          ICT 점수 순
+                        </Text>
+                      </Pressable>
+                    </View>
+                  )}
+                </View>
+              )}
+            </View>
 
             {scanExpanded && (
               tickersLoading ? (
@@ -545,15 +692,20 @@ export default function Analysis() {
                     />
                   </View>
 
-                  {filtered.map((ticker, idx) => (
-                    <TickerRow
-                      key={ticker.contract}
-                      ticker={ticker}
-                      idx={idx}
-                      onPress={() => analyze(ticker.contract)}
-                      isLast={idx === filtered.length - 1}
-                    />
-                  ))}
+                  {filtered.map((ticker, idx) => {
+                    const entry = sortBy === 'ict' ? ictScores[ticker.contract] : undefined;
+                    return (
+                      <TickerRow
+                        key={ticker.contract}
+                        ticker={ticker}
+                        idx={idx}
+                        onPress={() => analyze(ticker.contract)}
+                        isLast={idx === filtered.length - 1}
+                        ictScore={sortBy === 'ict' ? (entry === undefined ? null : entry?.score ?? null) : undefined}
+                        ictDirection={sortBy === 'ict' ? (entry?.direction ?? null) : undefined}
+                      />
+                    );
+                  })}
                 </>
               )
             )}
@@ -599,6 +751,14 @@ const st = StyleSheet.create({
   scanSection:  { borderTopWidth: 8, borderTopColor: '#F5F5F5' },
   scanHeader:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 18 },
   scanTitle:    { fontSize: 17, fontWeight: '700', color: '#191919' },
+
+  sortBtn:      { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: colors.bg.elevated, borderRadius: 8 },
+  sortBtnText:  { fontSize: 13, fontWeight: '600', color: '#191919' },
+  sortBtnProgress: { fontSize: 11, color: colors.text.tertiary, marginLeft: 4 },
+  sortMenu:     { position: 'absolute', top: 36, right: 0, backgroundColor: '#FFFFFF', borderRadius: 10, paddingVertical: 4, minWidth: 130, borderWidth: 1, borderColor: '#E5E5E5', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.08, shadowRadius: 12, elevation: 6, zIndex: 10 },
+  sortMenuItem: { paddingHorizontal: 14, paddingVertical: 10 },
+  sortMenuText: { fontSize: 14, color: colors.text.secondary },
+  sortMenuTextActive: { color: '#191919', fontWeight: '700' },
 
   searchWrap:  { marginHorizontal: 20, marginBottom: 8 },
   searchInput: {

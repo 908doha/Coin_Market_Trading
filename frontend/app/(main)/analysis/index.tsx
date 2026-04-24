@@ -18,7 +18,7 @@ import { colors } from '@/design-system/tokens';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType, ExchangeAccount } from '@/store/accounts';
 import { tradesService } from '@/services';
 import type { Trade } from '@/services/trades.service';
-import { formatKRW } from '@/utils/format';
+import { formatKRW, formatUsdPrice } from '@/utils/format';
 import type { Balance } from '@/services/account.service';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -299,10 +299,7 @@ function TickerRow({
           {ticker.name && <Text style={tr.name} numberOfLines={1}>{ticker.name}</Text>}
         </View>
         <Text style={tr.price}>
-          {'$' + ticker.last.toLocaleString('en-US', {
-            minimumFractionDigits:  ticker.last < 1 ? 4 : 2,
-            maximumFractionDigits:  ticker.last < 1 ? 4 : 2,
-          })}
+          {formatUsdPrice(ticker.last)}
           {'  '}
           <Text style={tr.vol}>{formatVol(ticker.volume24hUsd)}</Text>
         </Text>

@@ -27,25 +27,33 @@ export function formatMillions(value: number): string {
 }
 
 /**
- * USD 가격 포매터 — 종목 가격대에 따라 유의한 소수 자릿수를 자동 선택.
- * BTC/ETH/XBR(~$70) 처럼 ≥ $1 자산은 2자리,
- * DOGE/ADA(~$0.15) 는 4자리,
- * SHIB/PEPE 급 초저가 토큰은 최대 8자리까지 노출해 가격 레벨이
- * `$0.00` 으로 뭉개지지 않도록 함.
+ * 가격 레벨 전용 자릿수 선택 — 종목 가격대에 따라 유의한 소수 자릿수 자동.
+ * BTC/ETH/XBR(~$70) 처럼 ≥ $1 은 2자리, DOGE/ADA 는 4자리,
+ * SHIB/PEPE 급 초저가 토큰은 최대 8자리까지.
+ */
+function pickPriceDigits(abs: number): number {
+  if      (abs === 0)     return 2;
+  else if (abs >= 1)      return 2;   // BTC, ETH, BNB, SOL, 원자재
+  else if (abs >= 0.1)    return 4;   // DOGE, ADA
+  else if (abs >= 0.01)   return 5;
+  else if (abs >= 0.001)  return 6;
+  else if (abs >= 0.0001) return 7;
+  else                    return 8;   // SHIB, PEPE
+}
+
+/** USD 가격(접두 없음) — '0.1327', '60000.00' 등. 문자열 내 삽입용. */
+export function formatPrice(value: number): string {
+  const digits = pickPriceDigits(Math.abs(value));
+  return value.toLocaleString('en-US', {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
+/**
+ * USD 가격($ 접두) — '$0.1327', '$60,000.00'.
  * 포지션 진입가/현재가/청산가/손절가 등 '가격 레벨' 전용.
  */
 export function formatUsdPrice(value: number): string {
-  const abs = Math.abs(value);
-  let digits: number;
-  if      (abs === 0)     digits = 2;
-  else if (abs >= 1)      digits = 2;   // BTC, ETH, BNB, SOL, 원자재 등
-  else if (abs >= 0.1)    digits = 4;   // DOGE, ADA
-  else if (abs >= 0.01)   digits = 5;
-  else if (abs >= 0.001)  digits = 6;
-  else if (abs >= 0.0001) digits = 7;
-  else                    digits = 8;   // SHIB, PEPE 등
-  return `$${value.toLocaleString('en-US', {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  })}`;
+  return `$${formatPrice(value)}`;
 }

@@ -79,6 +79,44 @@ async function gateGet(apiKey: string, apiSecret: string, path: string, query: s
   return res.json();
 }
 
+/**
+ * 가격대별 유의 자릿수 선택 — 저가 토큰(SHIB/PEPE 등)의 가격 레벨이
+ * '0.00' 으로 뭉개지지 않도록 confluence 문자열과 SL/TP 반올림에 사용.
+ * 프론트엔드 formatPrice() 와 동일 규칙.
+ */
+function priceDigits(v: number): number {
+  const abs = Math.abs(v);
+  if      (abs === 0)     return 2;
+  else if (abs >= 1)      return 2;
+  else if (abs >= 0.1)    return 4;
+  else if (abs >= 0.01)   return 5;
+  else if (abs >= 0.001)  return 6;
+  else if (abs >= 0.0001) return 7;
+  else                    return 8;
+}
+const fmtP = (v: number) => v.toFixed(priceDigits(v));
+const roundP = (v: number) => parseFloat(v.toFixed(priceDigits(v)));
+
+/**
+ * Gate.io 캔들 조회 — 실제 체결 캔들이 비면 mark price 캔들로 fallback.
+ * 원자재/저유동성 perp (XBR/XTI/XAU/XAG 등)은 체결 캔들이 sparse해서
+ * 빈 배열을 반환하는 경우가 많음. mark price는 항상 계산되어 있음.
+ */
+async function gateGetCandles(
+  apiKey: string, apiSecret: string,
+  contract: string, interval: string, limit: number,
+): Promise<any[]> {
+  const path = '/api/v4/futures/usdt/candlesticks';
+  try {
+    const raw = await gateGet(apiKey, apiSecret, path, `contract=${contract}&interval=${interval}&limit=${limit}`);
+    if (Array.isArray(raw) && raw.length >= 10) return raw;
+  } catch { /* fall through */ }
+  try {
+    const raw = await gateGet(apiKey, apiSecret, path, `contract=mark_${contract}&interval=${interval}&limit=${limit}`);
+    return Array.isArray(raw) ? raw : [];
+  } catch { return []; }
+}
+
 // ─── 캔들 변환 ────────────────────────────────────────────────────────────────
 
 function parseCandles(raw: any[]): Candle[] {
@@ -382,11 +420,11 @@ function analyzeMTF(candles: Candle[], direction: string | null) {
   if (mss === direction) confluence.push(`MTF ${direction} MSS`);
   if (relOBs.length > 0) {
     const ob = relOBs[relOBs.length - 1];
-    confluence.push(`MTF OB [${ob.low.toFixed(2)}-${ob.high.toFixed(2)}]`);
+    confluence.push(`MTF OB [${fmtP(ob.low)}-${fmtP(ob.high)}]`);
   }
   if (relFVGs.length > 0) {
     const f = relFVGs[relFVGs.length - 1];
-    confluence.push(`MTF FVG [${f.bottom.toFixed(2)}-${f.top.toFixed(2)}] CE:${f.ce.toFixed(2)}`);
+    confluence.push(`MTF FVG [${fmtP(f.bottom)}-${fmtP(f.top)}] CE:${fmtP(f.ce)}`);
   }
 
   const confirmed = (mss === direction || relOBs.length > 0) && (relOBs.length > 0 || relFVGs.length > 0);
@@ -424,7 +462,7 @@ function analyzeLTF(candles: Candle[], direction: string | null, session: Sessio
   // 1. FVG CE
   for (const f of relFVGs) {
     if (f.atCE) {
-      confluence.push(`LTF FVG CE @ ${f.ce.toFixed(2)} (${f.fillPercent}% filled)`);
+      confluence.push(`LTF FVG CE @ ${fmtP(f.ce)} (${f.fillPercent}% filled)`);
       ready = true; entryType = 'FVG_CE'; break;
     }
   }
@@ -432,7 +470,7 @@ function analyzeLTF(candles: Candle[], direction: string | null, session: Sessio
   if (!ready) {
     for (const f of relFVGs) {
       if (f.inRange && f.fillPercent >= 50 && f.fillPercent < 100) {
-        confluence.push(`LTF FVG Fill @ ${f.fillPercent}% [${f.bottom.toFixed(2)}-${f.top.toFixed(2)}]`);
+        confluence.push(`LTF FVG Fill @ ${f.fillPercent}% [${fmtP(f.bottom)}-${fmtP(f.top)}]`);
         ready = true; entryType = 'FVG_FILL'; break;
       }
     }
@@ -451,7 +489,7 @@ function analyzeLTF(candles: Candle[], direction: string | null, session: Sessio
   // 4. Liquidity Sweep
   const relSweep = sweeps.find(s => s.type === direction);
   if (relSweep) {
-    confluence.push(`LTF Sweep @ ${relSweep.level.toFixed(2)}`);
+    confluence.push(`LTF Sweep @ ${fmtP(relSweep.level)}`);
     if (!ready) { ready = true; entryType = 'SWEEP'; }
   }
   // LTF MSS (보조)
@@ -486,13 +524,13 @@ function calcSLTP(
     else if (ltfSL.length > 0) sl = ltfSL[ltfSL.length - 1].price * 0.999;
     else if (pdhl)             sl = pdhl.pdl * 0.999;
     else                       sl = price * (1 - CFG.ict.stopLossPercent / 100);
-    return { sl: parseFloat(sl.toFixed(2)), tp: parseFloat((price + (price - sl) * 3).toFixed(2)) };
+    return { sl: roundP(sl), tp: roundP(price + (price - sl) * 3) };
   } else {
     if (relOBs.length > 0)   sl = relOBs[relOBs.length - 1].high * (1 + CFG.ict.stopLossPercent / 100 * 0.3);
     else if (ltfSH.length > 0) sl = ltfSH[ltfSH.length - 1].price * 1.001;
     else if (pdhl)             sl = pdhl.pdh * 1.001;
     else                       sl = price * (1 + CFG.ict.stopLossPercent / 100);
-    return { sl: parseFloat(sl.toFixed(2)), tp: parseFloat((price - (sl - price) * 3).toFixed(2)) };
+    return { sl: roundP(sl), tp: roundP(price - (sl - price) * 3) };
   }
 }
 
@@ -552,11 +590,11 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    // Gate.io 캔들 병렬 fetch
+    // Gate.io 캔들 병렬 fetch — 원자재/저유동성 perp은 mark price 로 자동 fallback
     const [htfRaw, mtfRaw, ltfRaw] = await Promise.all([
-      gateGet(apiKey, apiSecret, '/api/v4/futures/usdt/candlesticks', `contract=${contract}&interval=4h&limit=200`),
-      gateGet(apiKey, apiSecret, '/api/v4/futures/usdt/candlesticks', `contract=${contract}&interval=15m&limit=200`),
-      gateGet(apiKey, apiSecret, '/api/v4/futures/usdt/candlesticks', `contract=${contract}&interval=5m&limit=100`),
+      gateGetCandles(apiKey, apiSecret, contract, '4h', 200),
+      gateGetCandles(apiKey, apiSecret, contract, '15m', 200),
+      gateGetCandles(apiKey, apiSecret, contract, '5m', 100),
     ]);
 
     const htfC = parseCandles(htfRaw);

@@ -20,6 +20,7 @@ import type { ExchangeAccount } from '@/store/accounts';
 import type { Balance } from '@/services/account.service';
 import { ExchangeLogo } from '@/components/ExchangeLogo';
 import { formatKRW } from '@/utils/format';
+import { useBlurOnOpen } from '@/hooks/useBlurOnOpen';
 
 export interface AccountBottomSheetProps {
   visible:       boolean;
@@ -47,6 +48,9 @@ export function AccountBottomSheet({
 
   const translateY = useSharedValue(600);
   const [mounted, setMounted] = useState(false);
+
+  // RN Web 의 Modal aria-hidden 경고 회피 — 트리거 버튼 blur.
+  useBlurOnOpen(visible);
 
   useEffect(() => {
     if (visible) {

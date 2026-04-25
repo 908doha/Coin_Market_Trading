@@ -178,3 +178,30 @@ export async function pushBalanceHistory(accountId?: string): Promise<void> {
     }
   } catch { /* 네트워크 오류 무시 — 다음 주기에 재시도 */ }
 }
+
+/**
+ * 새 계좌 ID로 orphan balance_history 흡수.
+ * `exchange_accounts` 초기화 후 재등록 시, 옛 랜덤 account_id 에 남은
+ * 스냅샷을 신규 ID 로 rebind 해서 계좌별 차트 연속성을 복구함.
+ *
+ * @param newAccountId  방금 추가된 계좌의 랜덤 id
+ * @param keepAccountIds 보존할 활성 account_id 목록 (새 id 포함, '' 는 서버가 자동 보존)
+ * @returns rebind 된 행 수 (0 = orphan 없음 또는 실패)
+ */
+export async function claimOrphanBalanceHistory(
+  newAccountId:   string,
+  keepAccountIds: string[],
+): Promise<number> {
+  const token = getToken();
+  if (!token || !newAccountId) return 0;
+  try {
+    const res = await fetch('/api/balance-history', {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body:    JSON.stringify({ newAccountId, keepAccountIds }),
+    });
+    if (!res.ok) return 0;
+    const { rebound } = await res.json();
+    return Number(rebound ?? 0);
+  } catch { return 0; }
+}

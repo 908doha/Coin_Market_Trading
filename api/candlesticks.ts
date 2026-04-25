@@ -18,6 +18,8 @@ function setCors(res: any) {
   res.setHeader('Access-Control-Allow-Origin',  '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  // 빈 응답이 디스크 캐시에 박히면 fallback 로직이 무의미해지므로 캐시 금지
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
 }
 
 function pickInterval(fromSec: number, toSec: number): string {
@@ -27,6 +29,24 @@ function pickInterval(fromSec: number, toSec: number): string {
   if (diff <=     86_400) return '15m';
   if (diff <= 7 * 86_400) return '1h';
   return '4h';
+}
+
+// Gate.io 캔들 fetch (실패/빈 배열은 [] 반환)
+async function fetchGateCandles(
+  contract: string, fromSec: number, interval: string,
+): Promise<{ t: number; c: string }[]> {
+  const url =
+    `https://api.gateio.ws/api/v4/futures/usdt/candlesticks` +
+    `?contract=${encodeURIComponent(contract)}` +
+    `&from=${fromSec}&interval=${interval}&limit=1000`;
+  try {
+    const r = await fetch(url, { headers: { Accept: 'application/json' } });
+    if (!r.ok) return [];
+    const data = await r.json();
+    return Array.isArray(data)
+      ? data.filter((d: any) => d.t && d.c)
+      : [];
+  } catch { return []; }
 }
 
 export default async function handler(req: any, res: any) {
@@ -45,42 +65,38 @@ export default async function handler(req: any, res: any) {
   }
 
   const safeTo = Math.max(to, from + 60);
-
-  if (safeTo - from < 60) {
-    res.status(200).json([]);
-    return;
-  }
+  if (safeTo - from < 60) { res.status(200).json([]); return; }
 
   const interval = pickInterval(from, safeTo);
 
-  // Gate.io는 from과 to를 동시에 사용할 수 없음
-  // from만 사용하고 limit으로 개수 제한
-  const url =
-    `https://api.gateio.ws/api/v4/futures/usdt/candlesticks` +
-    `?contract=${encodeURIComponent(contract)}` +
-    `&from=${from}&interval=${interval}&limit=1000`;
-
-  try {
-    const r = await fetch(url, { headers: { Accept: 'application/json' } });
-    if (!r.ok) {
-      console.error('[candlesticks] Gate.io error', r.status, contract, from);
-      res.status(200).json([]);
-      return;
-    }
-
-    const data = await r.json();
-    const points = (Array.isArray(data) ? data : [])
-      .filter((d: any) => d.t && d.c)
-      .map((d: any) => ({
-        t: Number(d.t) * 1000,   // Gate.io seconds → ms
-        p: parseFloat(d.c),      // close price
-      }))
-      // to가 명시적으로 지정된 경우 (과거 거래), 해당 시점까지만 자르기
-      .filter((pt: any) => rawTo ? pt.t <= rawTo * 1000 : true);
-
-    res.status(200).json(points);
-  } catch (err: any) {
-    console.error('[candlesticks] fetch error', err?.message, contract);
-    res.status(200).json([]);
+  // 1차: 실제 체결 캔들
+  // 2차: mark price 캔들 (저유동성 원자재/지표 perp — XBR/XTI/XAU/XAG 등은
+  //      체결 캔들이 sparse하거나 빈 응답을 주는 경우가 있음. mark price는
+  //      funding/오라클 기반으로 항상 계산되어 거의 항상 데이터가 존재)
+  // 3차: mark price 캔들 + 더 큰 interval (1h) — 최후 fallback
+  let raw = await fetchGateCandles(contract, from, interval);
+  let source = 'contract';
+  if (raw.length < 2) {
+    raw = await fetchGateCandles(`mark_${contract}`, from, interval);
+    source = 'mark';
   }
+  if (raw.length < 2 && interval !== '1h' && interval !== '4h') {
+    raw = await fetchGateCandles(`mark_${contract}`, from, '1h');
+    source = 'mark_1h';
+  }
+
+  if (!raw.length) {
+    console.log('[candlesticks] empty after fallbacks', contract, from, interval);
+  } else if (source !== 'contract') {
+    console.log('[candlesticks] served via', source, 'for', contract);
+  }
+
+  const points = raw
+    .map((d: any) => ({
+      t: Number(d.t) * 1000,
+      p: parseFloat(d.c),
+    }))
+    .filter((pt: any) => rawTo ? pt.t <= rawTo * 1000 : true);
+
+  res.status(200).json(points);
 }

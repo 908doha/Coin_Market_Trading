@@ -13,12 +13,13 @@ import Animated, {
   useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS,
 } from 'react-native-reanimated';
 import Svg, { Path, Polygon, Rect, Text as SvgText, Circle } from 'react-native-svg';
-import { Text, FadeTabView, AnimatedNumber, Skeleton, PressableScale } from '@/design-system';
+import { Text, FadeTabView, AnimatedNumber, Skeleton, PressableScale, CurrencyToggle } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType, ExchangeAccount } from '@/store/accounts';
 import { tradesService } from '@/services';
 import type { Trade } from '@/services/trades.service';
-import { formatKRW } from '@/utils/format';
+import { formatKRW, formatUsdPrice } from '@/utils/format';
+import { useBlurOnOpen } from '@/hooks/useBlurOnOpen';
 import type { Balance } from '@/services/account.service';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -123,6 +124,7 @@ function AccountBottomSheet({
 }) {
   const translateY = useSharedValue(600);
   const [mounted, setMounted] = React.useState(false);
+  useBlurOnOpen(visible);
 
   React.useEffect(() => {
     if (visible) {
@@ -260,17 +262,28 @@ function formatVol(usd: number): string {
 // ─── 종목 행 (포지션 현황과 동일한 디자인) ─────────────────────────────────────
 
 function TickerRow({
-  ticker, idx, onPress, isLast,
+  ticker, idx, onPress, isLast, ictScore, ictDirection,
 }: {
   ticker: Ticker; idx: number;
   onPress: () => void;
   isLast: boolean;
+  ictScore?:     number | null;
+  ictDirection?: 'LONG' | 'SHORT' | null;
 }) {
   const changeColor = ticker.change24h > 0
     ? colors.market.rise
     : ticker.change24h < 0
       ? colors.market.fall
       : colors.text.secondary;
+
+  // 점수 등급별 팔레트 (거래내역 뱃지 톤과 통일)
+  const scoreChip =
+    ictScore == null     ? { bg: '#F5F5F5', fg: colors.text.tertiary } :
+    ictScore >= 75       ? { bg: '#EAF6F0', fg: '#1AC24E' } :
+    ictScore >= 55       ? { bg: '#FFF6E5', fg: '#F59E0B' } :
+                           { bg: '#F5F5F5', fg: colors.text.secondary };
+
+  const showIct = ictScore !== undefined;
 
   return (
     <PressableScale style={[!isLast && tr.border]} onPress={onPress}>
@@ -288,20 +301,36 @@ function TickerRow({
           {ticker.name && <Text style={tr.name} numberOfLines={1}>{ticker.name}</Text>}
         </View>
         <Text style={tr.price}>
-          {'$' + ticker.last.toLocaleString('en-US', {
-            minimumFractionDigits:  ticker.last < 1 ? 4 : 2,
-            maximumFractionDigits:  ticker.last < 1 ? 4 : 2,
-          })}
+          {formatUsdPrice(ticker.last)}
           {'  '}
           <Text style={tr.vol}>{formatVol(ticker.volume24hUsd)}</Text>
         </Text>
       </View>
 
-      {/* 우측: 변동률만 표시 (분석은 행 전체 탭으로) */}
-      <View style={{ alignItems: 'flex-end' }}>
+      {/* 우측: 변동률 + (ICT 점수 모드일 때) 방향/점수 뱃지 카드 */}
+      <View style={{ alignItems: 'flex-end', gap: 4 }}>
         <Text style={[tr.change, { color: changeColor }]}>
           {ticker.change24h > 0 ? '+' : ''}{ticker.change24h.toFixed(2)}%
         </Text>
+        {showIct && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            {ictDirection === 'LONG' && (
+              <View style={[tr.chip, { backgroundColor: '#EAF6F0' }]}>
+                <Text style={[tr.chipText, { color: '#1AC24E' }]}>롱</Text>
+              </View>
+            )}
+            {ictDirection === 'SHORT' && (
+              <View style={[tr.chip, { backgroundColor: '#FFF0F0' }]}>
+                <Text style={[tr.chipText, { color: '#FF4747' }]}>숏</Text>
+              </View>
+            )}
+            <View style={[tr.chip, { backgroundColor: scoreChip.bg }]}>
+              <Text style={[tr.chipText, { color: scoreChip.fg }]}>
+                {ictScore == null ? '—' : ictScore}
+              </Text>
+            </View>
+          </View>
+        )}
       </View>
       </View>
     </PressableScale>
@@ -319,6 +348,8 @@ const tr = StyleSheet.create({
   vol:        { fontSize: 12, color: colors.text.tertiary },
   price:      { fontSize: 13, color: colors.text.secondary, marginTop: 2 },
   change:     { fontSize: 14, fontWeight: '600' },
+  chip:       { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, minWidth: 28, alignItems: 'center' },
+  chipText:   { fontSize: 12, fontWeight: '700' },
 });
 
 // ─── 메인 ─────────────────────────────────────────────────────────────────────
@@ -332,6 +363,10 @@ export default function Analysis() {
   const [tickers, setTickers]   = useState<Ticker[]>([]);
   const [tickersLoading, setTickersLoading] = useState(true);
   const [search,  setSearch]    = useState('');
+  const [sortBy,  setSortBy]    = useState<'volume' | 'ict'>('volume');
+  // contract → { score, direction }. undefined = 미조회, null = 실패
+  const [ictScores, setIctScores] = useState<Record<string, { score: number; direction: 'LONG' | 'SHORT' | null } | null>>({});
+  const [ictScanProgress, setIctScanProgress] = useState<{ done: number; total: number } | null>(null);
 
   const { accounts, balances, totalBalance } = useAccounts();
 
@@ -361,7 +396,7 @@ export default function Analysis() {
 
   const kelly = useMemo(() => computeKelly(trades), [trades]);
 
-  // CoinGecko 시가총액 상위 50개 로드
+  // 시장 스캔 종목 로드 (서버: Gate.io tickers 전량 → fallback: CoinGecko top 50)
   useEffect(() => {
     const COINGECKO =
       'https://api.coingecko.com/api/v3/coins/markets' +
@@ -401,11 +436,83 @@ export default function Analysis() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toUpperCase();
-    if (!q) return tickers;
-    return tickers.filter(
+    const base = !q ? tickers : tickers.filter(
       (t) => t.coin.includes(q) || t.symbol.includes(q) || (t.name?.toUpperCase().includes(q) ?? false),
     );
-  }, [tickers, search]);
+    if (sortBy !== 'ict') return base;
+    // ICT 점수 desc 정렬. 미조회/실패 항목은 하단으로.
+    return [...base].sort((a, b) => {
+      const sa = ictScores[a.contract];
+      const sb = ictScores[b.contract];
+      const va = sa?.score ?? -1;
+      const vb = sb?.score ?? -1;
+      if (vb !== va) return vb - va;
+      return b.volume24hUsd - a.volume24hUsd;  // tie-breaker
+    });
+  }, [tickers, search, sortBy, ictScores]);
+
+  // ICT 점수 일괄 스캔 — sortBy='ict' 진입 시 top N 티커에 대해 병렬 배치 실행.
+  // 사용자 API 키 1개로 Gate.io 를 거치므로 동시 요청 수 제한.
+  useEffect(() => {
+    if (sortBy !== 'ict' || !tickers.length) return;
+    const account = accounts.find((a) => a.apiKey && a.apiSecret);
+    if (!account) { setIctScanProgress(null); return; }
+
+    const SCAN_LIMIT  = 30;   // 거래량 상위 30종
+    const CONCURRENCY = 5;
+    const targets = tickers
+      .slice(0, SCAN_LIMIT)
+      .filter((t) => ictScores[t.contract] === undefined);
+    if (!targets.length) { setIctScanProgress(null); return; }
+
+    let cancelled = false;
+    let done      = 0;
+    setIctScanProgress({ done: 0, total: targets.length });
+
+    const runOne = async (contract: string) => {
+      try {
+        const res = await fetch(`${API_BASE}/api/ict-analyze`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ apiKey: account.apiKey, apiSecret: account.apiSecret, contract }),
+        });
+        if (!res.ok) throw new Error(String(res.status));
+        const data = await res.json();
+        if (cancelled) return;
+        if (typeof data?.score !== 'number') {
+          setIctScores((prev) => ({ ...prev, [contract]: null }));
+          return;
+        }
+        const dir = data?.htf?.direction;
+        setIctScores((prev) => ({
+          ...prev,
+          [contract]: {
+            score:     data.score,
+            direction: dir === 'LONG' || dir === 'SHORT' ? dir : null,
+          },
+        }));
+      } catch {
+        if (!cancelled) setIctScores((prev) => ({ ...prev, [contract]: null }));
+      } finally {
+        if (!cancelled) {
+          done += 1;
+          setIctScanProgress({ done, total: targets.length });
+        }
+      }
+    };
+
+    // 간단한 concurrency pool
+    const queue = [...targets.map((t) => t.contract)];
+    const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
+      while (!cancelled && queue.length) {
+        const c = queue.shift();
+        if (c) await runOne(c);
+      }
+    });
+    Promise.all(workers).finally(() => { if (!cancelled) setIctScanProgress(null); });
+
+    return () => { cancelled = true; };
+  }, [sortBy, tickers, accounts]);
 
   const analyze = useCallback((contract: string) => {
     router.push(`/(main)/analysis/ict/${encodeURIComponent(contract)}` as any);
@@ -492,24 +599,44 @@ export default function Analysis() {
 
           {/* ICT 종목 스캔 섹션 */}
           <View style={st.scanSection}>
-            <Pressable
-              style={st.scanHeader}
-              onPress={() => {
-                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                setScanExpanded((v) => !v);
-              }}
-            >
-              <Text style={st.scanTitle}>ICT 종목 스캔</Text>
-              <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-                <Path
-                  d={scanExpanded ? 'M18 15l-6-6-6 6' : 'M6 9l6 6 6-6'}
-                  stroke="#AEAEB2"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </Svg>
-            </Pressable>
+            <View style={st.scanHeader}>
+              <Pressable
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                onPress={() => {
+                  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                  setScanExpanded((v) => !v);
+                }}
+              >
+                <Text style={st.scanTitle}>ICT 종목 스캔</Text>
+                <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+                  <Path
+                    d={scanExpanded ? 'M18 15l-6-6-6 6' : 'M6 9l6 6 6-6'}
+                    stroke="#AEAEB2"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </Svg>
+              </Pressable>
+
+              {/* 정렬 토글 — CurrencyToggle 을 재사용해 UI 통일 */}
+              {scanExpanded && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  {ictScanProgress && sortBy === 'ict' && (
+                    <Text style={st.sortBtnProgress}>
+                      {ictScanProgress.done}/{ictScanProgress.total}
+                    </Text>
+                  )}
+                  <CurrencyToggle
+                    showUsd={sortBy === 'ict'}
+                    onToggle={() => setSortBy((s) => (s === 'volume' ? 'ict' : 'volume'))}
+                    leftLabel="거래량"
+                    rightLabel="ICT"
+                    pillWidth={54}
+                  />
+                </View>
+              )}
+            </View>
 
             {scanExpanded && (
               tickersLoading ? (
@@ -545,15 +672,20 @@ export default function Analysis() {
                     />
                   </View>
 
-                  {filtered.map((ticker, idx) => (
-                    <TickerRow
-                      key={ticker.contract}
-                      ticker={ticker}
-                      idx={idx}
-                      onPress={() => analyze(ticker.contract)}
-                      isLast={idx === filtered.length - 1}
-                    />
-                  ))}
+                  {filtered.map((ticker, idx) => {
+                    const entry = sortBy === 'ict' ? ictScores[ticker.contract] : undefined;
+                    return (
+                      <TickerRow
+                        key={ticker.contract}
+                        ticker={ticker}
+                        idx={idx}
+                        onPress={() => analyze(ticker.contract)}
+                        isLast={idx === filtered.length - 1}
+                        ictScore={sortBy === 'ict' ? (entry === undefined ? null : entry?.score ?? null) : undefined}
+                        ictDirection={sortBy === 'ict' ? (entry?.direction ?? null) : undefined}
+                      />
+                    );
+                  })}
                 </>
               )
             )}
@@ -599,6 +731,8 @@ const st = StyleSheet.create({
   scanSection:  { borderTopWidth: 8, borderTopColor: '#F5F5F5' },
   scanHeader:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 18 },
   scanTitle:    { fontSize: 17, fontWeight: '700', color: '#191919' },
+
+  sortBtnProgress: { fontSize: 11, color: colors.text.tertiary, fontWeight: '600' },
 
   searchWrap:  { marginHorizontal: 20, marginBottom: 8 },
   searchInput: {

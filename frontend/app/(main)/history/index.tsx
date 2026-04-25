@@ -12,6 +12,7 @@ import { Text, CurrencyToggle, TradeHistoryListSkeleton, PressableScale } from '
 import { colors } from '@/design-system/tokens';
 import { tradesService } from '@/services';
 import { useApi } from '@/hooks/useApi';
+import { useBlurOnOpen } from '@/hooks/useBlurOnOpen';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS } from '@/store/accounts';
 import type { ExchangeType } from '@/store/accounts';
 import { formatKRWSigned, formatRate, formatKRW } from '@/utils/format';
@@ -126,6 +127,7 @@ function AccountPickerModal({
   const { accounts, balances, totalBalance } = useAccounts();
   const translateY = useSharedValue(600);
   const [mounted, setMounted] = useState(false);
+  useBlurOnOpen(visible);
 
   useEffect(() => {
     if (visible) {
@@ -437,6 +439,7 @@ export default function History() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [filterPos, setFilterPos] = useState({ top: 0, right: 0 });
   const filterBtnRef              = useRef<View>(null);
+  useBlurOnOpen(filterOpen);
   const { accountId } = useLocalSearchParams<{ accountId?: string }>();
   const [showUsd, setShowUsd]     = useState(false);
   const [period, setPeriod]       = useState<Period>('월');

@@ -21,6 +21,7 @@ import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType, ExchangeAc
 import { tradesService } from '@/services';
 import { formatKRW } from '@/utils/format';
 import type { Balance } from '@/services/account.service';
+import { useBlurOnOpen } from '@/hooks/useBlurOnOpen';
 import type { Trade } from '@/services/trades.service';
 
 // ── 거래소 로고 ──────────────────────────────────────────────────���────────────
@@ -84,6 +85,7 @@ function AccountBottomSheet({
 }) {
   const translateY = useSharedValue(600);
   const [mounted, setMounted] = React.useState(false);
+  useBlurOnOpen(visible);
 
   React.useEffect(() => {
     if (visible) {

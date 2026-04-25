@@ -3,6 +3,7 @@ import { View, StyleSheet } from 'react-native';
 import { Text, GlassCard } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { PriceChart } from '@/components/PositionDetailCard';
+import { formatPrice, formatUsdPrice } from '@/utils/format';
 
 // ─── 타입 정의 (export — positions/[id].tsx, history/[id].tsx에서 재사용) ───────
 export interface FvgInfo { ce: number; fillPct: number; }
@@ -79,14 +80,14 @@ function IctSection({
       {swingHigh != null && swingLow != null && (
         <View style={ict.kv}>
           <Text style={ict.kvKey}>SH / SL</Text>
-          <Text style={ict.kvVal}>{swingHigh.toFixed(2)} / {swingLow.toFixed(2)}</Text>
+          <Text style={ict.kvVal}>{formatPrice(swingHigh)} / {formatPrice(swingLow)}</Text>
         </View>
       )}
       {pdh != null && (
         <View style={ict.kv}>
           <Text style={ict.kvKey}>PDH</Text>
           <Text style={[ict.kvVal, pdhSweep && { color: '#FF8A00' }]}>
-            {pdh.toFixed(2)}{pdhSweep ? '  🔄 Sweep!' : ''}
+            {formatPrice(pdh)}{pdhSweep ? '  🔄 Sweep!' : ''}
           </Text>
         </View>
       )}
@@ -94,7 +95,7 @@ function IctSection({
         <View style={ict.kv}>
           <Text style={ict.kvKey}>PDL</Text>
           <Text style={[ict.kvVal, pdlSweep && { color: '#FF8A00' }]}>
-            {pdl.toFixed(2)}{pdlSweep ? '  🔄 Sweep!' : ''}
+            {formatPrice(pdl)}{pdlSweep ? '  🔄 Sweep!' : ''}
           </Text>
         </View>
       )}
@@ -108,12 +109,12 @@ function IctSection({
       </View>
       {fvg.lastBull && (
         <View style={ict.subRow}>
-          <Text style={ict.subText}>└ Bull CE: {fvg.lastBull.ce.toFixed(2)} ({fvg.lastBull.fillPct}% filled)</Text>
+          <Text style={ict.subText}>└ Bull CE: {formatPrice(fvg.lastBull.ce)} ({fvg.lastBull.fillPct}% filled)</Text>
         </View>
       )}
       {fvg.lastBear && (
         <View style={ict.subRow}>
-          <Text style={ict.subText}>└ Bear CE: {fvg.lastBear.ce.toFixed(2)} ({fvg.lastBear.fillPct}% filled)</Text>
+          <Text style={ict.subText}>└ Bear CE: {formatPrice(fvg.lastBear.ce)} ({fvg.lastBear.fillPct}% filled)</Text>
         </View>
       )}
       {inPOI && (
@@ -214,7 +215,7 @@ export default function IctAnalysisCard({
           <View style={ict.priceRow}>
             <Text style={ict.priceLabel}>진입 당시 가격</Text>
             <Text style={ict.priceValue}>
-              ${ictAnalysis.currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {formatUsdPrice(ictAnalysis.currentPrice)}
             </Text>
           </View>
 
@@ -250,7 +251,7 @@ export default function IctAnalysisCard({
                 <View key={s.name} style={ict.sessionRow}>
                   <Text style={ict.sessionName}>{s.name}</Text>
                   <Text style={ict.sessionRange}>
-                    {s.low.toFixed(2)} ~ {s.high.toFixed(2)}
+                    {formatPrice(s.low)} ~ {formatPrice(s.high)}
                     {s.sweep ? '  🔄 Sweep!' : ''}
                   </Text>
                 </View>
@@ -285,9 +286,9 @@ export default function IctAnalysisCard({
                 </View>
                 <View style={{ gap: 3, marginTop: 8 }}>
                   {[
-                    ['진입', ictAnalysis.summary.entry?.toFixed(2) ?? '-'],
-                    ['SL',   ictAnalysis.summary.sl?.toFixed(2)    ?? '-'],
-                    ['TP',   ictAnalysis.summary.tp?.toFixed(2)    ?? '-'],
+                    ['진입', ictAnalysis.summary.entry != null ? formatPrice(ictAnalysis.summary.entry) : '-'],
+                    ['SL',   ictAnalysis.summary.sl    != null ? formatPrice(ictAnalysis.summary.sl)    : '-'],
+                    ['TP',   ictAnalysis.summary.tp    != null ? formatPrice(ictAnalysis.summary.tp)    : '-'],
                   ].map(([k, v]) => (
                     <View key={k} style={ict.kv}>
                       <Text style={ict.kvKey}>{k}</Text>

@@ -9,7 +9,7 @@ import { View, StyleSheet, Text as RNText } from 'react-native';
 import Svg, { Line, Rect, Circle, Text as SvgText } from 'react-native-svg';
 import { Text, GlassCard, AnimatedNumber } from '@/design-system';
 import { colors } from '@/design-system/tokens';
-import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
+import { formatKRW, formatKRWSigned, formatRate, formatUsdPrice } from '@/utils/format';
 import type { PricePoint } from '@/utils/priceHistory';
 
 // ─── PriceChart (ICT 분석 카드 전용 — 포지션 상세 fallback에서는 사용 안 함) ──
@@ -31,7 +31,7 @@ export function PriceChart({
   if (range <= 0) return null;
 
   const toY = (p: number) => ((high - p) / range) * 100;
-  const fmt = (v: number) => `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const fmt = formatUsdPrice;
 
   const entryY   = toY(entry);
   const currentY = toY(current);

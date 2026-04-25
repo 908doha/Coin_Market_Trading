@@ -229,6 +229,179 @@ async function fetchGatePositions(apiKey: string, apiSecret: string): Promise<Po
     });
 }
 
+// ── Binance USDT-M Futures ───────────────────────────────────────────────────
+
+function binanceSign(query: string, apiSecret: string): string {
+  return crypto.createHmac('sha256', apiSecret).update(query).digest('hex');
+}
+
+async function binanceFapiGet(apiKey: string, apiSecret: string, path: string): Promise<any> {
+  const ts  = Date.now();
+  const qs  = `timestamp=${ts}&recvWindow=10000`;
+  const sig = binanceSign(qs, apiSecret);
+  const url = `https://fapi.binance.com${path}?${qs}&signature=${sig}`;
+  const res = await fetch(url, { headers: { 'X-MBX-APIKEY': apiKey, Accept: 'application/json' } });
+  if (!res.ok) throw new Error(`Binance ${path} error ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+// 마지막 Binance fetchBinancePositions 호출 시 진단 정보. 응답 헤더로 노출해
+// 사용자가 브라우저 Network 탭만 봐도 TP/SL 매칭 상태 확인 가능.
+let __binanceLastDebug: string = '';
+
+async function fetchBinancePositions(apiKey: string, apiSecret: string): Promise<Position[]> {
+  // 환율
+  let usdtKrw = 1350;
+  try {
+    const [t] = await (await fetch('https://api.upbit.com/v1/ticker?markets=KRW-USDT')).json();
+    usdtKrw = t.trade_price;
+  } catch {}
+
+  // 포지션 + 모든 열린 주문 병렬 조회
+  // /fapi/v1/openOrders 는 심볼 미지정 시 모든 심볼 한 번에 반환 (rate weight 40).
+  // 주문 조회 권한이 없거나 실패해도 포지션 조회는 계속 진행 (TP/SL 만 비워서 표시).
+  let openOrdersErr: string | null = null;
+  const [posAll, openOrders] = await Promise.all([
+    binanceFapiGet(apiKey, apiSecret, '/fapi/v2/positionRisk') as Promise<any[]>,
+    binanceFapiGet(apiKey, apiSecret, '/fapi/v1/openOrders').catch((e) => {
+      openOrdersErr = e?.message ?? String(e);
+      console.error('[binance:fapi/openOrders]', openOrdersErr);
+      return [] as any[];
+    }) as Promise<any[]>,
+  ]);
+  const open = (Array.isArray(posAll) ? posAll : []).filter((p) => parseFloat(p.positionAmt ?? '0') !== 0);
+  if (!open.length) return [];
+
+  // 디버그: 받아온 주문 type 분포 (TP/SL 안 잡힐 때 원인 파악용)
+  const typeSummary: Record<string, number> = {};
+  for (const o of (Array.isArray(openOrders) ? openOrders : [])) {
+    const t = String(o.type ?? '_NONE');
+    typeSummary[t] = (typeSummary[t] ?? 0) + 1;
+  }
+  const ordersCount = Array.isArray(openOrders) ? openOrders.length : 0;
+  console.log('[binance:openOrders]', ordersCount, typeSummary, openOrdersErr ? `(err: ${openOrdersErr.slice(0, 100)})` : '');
+  __binanceLastDebug = JSON.stringify({
+    positions: open.length,
+    orders:    ordersCount,
+    types:     typeSummary,
+    err:       openOrdersErr ? openOrdersErr.slice(0, 200) : undefined,
+  });
+
+  // 심볼+포지션사이드별 TP/SL 매핑.
+  // Binance 모드:
+  //   One-way: positionSide='BOTH', side=BUY/SELL
+  //   Hedge:   positionSide='LONG'/'SHORT' (한 심볼에 양방향 동시 가능)
+  // 주문 type:
+  //   STOP / STOP_MARKET / TRAILING_STOP_MARKET → SL 후보
+  //   TAKE_PROFIT / TAKE_PROFIT_MARKET          → TP 후보
+  // 같은 키에 여러 개면 가장 최근(updateTime 큰) 값 채택.
+  type TpSl = { tp: number | null; sl: number | null; tpTs: number; slTs: number };
+  const keyOf = (sym: string, posSide: string) => `${sym}|${posSide || 'BOTH'}`;
+  const tpSlMap = new Map<string, TpSl>();
+  for (const o of (Array.isArray(openOrders) ? openOrders : [])) {
+    const sym     = String(o.symbol ?? '');
+    const type    = String(o.type   ?? '').toUpperCase();
+    const posSide = String(o.positionSide ?? 'BOTH').toUpperCase();
+    const stop    = parseFloat(o.stopPrice ?? '0') || 0;
+    if (!sym || stop <= 0) continue;
+    const ts  = Number(o.updateTime ?? o.time ?? 0);
+    const k   = keyOf(sym, posSide);
+    const cur = tpSlMap.get(k) ?? { tp: null, sl: null, tpTs: 0, slTs: 0 };
+    if (type === 'TAKE_PROFIT' || type === 'TAKE_PROFIT_MARKET') {
+      if (ts >= cur.tpTs) { cur.tp = stop; cur.tpTs = ts; }
+    } else if (type === 'STOP' || type === 'STOP_MARKET' || type === 'TRAILING_STOP_MARKET') {
+      if (ts >= cur.slTs) { cur.sl = stop; cur.slTs = ts; }
+    }
+    tpSlMap.set(k, cur);
+  }
+
+  return open.map((p) => {
+    const symbol     = String(p.symbol ?? '');
+    const coin       = symbol.replace(/USDT$/, '').replace(/USDC$/, '');
+    const size       = parseFloat(p.positionAmt ?? '0');
+    const isLong     = size > 0;
+    const entryPrice = parseFloat(p.entryPrice ?? '0') || 0;
+    const markPrice  = parseFloat(p.markPrice  ?? '0') || 0;
+    const leverage   = parseInt(p.leverage     ?? '1', 10) || 1;
+    const liqPrice   = parseFloat(p.liquidationPrice ?? '0') || 0;
+    const unrealUsdt = parseFloat(p.unRealizedProfit ?? '0') || 0;
+
+    const notionalUsdt = Math.abs(size) * entryPrice;
+    const marginUsdt   = leverage > 0 ? notionalUsdt / leverage : notionalUsdt;
+    const profitKrw    = Math.round(unrealUsdt * usdtKrw);
+    const marginKrw    = Math.round(marginUsdt * usdtKrw);
+    const notionalKrw  = Math.round(notionalUsdt * usdtKrw);
+    const profitRate   = marginUsdt > 0 ? (unrealUsdt / marginUsdt) * 100 : 0;
+
+    const updateTimeMs = Number(p.updateTime ?? 0);
+    const entryAt      = updateTimeMs > 0 ? new Date(updateTimeMs).toISOString() : new Date().toISOString();
+
+    const elapsedSec = updateTimeMs > 0 ? (Date.now() - updateTimeMs) / 1000 : 0;
+    const holdingPeriod =
+      elapsedSec < 3600           ? `${Math.max(1, Math.floor(elapsedSec / 60))}분`        :
+      elapsedSec < 86400          ? `${Math.floor(elapsedSec / 3600)}시간`                 :
+                                    `${Math.floor(elapsedSec / 86400)}일`;
+
+    const r = Math.abs(profitRate);
+    const riskLevel: 1 | 2 | 3 | 4 | 5 =
+      r < 5 ? 1 : r < 15 ? 2 : r < 30 ? 3 : r < 60 ? 4 : 5;
+
+    // 주문 유형으로 분류한 결과를 진입가·방향 기준으로 한 번 더 검증.
+    // Long  → SL < entry < TP, Short → TP < entry < SL.
+    // 검증 실패 시(주문 type 이 의도와 반대로 등록된 케이스) 위치 기반 재배치.
+    // hedge 모드: positionSide=LONG|SHORT 매칭. one-way: BOTH.
+    const posSide = String(p.positionSide ?? 'BOTH').toUpperCase();
+    // hedge 모드여도 일부 사용자가 BOTH 키로 주문을 걸어둔 경우 대비해 fallback.
+    const orders =
+      tpSlMap.get(keyOf(symbol, posSide)) ??
+      (posSide !== 'BOTH' ? tpSlMap.get(keyOf(symbol, 'BOTH')) : undefined);
+    let finalTp: number | null = orders?.tp ?? null;
+    let finalSl: number | null = orders?.sl ?? null;
+    if (entryPrice > 0 && (finalTp || finalSl)) {
+      const candidates = [finalTp, finalSl].filter((v): v is number => !!v && v > 0);
+      if (candidates.length === 2) {
+        const [a, b] = candidates;
+        const hi = Math.max(a, b), lo = Math.min(a, b);
+        finalTp = isLong ? hi : lo;
+        finalSl = isLong ? lo : hi;
+      } else if (candidates.length === 1) {
+        const v = candidates[0];
+        if (isLong) {
+          if (v > entryPrice)      { finalTp = v; finalSl = null; }
+          else if (v < entryPrice) { finalSl = v; finalTp = null; }
+        } else {
+          if (v < entryPrice)      { finalTp = v; finalSl = null; }
+          else if (v > entryPrice) { finalSl = v; finalTp = null; }
+        }
+      }
+    }
+
+    return {
+      id:            symbol + '_' + (updateTimeMs || Date.now()),
+      symbol:        coin + '/USDT',
+      coin,
+      direction:     isLong ? 'Long' : 'Short',
+      amount:        marginKrw,
+      profit:        profitKrw,
+      profitRate:    parseFloat(profitRate.toFixed(2)),
+      entryPrice,
+      markPrice,
+      leverage,
+      currentPrice:  markPrice,
+      currentValue:  notionalKrw,
+      weight:        100,
+      entryAt,
+      holdingPeriod,
+      riskLevel,
+      liqPrice,
+      size:          Math.abs(size),
+      usdtKrw,
+      ...(finalTp ? { targetPrice: finalTp } : {}),
+      ...(finalSl ? { stopLoss:    finalSl } : {}),
+    } as Position;
+  });
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method === 'OPTIONS') { res.status(200).end(); return; }
   if (req.method !== 'POST')   { res.status(405).json({ error: 'Method not allowed' }); return; }
@@ -244,6 +417,13 @@ export default async function handler(req: any, res: any) {
 
     if (exchange === 'gate') {
       positions = await fetchGatePositions(apiKey, apiSecret);
+    } else if (exchange === 'binance') {
+      __binanceLastDebug = '';
+      positions = await fetchBinancePositions(apiKey, apiSecret);
+      if (__binanceLastDebug) {
+        // 브라우저 Network 탭에서 TP/SL 진단 가능. 민감정보 없음.
+        res.setHeader('x-binance-debug', __binanceLastDebug);
+      }
     }
 
     // accountId가 있으면 각 포지션에 주입

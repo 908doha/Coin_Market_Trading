@@ -118,23 +118,71 @@ function binanceSign(queryString: string, apiSecret: string): string {
 }
 
 async function fetchBinanceBalance(apiKey: string, apiSecret: string): Promise<Balance> {
-  const usdtKrw   = await getUsdtKrwRate();
-  const timestamp = Date.now();
-  const qs        = `timestamp=${timestamp}&recvWindow=10000`;
-  const signature = binanceSign(qs, apiSecret);
+  // 이 앱은 선물 중심이라 Futures(USDT-M) 잔고를 우선 조회.
+  // 권한 부족 등으로 실패하면 Spot 잔고로 fallback.
+  const usdtKrw = await getUsdtKrwRate();
+  let futuresErr: string | null = null;
 
+  // ── 1) USDT-M 선물 잔고 ────────────────────────────────────────────────────
+  try {
+    const ts        = Date.now();
+    const qs        = `timestamp=${ts}&recvWindow=10000`;
+    const signature = binanceSign(qs, apiSecret);
+    const r = await fetch(`https://fapi.binance.com/fapi/v2/account?${qs}&signature=${signature}`, {
+      headers: { 'X-MBX-APIKEY': apiKey },
+    });
+    if (r.ok) {
+      const d: any = await r.json();
+      const totalWallet  = parseFloat(d.totalWalletBalance       ?? '0') || 0;
+      const unrealPnl    = parseFloat(d.totalUnrealizedProfit    ?? '0') || 0;
+      const available    = parseFloat(d.availableBalance         ?? '0') || 0;
+      const totalUsdt    = totalWallet + unrealPnl;   // 미실현 포함 평가금
+      const investedUsdt = Math.max(0, totalUsdt - available);
+      const profitRate   = totalWallet > 0 ? (unrealPnl / totalWallet) * 100 : 0;
+
+      return {
+        total:           Math.round(totalUsdt    * usdtKrw),
+        available:       Math.round(available    * usdtKrw),
+        invested:        Math.round(investedUsdt * usdtKrw),
+        profitTotal:     Math.round(unrealPnl    * usdtKrw),
+        profitRate:      parseFloat(profitRate.toFixed(2)),
+        profitToday:     0,
+        profitTodayRate: 0,
+        totalUsd:        parseFloat(totalUsdt.toFixed(2)),
+        usdtKrw,
+      };
+    }
+    // 선물 응답 비정상 — 본문에서 Binance 에러 코드 추출
+    const text = await r.text().catch(() => '');
+    futuresErr = `${r.status} ${text.slice(0, 200)}`;
+    console.error('[binance:fapi/account]', futuresErr);
+  } catch (e: any) {
+    futuresErr = e?.message ?? String(e);
+    console.error('[binance:fapi/account] throw', futuresErr);
+  }
+
+  // ── 2) Spot 잔고 fallback ──────────────────────────────────────────────────
+  const ts        = Date.now();
+  const qs        = `timestamp=${ts}&recvWindow=10000`;
+  const signature = binanceSign(qs, apiSecret);
   const res = await fetch(`https://api.binance.com/api/v3/account?${qs}&signature=${signature}`, {
     headers: { 'X-MBX-APIKEY': apiKey },
   });
-  if (!res.ok) throw new Error(`Binance API error: ${res.status}`);
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    // -2015 = Invalid API-key, IP, or permissions for action
+    if (futuresErr?.includes('-2015') || txt.includes('-2015')) {
+      throw new Error('Binance API 키 권한 부족 — 키 설정에서 Futures(선물) 권한을 활성화해주세요');
+    }
+    throw new Error(`Binance API error: ${res.status} ${txt.slice(0, 200)}`);
+  }
   const data: any = await res.json();
 
   const balances: any[] = data.balances ?? [];
-  let totalUsdt    = 0;
+  let totalUsdt     = 0;
   let availableUsdt = 0;
-  let lockedUsdt   = 0;
+  let lockedUsdt    = 0;
 
-  // USDT 직접 보유
   const usdtBal = balances.find((b) => b.asset === 'USDT');
   if (usdtBal) {
     const free   = parseFloat(usdtBal.free);
@@ -144,7 +192,6 @@ async function fetchBinanceBalance(apiKey: string, apiSecret: string): Promise<B
     totalUsdt     += free + locked;
   }
 
-  // 다른 코인 가격 조회 (USDT 환산)
   const otherBalances = balances.filter(
     (b) => b.asset !== 'USDT' &&
            (parseFloat(b.free) + parseFloat(b.locked)) > 0,
@@ -168,14 +215,17 @@ async function fetchBinanceBalance(apiKey: string, apiSecret: string): Promise<B
     totalUsdt  += otherTotal;
   }
 
-  const totalKrw     = Math.round(totalUsdt     * usdtKrw);
-  const availableKrw = Math.round(availableUsdt * usdtKrw);
-  const investedKrw  = Math.round(lockedUsdt    * usdtKrw);
+  // Spot 도 비어있고 선물도 권한 없거나 실패 → 사용자에게 의미 있는 안내.
+  if (totalUsdt === 0 && futuresErr) {
+    throw new Error(
+      `Binance 잔고 조회 실패 — Spot 잔고 0, Futures 권한도 없음. 키 설정에서 Futures 권한을 활성화하거나 자산 위치를 확인해주세요. (futures: ${futuresErr.slice(0, 80)})`,
+    );
+  }
 
   return {
-    total:           totalKrw,
-    available:       availableKrw,
-    invested:        investedKrw,
+    total:           Math.round(totalUsdt     * usdtKrw),
+    available:       Math.round(availableUsdt * usdtKrw),
+    invested:        Math.round(lockedUsdt    * usdtKrw),
     profitTotal:     0,
     profitRate:      0,
     profitToday:     0,

@@ -10,10 +10,9 @@ import type { IctAnalysis } from '@/components/IctAnalysisCard';
 import { loadIctSnapshotByEntryTs, fetchIctSnapshotRemote } from '@/utils/ictSnapshot';
 import { loadPositionSnapshotByEntryTs } from '@/utils/positionSnapshot';
 import type { PricePoint } from '@/utils/priceHistory';
-import { formatKRW } from '@/utils/format';
+import { formatKRW, formatUsdPrice } from '@/utils/format';
 
-const fmt$ = (v: number) =>
-  `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fmt$ = formatUsdPrice;
 
 // ISO 문자열 → KST 표시 형식 ("2025.04.10 (목) 18:07")
 function formatKST(iso?: string): string {
@@ -57,7 +56,7 @@ export default function TradeDetail() {
     const to   = trade.exitAt  ? Math.floor(Date.parse(trade.exitAt)  / 1000) : 0;
     if (!from) return;
     const toParam = to > 0 ? `&to=${to}` : '';
-    fetch(`/api/candlesticks?contract=${contract}&from=${from}${toParam}`)
+    fetch(`/api/candlesticks?contract=${contract}&from=${from}${toParam}&_=${Date.now()}`)
       .then((r) => (r.ok ? r.json() : []))
       .then((pts: PricePoint[]) => { if (pts.length) setPricePoints(pts); })
       .catch(() => {});

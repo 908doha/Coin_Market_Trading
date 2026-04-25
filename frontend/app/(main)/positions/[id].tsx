@@ -4,7 +4,7 @@ import { PositionDetailSkeleton, AnimatedNumber } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { positionsService } from '@/services';
 import { useApi } from '@/hooks/useApi';
-import { formatKRW } from '@/utils/format';
+import { formatKRW, formatUsdPrice } from '@/utils/format';
 import { useAccounts } from '@/store/accounts';
 import { PositionDetailView } from '@/components/PositionDetailView';
 import type { IctAnalysis } from '@/components/IctAnalysisCard';
@@ -24,18 +24,27 @@ function parseEntryAtTs(s?: string): number | undefined {
   return undefined;
 }
 
-const fmt$ = (v: number) =>
-  `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fmt$ = formatUsdPrice;
 
 export default function PositionDetail() {
   const { id, from } = useLocalSearchParams<{ id: string; from?: string }>();
 
+  // 뒤로가기는 진입 경로(from) 기준으로 고정 목적지로만 이동한다.
+  // router.back() 을 무조건 호출하면 스택에 쌓인 이전 포지션 상세로 가는
+  // 회귀 버그(여러 번 재발)가 생기므로, router.navigate 로 지정 route 에
+  // pop 또는 push 시켜 결정론적으로 만든다.
   const handleBack = useCallback(() => {
     if (from === 'home') {
       router.navigate('/(main)/home');
-    } else {
-      router.back();
+      return;
     }
+    if (from === 'positions') {
+      router.navigate('/(main)/positions');
+      return;
+    }
+    // 기본값: 포지션 리스트. router.back() 사용 시 스택이 오염돼 있으면
+    // 엉뚱한 포지션 상세로 튀는 문제 발생.
+    router.navigate('/(main)/positions');
   }, [from]);
   const { data: cachedPosition, isLoading, error } = useApi(
     () => positionsService.getById(id),
@@ -83,7 +92,7 @@ export default function PositionDetail() {
     // entryAt 파싱 실패 시 최근 1시간 캔들로 fallback
     const from = entryTs || Math.floor(Date.now() / 1000) - 3600;
 
-    fetch(`/api/candlesticks?contract=${contract}&from=${from}`)
+    fetch(`/api/candlesticks?contract=${contract}&from=${from}&_=${Date.now()}`)
       .then((r) => (r.ok ? r.json() : []))
       .then((pts: PricePoint[]) => {
         if (Array.isArray(pts) && pts.length) setPricePoints(pts);

@@ -253,13 +253,37 @@ async function fetchBinancePositions(apiKey: string, apiSecret: string): Promise
     usdtKrw = t.trade_price;
   } catch {}
 
-  // /fapi/v2/positionRisk: 모든 심볼 (열린 + 닫힌). 열린 포지션만 필터.
-  const all = await binanceFapiGet(apiKey, apiSecret, '/fapi/v2/positionRisk') as any[];
-  const open = (Array.isArray(all) ? all : []).filter((p) => parseFloat(p.positionAmt ?? '0') !== 0);
+  // 포지션 + 모든 열린 주문 병렬 조회
+  // /fapi/v1/openOrders 는 심볼 미지정 시 모든 심볼 한 번에 반환 (rate weight 40).
+  const [posAll, openOrders] = await Promise.all([
+    binanceFapiGet(apiKey, apiSecret, '/fapi/v2/positionRisk') as Promise<any[]>,
+    binanceFapiGet(apiKey, apiSecret, '/fapi/v1/openOrders')   as Promise<any[]>,
+  ]);
+  const open = (Array.isArray(posAll) ? posAll : []).filter((p) => parseFloat(p.positionAmt ?? '0') !== 0);
   if (!open.length) return [];
 
-  // 진입 시각 추정용: /fapi/v1/userTrades 는 심볼당 호출이라 비쌈 → updateTime 사용.
-  // (Binance 는 positionRisk 응답에 updateTime 을 ms 로 줌)
+  // 심볼별 TP/SL 매핑.
+  // Binance 주문 type:
+  //   STOP / STOP_MARKET / TRAILING_STOP_MARKET → SL 후보
+  //   TAKE_PROFIT / TAKE_PROFIT_MARKET          → TP 후보
+  // stopPrice 가 트리거가. 같은 심볼에 여러 개면 가장 최근(updateTime 큰) 값 채택.
+  type TpSl = { tp: number | null; sl: number | null; tpTs: number; slTs: number };
+  const tpSlMap = new Map<string, TpSl>();
+  for (const o of (Array.isArray(openOrders) ? openOrders : [])) {
+    const sym  = String(o.symbol ?? '');
+    const type = String(o.type   ?? '').toUpperCase();
+    const stop = parseFloat(o.stopPrice ?? '0') || 0;
+    if (!sym || stop <= 0) continue;
+    const ts = Number(o.updateTime ?? o.time ?? 0);
+    const cur = tpSlMap.get(sym) ?? { tp: null, sl: null, tpTs: 0, slTs: 0 };
+    if (type === 'TAKE_PROFIT' || type === 'TAKE_PROFIT_MARKET') {
+      if (ts >= cur.tpTs) { cur.tp = stop; cur.tpTs = ts; }
+    } else if (type === 'STOP' || type === 'STOP_MARKET' || type === 'TRAILING_STOP_MARKET') {
+      if (ts >= cur.slTs) { cur.sl = stop; cur.slTs = ts; }
+    }
+    tpSlMap.set(sym, cur);
+  }
+
   return open.map((p) => {
     const symbol     = String(p.symbol ?? '');
     const coin       = symbol.replace(/USDT$/, '').replace(/USDC$/, '');
@@ -281,17 +305,40 @@ async function fetchBinancePositions(apiKey: string, apiSecret: string): Promise
     const updateTimeMs = Number(p.updateTime ?? 0);
     const entryAt      = updateTimeMs > 0 ? new Date(updateTimeMs).toISOString() : new Date().toISOString();
 
-    // 보유기간 텍스트 (Gate 와 동일 포맷 가깝게)
     const elapsedSec = updateTimeMs > 0 ? (Date.now() - updateTimeMs) / 1000 : 0;
     const holdingPeriod =
       elapsedSec < 3600           ? `${Math.max(1, Math.floor(elapsedSec / 60))}분`        :
       elapsedSec < 86400          ? `${Math.floor(elapsedSec / 3600)}시간`                 :
                                     `${Math.floor(elapsedSec / 86400)}일`;
 
-    // 위험도 1-5 (Gate 와 동일하게 손익률 절댓값 기반 단순 분류)
     const r = Math.abs(profitRate);
     const riskLevel: 1 | 2 | 3 | 4 | 5 =
       r < 5 ? 1 : r < 15 ? 2 : r < 30 ? 3 : r < 60 ? 4 : 5;
+
+    // 주문 유형으로 분류한 결과를 진입가·방향 기준으로 한 번 더 검증.
+    // Long  → SL < entry < TP, Short → TP < entry < SL.
+    // 검증 실패 시(주문 type 이 의도와 반대로 등록된 케이스) 위치 기반 재배치.
+    const orders = tpSlMap.get(symbol);
+    let finalTp: number | null = orders?.tp ?? null;
+    let finalSl: number | null = orders?.sl ?? null;
+    if (entryPrice > 0 && (finalTp || finalSl)) {
+      const candidates = [finalTp, finalSl].filter((v): v is number => !!v && v > 0);
+      if (candidates.length === 2) {
+        const [a, b] = candidates;
+        const hi = Math.max(a, b), lo = Math.min(a, b);
+        finalTp = isLong ? hi : lo;
+        finalSl = isLong ? lo : hi;
+      } else if (candidates.length === 1) {
+        const v = candidates[0];
+        if (isLong) {
+          if (v > entryPrice)      { finalTp = v; finalSl = null; }
+          else if (v < entryPrice) { finalSl = v; finalTp = null; }
+        } else {
+          if (v < entryPrice)      { finalTp = v; finalSl = null; }
+          else if (v > entryPrice) { finalSl = v; finalTp = null; }
+        }
+      }
+    }
 
     return {
       id:            symbol + '_' + (updateTimeMs || Date.now()),
@@ -313,6 +360,8 @@ async function fetchBinancePositions(apiKey: string, apiSecret: string): Promise
       liqPrice,
       size:          Math.abs(size),
       usdtKrw,
+      ...(finalTp ? { targetPrice: finalTp } : {}),
+      ...(finalSl ? { stopLoss:    finalSl } : {}),
     } as Position;
   });
 }

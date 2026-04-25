@@ -19,6 +19,7 @@ import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType, ExchangeAc
 import { tradesService } from '@/services';
 import type { Trade } from '@/services/trades.service';
 import { formatKRW, formatUsdPrice } from '@/utils/format';
+import { useBlurOnOpen } from '@/hooks/useBlurOnOpen';
 import type { Balance } from '@/services/account.service';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -123,6 +124,7 @@ function AccountBottomSheet({
 }) {
   const translateY = useSharedValue(600);
   const [mounted, setMounted] = React.useState(false);
+  useBlurOnOpen(visible);
 
   React.useEffect(() => {
     if (visible) {

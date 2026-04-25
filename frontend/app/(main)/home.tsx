@@ -9,6 +9,7 @@ import { colors, spacing, borderRadius } from '@/design-system/tokens';
 import { accountService, tradesService } from '@/services';
 import type { Trade } from '@/services';
 import { useApi } from '@/hooks/useApi';
+import { useBlurOnOpen } from '@/hooks/useBlurOnOpen';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeAccount, ExchangeType } from '@/store/accounts';
 import type { Balance } from '@/services';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
@@ -845,6 +846,7 @@ export default function Home() {
   const [showAccPicker, setShowAccPicker]         = useState(false);
   const [dropPos, setDropPos]                     = useState({ top: 0, right: 0 });
   const dropBtnRef                                = useRef<View>(null);
+  useBlurOnOpen(showAccPicker);
   const { accounts, balances, balanceErrors, totalBalance, balancesLoading, positions, historyVersion } = useAccounts();
 
   const { data: singleBalance, isLoading: singleLoading } = useApi(

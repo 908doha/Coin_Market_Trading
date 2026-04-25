@@ -17,6 +17,7 @@ import { colors } from '@/design-system/tokens';
 import { formatKRW, formatKRWSigned, formatRate } from '@/utils/format';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType, ExchangeAccount } from '@/store/accounts';
 import type { Balance } from '@/services/account.service';
+import { useBlurOnOpen } from '@/hooks/useBlurOnOpen';
 
 // ── 거래소 로고 ───────────────────────────────────────────────────────────────
 function ExchangeLogo({ exchange, size = 40 }: { exchange: ExchangeType; size?: number }) {
@@ -79,6 +80,7 @@ function AccountBottomSheet({
 }) {
   const translateY = useSharedValue(600);
   const [mounted, setMounted] = React.useState(false);
+  useBlurOnOpen(visible);
 
   React.useEffect(() => {
     if (visible) {

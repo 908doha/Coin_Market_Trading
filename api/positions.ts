@@ -229,6 +229,94 @@ async function fetchGatePositions(apiKey: string, apiSecret: string): Promise<Po
     });
 }
 
+// ── Binance USDT-M Futures ───────────────────────────────────────────────────
+
+function binanceSign(query: string, apiSecret: string): string {
+  return crypto.createHmac('sha256', apiSecret).update(query).digest('hex');
+}
+
+async function binanceFapiGet(apiKey: string, apiSecret: string, path: string): Promise<any> {
+  const ts  = Date.now();
+  const qs  = `timestamp=${ts}&recvWindow=10000`;
+  const sig = binanceSign(qs, apiSecret);
+  const url = `https://fapi.binance.com${path}?${qs}&signature=${sig}`;
+  const res = await fetch(url, { headers: { 'X-MBX-APIKEY': apiKey, Accept: 'application/json' } });
+  if (!res.ok) throw new Error(`Binance ${path} error ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+async function fetchBinancePositions(apiKey: string, apiSecret: string): Promise<Position[]> {
+  // 환율
+  let usdtKrw = 1350;
+  try {
+    const [t] = await (await fetch('https://api.upbit.com/v1/ticker?markets=KRW-USDT')).json();
+    usdtKrw = t.trade_price;
+  } catch {}
+
+  // /fapi/v2/positionRisk: 모든 심볼 (열린 + 닫힌). 열린 포지션만 필터.
+  const all = await binanceFapiGet(apiKey, apiSecret, '/fapi/v2/positionRisk') as any[];
+  const open = (Array.isArray(all) ? all : []).filter((p) => parseFloat(p.positionAmt ?? '0') !== 0);
+  if (!open.length) return [];
+
+  // 진입 시각 추정용: /fapi/v1/userTrades 는 심볼당 호출이라 비쌈 → updateTime 사용.
+  // (Binance 는 positionRisk 응답에 updateTime 을 ms 로 줌)
+  return open.map((p) => {
+    const symbol     = String(p.symbol ?? '');
+    const coin       = symbol.replace(/USDT$/, '').replace(/USDC$/, '');
+    const size       = parseFloat(p.positionAmt ?? '0');
+    const isLong     = size > 0;
+    const entryPrice = parseFloat(p.entryPrice ?? '0') || 0;
+    const markPrice  = parseFloat(p.markPrice  ?? '0') || 0;
+    const leverage   = parseInt(p.leverage     ?? '1', 10) || 1;
+    const liqPrice   = parseFloat(p.liquidationPrice ?? '0') || 0;
+    const unrealUsdt = parseFloat(p.unRealizedProfit ?? '0') || 0;
+
+    const notionalUsdt = Math.abs(size) * entryPrice;
+    const marginUsdt   = leverage > 0 ? notionalUsdt / leverage : notionalUsdt;
+    const profitKrw    = Math.round(unrealUsdt * usdtKrw);
+    const marginKrw    = Math.round(marginUsdt * usdtKrw);
+    const notionalKrw  = Math.round(notionalUsdt * usdtKrw);
+    const profitRate   = marginUsdt > 0 ? (unrealUsdt / marginUsdt) * 100 : 0;
+
+    const updateTimeMs = Number(p.updateTime ?? 0);
+    const entryAt      = updateTimeMs > 0 ? new Date(updateTimeMs).toISOString() : new Date().toISOString();
+
+    // 보유기간 텍스트 (Gate 와 동일 포맷 가깝게)
+    const elapsedSec = updateTimeMs > 0 ? (Date.now() - updateTimeMs) / 1000 : 0;
+    const holdingPeriod =
+      elapsedSec < 3600           ? `${Math.max(1, Math.floor(elapsedSec / 60))}분`        :
+      elapsedSec < 86400          ? `${Math.floor(elapsedSec / 3600)}시간`                 :
+                                    `${Math.floor(elapsedSec / 86400)}일`;
+
+    // 위험도 1-5 (Gate 와 동일하게 손익률 절댓값 기반 단순 분류)
+    const r = Math.abs(profitRate);
+    const riskLevel: 1 | 2 | 3 | 4 | 5 =
+      r < 5 ? 1 : r < 15 ? 2 : r < 30 ? 3 : r < 60 ? 4 : 5;
+
+    return {
+      id:            symbol + '_' + (updateTimeMs || Date.now()),
+      symbol:        coin + '/USDT',
+      coin,
+      direction:     isLong ? 'Long' : 'Short',
+      amount:        marginKrw,
+      profit:        profitKrw,
+      profitRate:    parseFloat(profitRate.toFixed(2)),
+      entryPrice,
+      markPrice,
+      leverage,
+      currentPrice:  markPrice,
+      currentValue:  notionalKrw,
+      weight:        100,
+      entryAt,
+      holdingPeriod,
+      riskLevel,
+      liqPrice,
+      size:          Math.abs(size),
+      usdtKrw,
+    } as Position;
+  });
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method === 'OPTIONS') { res.status(200).end(); return; }
   if (req.method !== 'POST')   { res.status(405).json({ error: 'Method not allowed' }); return; }
@@ -244,6 +332,8 @@ export default async function handler(req: any, res: any) {
 
     if (exchange === 'gate') {
       positions = await fetchGatePositions(apiKey, apiSecret);
+    } else if (exchange === 'binance') {
+      positions = await fetchBinancePositions(apiKey, apiSecret);
     }
 
     // accountId가 있으면 각 포지션에 주입

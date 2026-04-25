@@ -130,18 +130,41 @@ class GateClient {
   }
 
   /**
-   * 선물 주문 (시장가)
+   * 선물 주문 (시장가).
+   *
+   * @param {string} contract - 페어 (e.g. 'BTC_USDT')
+   * @param {number} size - 계약 수량 (절댓값, 부호는 side 로 결정). autoSize 사용 시 무시됨
+   * @param {string} side - 'buy' | 'sell' (로그 및 autoSize=null 일 때 size 부호 결정)
+   * @param {Object} [opts]
+   * @param {boolean} [opts.reduceOnly=false] - reduce-only 주문 (Hedge Mode 청산 필수)
+   * @param {'close_long'|'close_short'|null} [opts.autoSize=null] - size=0 + auto_size 청산 방식
+   * @returns {Promise<Object>} Gate.io order response
    */
-  async createOrder(contract, size, side) {
+  async createOrder(contract, size, side, opts = {}) {
+    const { reduceOnly = false, autoSize = null } = opts;
     try {
       const order = new GateApi.FuturesOrder();
       order.contract = contract;
-      order.size = side === 'buy' ? Math.abs(size) : -Math.abs(size);
+
+      if (autoSize) {
+        // Hedge Mode 청산: size=0 + auto_size (거래소가 전체 청산 처리)
+        order.size = 0;
+        order.autoSize = autoSize;
+      } else {
+        order.size = side === 'buy' ? Math.abs(size) : -Math.abs(size);
+      }
+
       order.price = '0'; // 시장가
       order.tif = 'ioc'; // Immediate or Cancel
 
+      if (reduceOnly) {
+        order.reduceOnly = true;
+      }
+
       const { body } = await this.futuresApi.createFuturesOrder(SETTLE, order);
-      logger.info(`주문 체결: ${side} ${contract} size=${size} id=${body.id}`);
+      const sizeLabel = autoSize ? autoSize : `size=${size}`;
+      const reduceLabel = reduceOnly ? ' [reduce_only]' : '';
+      logger.info(`주문 체결: ${side} ${contract} ${sizeLabel}${reduceLabel} id=${body.id}`);
       return body;
     } catch (err) {
       logger.error(`주문 실패: ${err.message}`);
@@ -233,7 +256,10 @@ class GateClient {
   }
 
   /**
-   * 포지션 청산 (전량)
+   * 포지션 시장가 청산 (Hedge Mode 안전).
+   *
+   * size=0 + auto_size + reduce_only 방식으로 Hedge Mode 에서
+   * 신규 반대 포지션이 생성되지 않도록 보장한다.
    */
   async closePosition(contract) {
     try {
@@ -242,9 +268,12 @@ class GateClient {
         logger.info(`청산할 포지션 없음: ${contract}`);
         return null;
       }
-      // 반대 방향으로 같은 수량 시장가 주문
+      const autoSize = position.size > 0 ? 'close_long' : 'close_short';
       const closeSide = position.size > 0 ? 'sell' : 'buy';
-      return await this.createOrder(contract, Math.abs(position.size), closeSide);
+      return await this.createOrder(contract, 0, closeSide, {
+        reduceOnly: true,
+        autoSize,
+      });
     } catch (err) {
       logger.error(`포지션 청산 실패: ${err.message}`);
       throw err;

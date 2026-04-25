@@ -245,6 +245,10 @@ async function binanceFapiGet(apiKey: string, apiSecret: string, path: string): 
   return res.json();
 }
 
+// 마지막 Binance fetchBinancePositions 호출 시 진단 정보. 응답 헤더로 노출해
+// 사용자가 브라우저 Network 탭만 봐도 TP/SL 매칭 상태 확인 가능.
+let __binanceLastDebug: string = '';
+
 async function fetchBinancePositions(apiKey: string, apiSecret: string): Promise<Position[]> {
   // 환율
   let usdtKrw = 1350;
@@ -256,10 +260,12 @@ async function fetchBinancePositions(apiKey: string, apiSecret: string): Promise
   // 포지션 + 모든 열린 주문 병렬 조회
   // /fapi/v1/openOrders 는 심볼 미지정 시 모든 심볼 한 번에 반환 (rate weight 40).
   // 주문 조회 권한이 없거나 실패해도 포지션 조회는 계속 진행 (TP/SL 만 비워서 표시).
+  let openOrdersErr: string | null = null;
   const [posAll, openOrders] = await Promise.all([
     binanceFapiGet(apiKey, apiSecret, '/fapi/v2/positionRisk') as Promise<any[]>,
     binanceFapiGet(apiKey, apiSecret, '/fapi/v1/openOrders').catch((e) => {
-      console.error('[binance:fapi/openOrders]', e?.message ?? e);
+      openOrdersErr = e?.message ?? String(e);
+      console.error('[binance:fapi/openOrders]', openOrdersErr);
       return [] as any[];
     }) as Promise<any[]>,
   ]);
@@ -267,16 +273,19 @@ async function fetchBinancePositions(apiKey: string, apiSecret: string): Promise
   if (!open.length) return [];
 
   // 디버그: 받아온 주문 type 분포 (TP/SL 안 잡힐 때 원인 파악용)
-  if (Array.isArray(openOrders) && openOrders.length) {
-    const summary: Record<string, number> = {};
-    for (const o of openOrders) {
-      const t = String(o.type ?? '_NONE');
-      summary[t] = (summary[t] ?? 0) + 1;
-    }
-    console.log('[binance:openOrders]', openOrders.length, summary);
-  } else {
-    console.log('[binance:openOrders] empty');
+  const typeSummary: Record<string, number> = {};
+  for (const o of (Array.isArray(openOrders) ? openOrders : [])) {
+    const t = String(o.type ?? '_NONE');
+    typeSummary[t] = (typeSummary[t] ?? 0) + 1;
   }
+  const ordersCount = Array.isArray(openOrders) ? openOrders.length : 0;
+  console.log('[binance:openOrders]', ordersCount, typeSummary, openOrdersErr ? `(err: ${openOrdersErr.slice(0, 100)})` : '');
+  __binanceLastDebug = JSON.stringify({
+    positions: open.length,
+    orders:    ordersCount,
+    types:     typeSummary,
+    err:       openOrdersErr ? openOrdersErr.slice(0, 200) : undefined,
+  });
 
   // 심볼+포지션사이드별 TP/SL 매핑.
   // Binance 모드:
@@ -409,7 +418,12 @@ export default async function handler(req: any, res: any) {
     if (exchange === 'gate') {
       positions = await fetchGatePositions(apiKey, apiSecret);
     } else if (exchange === 'binance') {
+      __binanceLastDebug = '';
       positions = await fetchBinancePositions(apiKey, apiSecret);
+      if (__binanceLastDebug) {
+        // 브라우저 Network 탭에서 TP/SL 진단 가능. 민감정보 없음.
+        res.setHeader('x-binance-debug', __binanceLastDebug);
+      }
     }
 
     // accountId가 있으면 각 포지션에 주입

@@ -255,33 +255,55 @@ async function fetchBinancePositions(apiKey: string, apiSecret: string): Promise
 
   // 포지션 + 모든 열린 주문 병렬 조회
   // /fapi/v1/openOrders 는 심볼 미지정 시 모든 심볼 한 번에 반환 (rate weight 40).
+  // 주문 조회 권한이 없거나 실패해도 포지션 조회는 계속 진행 (TP/SL 만 비워서 표시).
   const [posAll, openOrders] = await Promise.all([
     binanceFapiGet(apiKey, apiSecret, '/fapi/v2/positionRisk') as Promise<any[]>,
-    binanceFapiGet(apiKey, apiSecret, '/fapi/v1/openOrders')   as Promise<any[]>,
+    binanceFapiGet(apiKey, apiSecret, '/fapi/v1/openOrders').catch((e) => {
+      console.error('[binance:fapi/openOrders]', e?.message ?? e);
+      return [] as any[];
+    }) as Promise<any[]>,
   ]);
   const open = (Array.isArray(posAll) ? posAll : []).filter((p) => parseFloat(p.positionAmt ?? '0') !== 0);
   if (!open.length) return [];
 
-  // 심볼별 TP/SL 매핑.
-  // Binance 주문 type:
+  // 디버그: 받아온 주문 type 분포 (TP/SL 안 잡힐 때 원인 파악용)
+  if (Array.isArray(openOrders) && openOrders.length) {
+    const summary: Record<string, number> = {};
+    for (const o of openOrders) {
+      const t = String(o.type ?? '_NONE');
+      summary[t] = (summary[t] ?? 0) + 1;
+    }
+    console.log('[binance:openOrders]', openOrders.length, summary);
+  } else {
+    console.log('[binance:openOrders] empty');
+  }
+
+  // 심볼+포지션사이드별 TP/SL 매핑.
+  // Binance 모드:
+  //   One-way: positionSide='BOTH', side=BUY/SELL
+  //   Hedge:   positionSide='LONG'/'SHORT' (한 심볼에 양방향 동시 가능)
+  // 주문 type:
   //   STOP / STOP_MARKET / TRAILING_STOP_MARKET → SL 후보
   //   TAKE_PROFIT / TAKE_PROFIT_MARKET          → TP 후보
-  // stopPrice 가 트리거가. 같은 심볼에 여러 개면 가장 최근(updateTime 큰) 값 채택.
+  // 같은 키에 여러 개면 가장 최근(updateTime 큰) 값 채택.
   type TpSl = { tp: number | null; sl: number | null; tpTs: number; slTs: number };
+  const keyOf = (sym: string, posSide: string) => `${sym}|${posSide || 'BOTH'}`;
   const tpSlMap = new Map<string, TpSl>();
   for (const o of (Array.isArray(openOrders) ? openOrders : [])) {
-    const sym  = String(o.symbol ?? '');
-    const type = String(o.type   ?? '').toUpperCase();
-    const stop = parseFloat(o.stopPrice ?? '0') || 0;
+    const sym     = String(o.symbol ?? '');
+    const type    = String(o.type   ?? '').toUpperCase();
+    const posSide = String(o.positionSide ?? 'BOTH').toUpperCase();
+    const stop    = parseFloat(o.stopPrice ?? '0') || 0;
     if (!sym || stop <= 0) continue;
-    const ts = Number(o.updateTime ?? o.time ?? 0);
-    const cur = tpSlMap.get(sym) ?? { tp: null, sl: null, tpTs: 0, slTs: 0 };
+    const ts  = Number(o.updateTime ?? o.time ?? 0);
+    const k   = keyOf(sym, posSide);
+    const cur = tpSlMap.get(k) ?? { tp: null, sl: null, tpTs: 0, slTs: 0 };
     if (type === 'TAKE_PROFIT' || type === 'TAKE_PROFIT_MARKET') {
       if (ts >= cur.tpTs) { cur.tp = stop; cur.tpTs = ts; }
     } else if (type === 'STOP' || type === 'STOP_MARKET' || type === 'TRAILING_STOP_MARKET') {
       if (ts >= cur.slTs) { cur.sl = stop; cur.slTs = ts; }
     }
-    tpSlMap.set(sym, cur);
+    tpSlMap.set(k, cur);
   }
 
   return open.map((p) => {
@@ -318,7 +340,12 @@ async function fetchBinancePositions(apiKey: string, apiSecret: string): Promise
     // 주문 유형으로 분류한 결과를 진입가·방향 기준으로 한 번 더 검증.
     // Long  → SL < entry < TP, Short → TP < entry < SL.
     // 검증 실패 시(주문 type 이 의도와 반대로 등록된 케이스) 위치 기반 재배치.
-    const orders = tpSlMap.get(symbol);
+    // hedge 모드: positionSide=LONG|SHORT 매칭. one-way: BOTH.
+    const posSide = String(p.positionSide ?? 'BOTH').toUpperCase();
+    // hedge 모드여도 일부 사용자가 BOTH 키로 주문을 걸어둔 경우 대비해 fallback.
+    const orders =
+      tpSlMap.get(keyOf(symbol, posSide)) ??
+      (posSide !== 'BOTH' ? tpSlMap.get(keyOf(symbol, 'BOTH')) : undefined);
     let finalTp: number | null = orders?.tp ?? null;
     let finalSl: number | null = orders?.sl ?? null;
     if (entryPrice > 0 && (finalTp || finalSl)) {

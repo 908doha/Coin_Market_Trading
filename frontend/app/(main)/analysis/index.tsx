@@ -363,7 +363,7 @@ export default function Analysis() {
   const [tickers, setTickers]   = useState<Ticker[]>([]);
   const [tickersLoading, setTickersLoading] = useState(true);
   const [search,  setSearch]    = useState('');
-  const [sortBy,  setSortBy]    = useState<'volume' | 'ict'>('volume');
+  const [sortBy,  setSortBy]    = useState<'volume' | 'ict'>('ict');
   // contract → { score, direction }. undefined = 미조회, null = 실패
   const [ictScores, setIctScores] = useState<Record<string, { score: number; direction: 'LONG' | 'SHORT' | null } | null>>({});
   const [ictScanProgress, setIctScanProgress] = useState<{ done: number; total: number } | null>(null);
@@ -397,7 +397,8 @@ export default function Analysis() {
   const kelly = useMemo(() => computeKelly(trades), [trades]);
 
   // 시장 스캔 종목 로드 (서버: Gate.io tickers 전량 → fallback: CoinGecko top 50)
-  useEffect(() => {
+  // bust 가 증가하면 캐시 우회용 query string 추가해 강제 재조회.
+  const reloadTickers = useCallback(async (bust = 0) => {
     const COINGECKO =
       'https://api.coingecko.com/api/v3/coins/markets' +
       '?vs_currency=usd&order=market_cap_desc&per_page=50&page=1' +
@@ -415,24 +416,32 @@ export default function Analysis() {
         fundingRate:  0,
       }));
 
-    // 서버 프록시 먼저, 실패 시 CoinGecko 직접 호출
-    fetch(`${API_BASE}/api/market-scan`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (Array.isArray(data) && data.length) {
-          setTickers(data);
-        } else {
-          throw new Error('empty');
-        }
-      })
-      .catch(() =>
-        fetch(COINGECKO)
-          .then((r) => r.json())
-          .then((coins: any[]) => Array.isArray(coins) && setTickers(mapCoins(coins)))
-          .catch(() => {}),
-      )
-      .finally(() => setTickersLoading(false));
+    setTickersLoading(true);
+    try {
+      const url = bust > 0 ? `${API_BASE}/api/market-scan?_=${bust}` : `${API_BASE}/api/market-scan`;
+      const r = await fetch(url, bust > 0 ? { cache: 'no-store' } : undefined);
+      const data = await r.json();
+      if (Array.isArray(data) && data.length) { setTickers(data); return; }
+      throw new Error('empty');
+    } catch {
+      try {
+        const r = await fetch(COINGECKO);
+        const coins = await r.json();
+        if (Array.isArray(coins)) setTickers(mapCoins(coins));
+      } catch { /* 무시 */ }
+    } finally {
+      setTickersLoading(false);
+    }
   }, []);
+
+  useEffect(() => { reloadTickers(); }, [reloadTickers]);
+
+  // 새로고침: 티커 + ICT 점수 캐시 모두 초기화 → useEffect 가 자동 재스캔
+  const refreshScan = useCallback(() => {
+    setIctScores({});
+    setIctScanProgress(null);
+    reloadTickers(Date.now());
+  }, [reloadTickers]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toUpperCase();
@@ -619,7 +628,7 @@ export default function Analysis() {
                 </Svg>
               </Pressable>
 
-              {/* 정렬 토글 — CurrencyToggle 을 재사용해 UI 통일 */}
+              {/* 정렬 토글 + 새로고침 — CurrencyToggle 을 재사용해 UI 통일 */}
               {scanExpanded && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   {ictScanProgress && sortBy === 'ict' && (
@@ -634,6 +643,22 @@ export default function Analysis() {
                     rightLabel="ICT"
                     pillWidth={54}
                   />
+                  <Pressable
+                    onPress={refreshScan}
+                    hitSlop={8}
+                    style={st.refreshBtn}
+                    disabled={!!ictScanProgress || tickersLoading}
+                  >
+                    <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                      <Path
+                        d="M21 12a9 9 0 1 1-3.5-7.1M21 4v5h-5"
+                        stroke={(ictScanProgress || tickersLoading) ? '#C7C7CC' : '#246CF9'}
+                        strokeWidth="2.2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </Svg>
+                  </Pressable>
                 </View>
               )}
             </View>
@@ -733,6 +758,7 @@ const st = StyleSheet.create({
   scanTitle:    { fontSize: 17, fontWeight: '700', color: '#191919' },
 
   sortBtnProgress: { fontSize: 11, color: colors.text.tertiary, fontWeight: '600' },
+  refreshBtn:   { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg.elevated, borderWidth: 1, borderColor: colors.border.default },
 
   searchWrap:  { marginHorizontal: 20, marginBottom: 8 },
   searchInput: {

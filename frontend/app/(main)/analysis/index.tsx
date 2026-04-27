@@ -264,14 +264,14 @@ function formatVol(usd: number): string {
 // React.memo 로 감싸 폴링/state 변화 시 prop 미변경 row 의 불필요한 재렌더를 차단.
 // onAnalyze/contract 분리해 부모 매 렌더마다 새 arrow 가 만들어지지 않도록 함 (memo 효과 유지).
 const TickerRow = React.memo(function TickerRowImpl({
-  ticker, idx, onAnalyze, isLast, ictScore, ictDirection, risky,
+  ticker, idx, onAnalyze, isLast, ictScore, ictDirection, pillars,
 }: {
   ticker: Ticker; idx: number;
   onAnalyze: (contract: string) => void;
   isLast: boolean;
   ictScore?:     number | null;
   ictDirection?: 'LONG' | 'SHORT' | null;
-  risky?:        boolean;
+  pillars?:      { bias: boolean; poi: boolean; sweep: boolean; mss: boolean; rr: boolean } | null;
 }) {
   const onPress = React.useCallback(() => onAnalyze(ticker.contract), [onAnalyze, ticker.contract]);
   const changeColor = ticker.change24h > 0
@@ -302,7 +302,13 @@ const TickerRow = React.memo(function TickerRowImpl({
       <View style={{ flex: 1 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <Text style={tr.coin}>{ticker.coin}</Text>
-          {risky && <Text style={tr.riskMark}>⚠️</Text>}
+          {pillars && (
+            <View style={tr.pillars}>
+              {(['bias', 'poi', 'sweep', 'mss', 'rr'] as const).map((p) => (
+                <View key={p} style={[tr.pillarDot, pillars[p] ? tr.pillarOn : tr.pillarOff]} />
+              ))}
+            </View>
+          )}
           {ticker.name && <Text style={tr.name} numberOfLines={1}>{ticker.name}</Text>}
         </View>
         <Text style={tr.price}>
@@ -355,7 +361,10 @@ const tr = StyleSheet.create({
   change:     { fontSize: 14, fontWeight: '600' },
   chip:       { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, minWidth: 28, alignItems: 'center' },
   chipText:   { fontSize: 12, fontWeight: '700' },
-  riskMark:   { fontSize: 12 },
+  pillars:    { flexDirection: 'row', gap: 3, alignItems: 'center' },
+  pillarDot:  { width: 6, height: 6, borderRadius: 3 },
+  pillarOn:   { backgroundColor: '#1AC24E' },   // 통과 = 녹색
+  pillarOff:  { backgroundColor: '#E5E5EA' },   // 미통과 = 옅은 회색
 });
 
 // ─── 메인 ─────────────────────────────────────────────────────────────────────
@@ -374,13 +383,17 @@ export default function Analysis() {
   const sortBtnRef = React.useRef<View>(null);
   const [sortMenuPos, setSortMenuPos] = useState({ top: 0, right: 0 });
   useBlurOnOpen(sortMenuOpen);
-  // contract → { score, direction, signal, risky }. undefined = 미조회, null = 실패
+  // contract → { score, direction, signal, pillars, passCount }. undefined = 미조회, null = 실패
+  // ICT 5-Pillar 게이트 — 안정적 진입을 위해 모두 충족하는 것이 이상.
+  // bias: HTF 방향 명확 / poi: HTF POI 진입 중 / sweep: 유동성 sweep 발생
+  // mss : MTF 구조 전환 / rr : R:R ≥ 2 + SL 미메움 FVG 밖
+  type Pillars = { bias: boolean; poi: boolean; sweep: boolean; mss: boolean; rr: boolean };
   const [ictScores, setIctScores] = useState<Record<string, {
-    score:       number;
-    direction:   'LONG' | 'SHORT' | null;   // htf 추세 (호환)
-    signal:      'long' | 'short' | null;   // 종합 신호
-    risky:       boolean;
-    riskReasons: string[];
+    score:     number;
+    direction: 'LONG' | 'SHORT' | null;   // htf 추세 (호환)
+    signal:    'long' | 'short' | null;   // 종합 신호
+    pillars:   Pillars;
+    passCount: number;                    // 0..5
   } | null>>({});
   const [ictScanProgress, setIctScanProgress] = useState<{ done: number; total: number } | null>(null);
 
@@ -495,37 +508,46 @@ export default function Analysis() {
     let done      = 0;
     setIctScanProgress({ done: 0, total: targets.length });
 
-    // ICT 정통 시퀀스 위반 / SL 위치 위태로움 / 점수 낮음 등 위험 신호 판정.
-    const isRisky = (d: any): { risky: boolean; reasons: string[] } => {
-      const reasons: string[] = [];
-      const sig    = d?.summary?.signal;        // 'long' | 'short' | null
-      const sl     = d?.summary?.sl as number | null;
-      const entry  = d?.summary?.entry as number | null;
-      const score  = typeof d?.score === 'number' ? d.score : 0;
+    // ICT 정통 5-Pillar 평가. 안정적 진입을 위해 충족해야 하는 5가지 게이트.
+    // 각 항목 boolean → 5개 점으로 시각화. 0~5 통과 카운트로 등급 표시.
+    const evaluatePillars = (d: any): { pillars: Pillars; passCount: number } => {
+      const sig  = d?.summary?.signal as string | null;     // 'long' | 'short' | null
+      const dir  = d?.htf?.direction  as string | null;     // 'BULLISH' | 'BEARISH' | null
+      const sl   = d?.summary?.sl     as number | null;
+      const rr   = parseFloat(d?.summary?.rr ?? '0') || 0;
 
-      // 0) 신호 미발생 — 진입 자격 부족 자체가 위험. (사용자 입장에선 "이 종목은 지금 트레이드 X")
-      if (!sig) {
-        reasons.push('no_signal');
-        return { risky: true, reasons };
-      }
+      // 1) HTF Bias 확정 — 방향 우위(edge)
+      const bias = dir === 'BULLISH' || dir === 'BEARISH';
 
-      // 1) 점수가 낮음 (B 미만) — 셋업 강도 부족
-      if (score < 55) reasons.push('low_score');
+      // 2) POI 진입 중 — 현재가가 HTF Order Block / FVG 안
+      const poi = d?.htf?.inPOI === true;
 
-      // 2) MTF MSS 부재 — HTF POI → MTF MSS → LTF Confirmation 시퀀스 결함
-      if (d?.mtf?.mss?.found === false) reasons.push('no_mtf_mss');
+      // 3) Liquidity Sweep — bias 방향과 정합되는 sweep 또는 임의 session sweep
+      //    BULLISH 진입은 PDL/세션 low sweep 후 반등이 정통, BEARISH 는 PDH sweep
+      const pdhSweep = d?.htf?.pdhSweep === true;
+      const pdlSweep = d?.htf?.pdlSweep === true;
+      const anySessionSweep = Array.isArray(d?.sessions) && d.sessions.some((s: any) => s?.sweep);
+      const directionalSweep =
+        (dir === 'BEARISH' && pdhSweep) ||
+        (dir === 'BULLISH' && pdlSweep);
+      const sweep = directionalSweep || anySessionSweep;
 
-      // 3) SL 이 동일 방향 미메움(<70%) MTF FVG CE 의 잘못된 쪽
-      //    SHORT: SL < lastBear.ce — 가격이 FVG 메우러 가는 wick 에 SL 잡힘
-      //    LONG : SL > lastBull.ce
-      if (sig && entry != null && sl != null) {
-        const lastBear = d?.mtf?.fvg?.lastBear;   // { ce, fillPct }
+      // 4) MTF MSS — 구조 전환 확인 (sweep 후 진짜 반전인지 검증)
+      const mss = d?.mtf?.mss?.found === true;
+
+      // 5) R:R + SL 안전 — R:R ≥ 2 AND SL 이 동일 방향 미메움(<70%) MTF FVG 밖
+      let slSafe = true;
+      if (sig && sl != null) {
+        const lastBear = d?.mtf?.fvg?.lastBear;
         const lastBull = d?.mtf?.fvg?.lastBull;
-        if (sig === 'short' && lastBear && lastBear.fillPct < 70 && sl < lastBear.ce) reasons.push('sl_inside_mtf_fvg');
-        if (sig === 'long'  && lastBull && lastBull.fillPct < 70 && sl > lastBull.ce) reasons.push('sl_inside_mtf_fvg');
+        if (sig === 'short' && lastBear && lastBear.fillPct < 70 && sl < lastBear.ce) slSafe = false;
+        if (sig === 'long'  && lastBull && lastBull.fillPct < 70 && sl > lastBull.ce) slSafe = false;
       }
+      const rrPass = rr >= 2.0 && slSafe;
 
-      return { risky: reasons.length > 0, reasons };
+      const pillars: Pillars = { bias, poi, sweep, mss, rr: rrPass };
+      const passCount = Number(bias) + Number(poi) + Number(sweep) + Number(mss) + Number(rrPass);
+      return { pillars, passCount };
     };
 
     const runOne = async (contract: string) => {
@@ -544,15 +566,15 @@ export default function Analysis() {
         }
         const dir = data?.htf?.direction;
         const sig = data?.summary?.signal;
-        const { risky, reasons } = isRisky(data);
+        const { pillars, passCount } = evaluatePillars(data);
         setIctScores((prev) => ({
           ...prev,
           [contract]: {
-            score:       data.score,
-            direction:   dir === 'LONG' || dir === 'SHORT' ? dir : null,
-            signal:      sig === 'long' || sig === 'short' ? sig : null,
-            risky,
-            riskReasons: reasons,
+            score:     data.score,
+            direction: dir === 'LONG' || dir === 'SHORT' ? dir : null,
+            signal:    sig === 'long' || sig === 'short' ? sig : null,
+            pillars,
+            passCount,
           },
         }));
       } catch {
@@ -780,7 +802,7 @@ export default function Analysis() {
                           isLast={idx === filtered.length - 1}
                           ictScore={sortBy === 'ict' ? (entry === undefined ? null : entry?.score ?? null) : undefined}
                           ictDirection={sortBy === 'ict' ? (entry?.direction ?? null) : undefined}
-                          risky={cached?.risky === true}
+                          pillars={cached?.pillars ?? null}
                         />
                       </Animated.View>
                     );

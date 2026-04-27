@@ -1,9 +1,10 @@
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
-import { Text, GlassCard } from '@/design-system';
+import { View, StyleSheet, Pressable } from 'react-native';
+import { Text, GlassCard, useToast } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { PriceChart } from '@/components/PositionDetailCard';
 import { formatPrice, formatUsdPrice } from '@/utils/format';
+import { copyToClipboard } from '@/utils/clipboard';
 
 // ─── 타입 정의 (export — positions/[id].tsx, history/[id].tsx에서 재사용) ───────
 export interface FvgInfo { ce: number; fillPct: number; }
@@ -197,6 +198,17 @@ export default function IctAnalysisCard({
   direction?: 'Long' | 'Short';
   pending?: boolean;
 }) {
+  const toast = useToast();
+  // 진입/SL/TP 클릭 시 가격을 클립보드에 복사 — 수동 트레이딩 편의.
+  // 표시용 문자열(formatPrice) 이 아닌 raw 숫자를 복사해 거래소 입력란에 그대로 붙여넣기 가능.
+  const copyPrice = React.useCallback(async (label: string, value: number | null | undefined) => {
+    if (value == null) return;
+    const ok = await copyToClipboard(String(value));
+    toast.show({
+      type:    ok ? 'success' : 'error',
+      message: ok ? `${label} ${value} 복사됨` : '복사 실패 — 브라우저 권한 확인',
+    });
+  }, [toast]);
   return (
     <GlassCard intensity="low" radius={20} padding={0} style={{ marginBottom: 12 }}>
       {/* 헤더 */}
@@ -298,16 +310,27 @@ export default function IctAnalysisCard({
                   </Text>
                 </View>
                 <View style={{ gap: 3, marginTop: 8 }}>
-                  {[
-                    ['진입', ictAnalysis.summary.entry != null ? formatPrice(ictAnalysis.summary.entry) : '-'],
-                    ['SL',   ictAnalysis.summary.sl    != null ? formatPrice(ictAnalysis.summary.sl)    : '-'],
-                    ['TP',   ictAnalysis.summary.tp    != null ? formatPrice(ictAnalysis.summary.tp)    : '-'],
-                  ].map(([k, v]) => (
-                    <View key={k} style={ict.kv}>
-                      <Text style={ict.kvKey}>{k}</Text>
-                      <Text style={ict.kvVal}>{v}</Text>
-                    </View>
-                  ))}
+                  {([
+                    { k: '진입', raw: ictAnalysis.summary.entry },
+                    { k: 'SL',   raw: ictAnalysis.summary.sl    },
+                    { k: 'TP',   raw: ictAnalysis.summary.tp    },
+                  ] as const).map(({ k, raw }) => {
+                    const v = raw != null ? formatPrice(raw) : '-';
+                    return (
+                      <Pressable
+                        key={k}
+                        style={({ pressed }) => [ict.kv, ict.kvCopyable, pressed && raw != null && { backgroundColor: '#F2F4F7' }]}
+                        onPress={() => copyPrice(k, raw)}
+                        disabled={raw == null}
+                      >
+                        <Text style={ict.kvKey}>{k}</Text>
+                        <View style={ict.kvRight}>
+                          <Text style={[ict.kvVal, { flex: 0 }]}>{v}</Text>
+                          {raw != null && <Text style={ict.copyHint}>📋</Text>}
+                        </View>
+                      </Pressable>
+                    );
+                  })}
                 </View>
               </>
             ) : (
@@ -351,6 +374,9 @@ const ict = StyleSheet.create({
   kv:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingVertical: 3 },
   kvKey: { fontSize: 13, color: colors.text.tertiary, flex: 1 },
   kvVal: { fontSize: 13, color: colors.text.primary, fontWeight: '500', flex: 2, textAlign: 'right' },
+  kvCopyable: { paddingHorizontal: 6, marginHorizontal: -6, borderRadius: 6 },
+  kvRight:    { flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4 },
+  copyHint:   { fontSize: 11, color: colors.text.tertiary },
 
   subRow:  { paddingLeft: 8, paddingVertical: 2 },
   subText: { fontSize: 12, color: colors.text.tertiary },

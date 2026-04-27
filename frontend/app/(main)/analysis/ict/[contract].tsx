@@ -4,14 +4,15 @@
  * 포지션 상세와 동일한 ICT v2 분석 결과를 표시
  */
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, ScrollView, ActivityIndicator, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
-import { Text, GlassCard, SubPageHeader, ScreenTransition } from '@/design-system';
+import { Text, GlassCard, SubPageHeader, ScreenTransition, useToast } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { useAccounts } from '@/store/accounts';
 import { PriceChart } from '@/components/PositionDetailCard';
 import { formatPrice } from '@/utils/format';
+import { copyToClipboard } from '@/utils/clipboard';
 
 // ─── 인터페이스 ──────────────────────────────────────────────────────────────
 
@@ -194,6 +195,16 @@ export default function IctDetail() {
   const { accounts }  = useAccounts();
   const [analysis, setAnalysis] = useState<IctAnalysis | null>(null);
   const [loading, setLoading]   = useState(true);
+  const toast = useToast();
+  // 진입/SL/TP 클릭 시 raw 가격을 클립보드에 복사 (수동 트레이딩용).
+  const copyPrice = React.useCallback(async (label: string, value: number | null | undefined) => {
+    if (value == null) return;
+    const ok = await copyToClipboard(String(value));
+    toast.show({
+      type:    ok ? 'success' : 'error',
+      message: ok ? `${label} ${value} 복사됨` : '복사 실패 — 브라우저 권한 확인',
+    });
+  }, [toast]);
   const [error, setError]       = useState<string | null>(null);
 
   useEffect(() => {
@@ -340,17 +351,36 @@ export default function IctDetail() {
                       </Text>
                     </View>
                     <View style={{ gap: 3, marginTop: 8 }}>
-                      {[
-                        ['진입', analysis.summary.entry != null ? formatPrice(analysis.summary.entry) : '-'],
-                        ['SL',   analysis.summary.sl    != null ? formatPrice(analysis.summary.sl)    : '-'],
-                        ['TP',   analysis.summary.tp    != null ? formatPrice(analysis.summary.tp)    : '-'],
-                        ...(analysis.summary.rr ? [['R:R', `1 : ${analysis.summary.rr}`]] : []),
-                      ].map(([k, v]) => (
-                        <View key={k} style={ict.kv}>
-                          <Text style={ict.kvKey}>{k}</Text>
-                          <Text style={ict.kvVal}>{v}</Text>
-                        </View>
-                      ))}
+                      {([
+                        { k: '진입', raw: analysis.summary.entry, copyable: true },
+                        { k: 'SL',   raw: analysis.summary.sl,    copyable: true },
+                        { k: 'TP',   raw: analysis.summary.tp,    copyable: true },
+                        ...(analysis.summary.rr ? [{ k: 'R:R' as const, raw: null as number | null, copyable: false, override: `1 : ${analysis.summary.rr}` as string | undefined }] : []),
+                      ] as Array<{ k: string; raw: number | null; copyable: boolean; override?: string }>).map(({ k, raw, copyable, override }) => {
+                        const v = override ?? (raw != null ? formatPrice(raw) : '-');
+                        if (!copyable) {
+                          return (
+                            <View key={k} style={ict.kv}>
+                              <Text style={ict.kvKey}>{k}</Text>
+                              <Text style={ict.kvVal}>{v}</Text>
+                            </View>
+                          );
+                        }
+                        return (
+                          <Pressable
+                            key={k}
+                            style={({ pressed }) => [ict.kv, ict.kvCopyable, pressed && raw != null && { backgroundColor: '#F2F4F7' }]}
+                            onPress={() => copyPrice(k, raw)}
+                            disabled={raw == null}
+                          >
+                            <Text style={ict.kvKey}>{k}</Text>
+                            <View style={ict.kvRight}>
+                              <Text style={[ict.kvVal, { flex: 0 }]}>{v}</Text>
+                              {raw != null && <Text style={ict.copyHint}>📋</Text>}
+                            </View>
+                          </Pressable>
+                        );
+                      })}
                     </View>
                   </>
                 ) : (
@@ -405,6 +435,9 @@ const ict = StyleSheet.create({
   kv:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingVertical: 3 },
   kvKey:      { fontSize: 13, color: colors.text.tertiary, flex: 1 },
   kvVal:      { fontSize: 13, color: colors.text.primary, fontWeight: '500', flex: 2, textAlign: 'right' },
+  kvCopyable: { paddingHorizontal: 6, marginHorizontal: -6, borderRadius: 6 },
+  kvRight:    { flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4 },
+  copyHint:   { fontSize: 11, color: colors.text.tertiary },
   subRow:     { paddingLeft: 8, paddingVertical: 2 },
   subText:    { fontSize: 12, color: colors.text.tertiary },
   poiBadge:   { marginTop: 8, backgroundColor: '#FFFAE6', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },

@@ -10,7 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Animated, {
-  useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS, LinearTransition, Easing,
+  useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS, LinearTransition,
 } from 'react-native-reanimated';
 import Svg, { Path, Polygon, Rect, Text as SvgText, Circle } from 'react-native-svg';
 import { Text, FadeTabView, AnimatedNumber, Skeleton, PressableScale, Toggle } from '@/design-system';
@@ -262,13 +262,14 @@ function formatVol(usd: number): string {
 // ─── 종목 행 (포지션 현황과 동일한 디자인) ─────────────────────────────────────
 
 function TickerRow({
-  ticker, idx, onPress, isLast, ictScore, ictDirection,
+  ticker, idx, onPress, isLast, ictScore, ictDirection, risky,
 }: {
   ticker: Ticker; idx: number;
   onPress: () => void;
   isLast: boolean;
   ictScore?:     number | null;
   ictDirection?: 'LONG' | 'SHORT' | null;
+  risky?:        boolean;
 }) {
   const changeColor = ticker.change24h > 0
     ? colors.market.rise
@@ -298,6 +299,7 @@ function TickerRow({
       <View style={{ flex: 1 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <Text style={tr.coin}>{ticker.coin}</Text>
+          {risky && <Text style={tr.riskMark}>⚠️</Text>}
           {ticker.name && <Text style={tr.name} numberOfLines={1}>{ticker.name}</Text>}
         </View>
         <Text style={tr.price}>
@@ -350,6 +352,7 @@ const tr = StyleSheet.create({
   change:     { fontSize: 14, fontWeight: '600' },
   chip:       { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, minWidth: 28, alignItems: 'center' },
   chipText:   { fontSize: 12, fontWeight: '700' },
+  riskMark:   { fontSize: 12 },
 });
 
 // ─── 메인 ─────────────────────────────────────────────────────────────────────
@@ -495,25 +498,35 @@ export default function Analysis() {
     let done      = 0;
     setIctScanProgress({ done: 0, total: targets.length });
 
-    // ICT 정통 시퀀스 위반 / SL 위치 위태로움 등 위험 신호 판정.
-    // 신호 자체가 없으면 '위험' 으로 분류하지 않음 (점수 정렬에서만 의미).
+    // ICT 정통 시퀀스 위반 / SL 위치 위태로움 / 점수 낮음 등 위험 신호 판정.
     const isRisky = (d: any): { risky: boolean; reasons: string[] } => {
       const reasons: string[] = [];
       const sig    = d?.summary?.signal;        // 'long' | 'short' | null
       const sl     = d?.summary?.sl as number | null;
       const entry  = d?.summary?.entry as number | null;
-      if (!sig || !entry || !sl) return { risky: false, reasons };
+      const score  = typeof d?.score === 'number' ? d.score : 0;
 
-      // 1) MTF MSS 부재 — HTF POI → MTF MSS → LTF Confirmation 시퀀스 결함
+      // 0) 신호 미발생 — 진입 자격 부족 자체가 위험. (사용자 입장에선 "이 종목은 지금 트레이드 X")
+      if (!sig) {
+        reasons.push('no_signal');
+        return { risky: true, reasons };
+      }
+
+      // 1) 점수가 낮음 (B 미만) — 셋업 강도 부족
+      if (score < 55) reasons.push('low_score');
+
+      // 2) MTF MSS 부재 — HTF POI → MTF MSS → LTF Confirmation 시퀀스 결함
       if (d?.mtf?.mss?.found === false) reasons.push('no_mtf_mss');
 
-      // 2) SL 이 동일 방향 미메움(<70%) MTF FVG CE 의 잘못된 쪽
+      // 3) SL 이 동일 방향 미메움(<70%) MTF FVG CE 의 잘못된 쪽
       //    SHORT: SL < lastBear.ce — 가격이 FVG 메우러 가는 wick 에 SL 잡힘
       //    LONG : SL > lastBull.ce
-      const lastBear = d?.mtf?.fvg?.lastBear;   // { ce, fillPct }
-      const lastBull = d?.mtf?.fvg?.lastBull;
-      if (sig === 'short' && lastBear && lastBear.fillPct < 70 && sl < lastBear.ce) reasons.push('sl_inside_mtf_fvg');
-      if (sig === 'long'  && lastBull && lastBull.fillPct < 70 && sl > lastBull.ce) reasons.push('sl_inside_mtf_fvg');
+      if (sig && entry != null && sl != null) {
+        const lastBear = d?.mtf?.fvg?.lastBear;   // { ce, fillPct }
+        const lastBull = d?.mtf?.fvg?.lastBull;
+        if (sig === 'short' && lastBear && lastBear.fillPct < 70 && sl < lastBear.ce) reasons.push('sl_inside_mtf_fvg');
+        if (sig === 'long'  && lastBull && lastBull.fillPct < 70 && sl > lastBull.ce) reasons.push('sl_inside_mtf_fvg');
+      }
 
       return { risky: reasons.length > 0, reasons };
     };
@@ -742,14 +755,15 @@ export default function Analysis() {
                   </View>
 
                   {filtered.map((ticker, idx) => {
-                    const entry = sortBy === 'ict' ? ictScores[ticker.contract] : undefined;
+                    const cached = ictScores[ticker.contract];
+                    const entry  = sortBy === 'ict' ? cached : undefined;
                     return (
                       // LinearTransition: 순위 변동 시 위/아래로 부드럽게 이동.
-                      // 시간 기반 + ease-out cubic (스코어보드 느낌의 길고 부드러운 보간).
-                      // 스프링은 빠르고 튀는 느낌이라 timing 으로 변경.
+                      // 웹 호환을 위해 spring 사용 (Easing.bezier 는 RN Web 미지원으로 경고 발생).
+                      // damping 32 + stiffness 60 + mass 1 → 거의 critically damped, 길고 부드러운 glide.
                       <Animated.View
                         key={ticker.contract}
-                        layout={LinearTransition.duration(700).easing(Easing.bezier(0.25, 0.1, 0.25, 1))}
+                        layout={LinearTransition.springify().damping(32).stiffness(60).mass(1)}
                       >
                         <TickerRow
                           ticker={ticker}
@@ -758,6 +772,7 @@ export default function Analysis() {
                           isLast={idx === filtered.length - 1}
                           ictScore={sortBy === 'ict' ? (entry === undefined ? null : entry?.score ?? null) : undefined}
                           ictDirection={sortBy === 'ict' ? (entry?.direction ?? null) : undefined}
+                          risky={cached?.risky === true}
                         />
                       </Animated.View>
                     );

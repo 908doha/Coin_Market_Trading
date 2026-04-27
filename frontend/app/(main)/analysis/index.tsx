@@ -414,8 +414,7 @@ export default function Analysis() {
 
   // 시장 스캔 종목 로드 (서버: Gate.io tickers 전량 → fallback: CoinGecko top 50)
   // bust 가 증가하면 캐시 우회용 query string 추가해 강제 재조회.
-  // silent=true 일 때는 로딩 스켈레톤을 띄우지 않음 (5초 백그라운드 갱신용).
-  const reloadTickers = useCallback(async (bust = 0, silent = false) => {
+  const reloadTickers = useCallback(async (bust = 0) => {
     const COINGECKO =
       'https://api.coingecko.com/api/v3/coins/markets' +
       '?vs_currency=usd&order=market_cap_desc&per_page=50&page=1' +
@@ -433,7 +432,7 @@ export default function Analysis() {
         fundingRate:  0,
       }));
 
-    if (!silent) setTickersLoading(true);
+    setTickersLoading(true);
     try {
       const url = bust > 0 ? `${API_BASE}/api/market-scan?_=${bust}` : `${API_BASE}/api/market-scan`;
       const r = await fetch(url, bust > 0 ? { cache: 'no-store' } : undefined);
@@ -447,18 +446,18 @@ export default function Analysis() {
         if (Array.isArray(coins)) setTickers(mapCoins(coins));
       } catch { /* 무시 */ }
     } finally {
-      if (!silent) setTickersLoading(false);
+      setTickersLoading(false);
     }
   }, []);
 
   useEffect(() => { reloadTickers(); }, [reloadTickers]);
 
-  // ICT 종목 스캔 카드 자동 갱신 — 5초마다 ticker 가격/거래량 재조회.
-  // silent=true 로 호출해 스켈레톤 깜빡임 없이 데이터만 갱신 → 부드러운 순위 애니메이션.
-  // ICT 점수는 비싸므로 캐시 유지 (신규 ticker 만 미평가 분석).
-  useEffect(() => {
-    const id = setInterval(() => { reloadTickers(Date.now(), true); }, 5000);
-    return () => clearInterval(id);
+  // 새로고침 — ICT 점수 캐시 + 진행률 초기화 후 ticker 재조회.
+  // useEffect (sortBy='ict') 가 자동으로 미평가 종목 재스캔.
+  const refreshScan = useCallback(() => {
+    setIctScores({});
+    setIctScanProgress(null);
+    reloadTickers(Date.now());
   }, [reloadTickers]);
 
   const filtered = useMemo(() => {
@@ -684,7 +683,7 @@ export default function Analysis() {
                 </Svg>
               </Pressable>
 
-              {/* 우측 컨트롤: 정렬 드롭다운 */}
+              {/* 우측 컨트롤: 정렬 드롭다운 + 새로고침 */}
               {scanExpanded && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   {ictScanProgress && sortBy === 'ict' && (
@@ -707,6 +706,22 @@ export default function Analysis() {
                     </Text>
                     <Svg width={12} height={12} viewBox="0 0 24 24" fill="none">
                       <Path d="M6 9l6 6 6-6" stroke="#AEAEB2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </Svg>
+                  </Pressable>
+                  <Pressable
+                    onPress={refreshScan}
+                    hitSlop={8}
+                    style={st.refreshBtn}
+                    disabled={!!ictScanProgress || tickersLoading}
+                  >
+                    <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                      <Path
+                        d="M21 12a9 9 0 1 1-3.5-7.1M21 4v5h-5"
+                        stroke={(ictScanProgress || tickersLoading) ? '#C7C7CC' : '#246CF9'}
+                        strokeWidth="2.2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
                     </Svg>
                   </Pressable>
                 </View>
@@ -858,6 +873,7 @@ const st = StyleSheet.create({
   scanTitle:    { fontSize: 17, fontWeight: '700', color: '#191919' },
 
   sortBtnProgress: { fontSize: 11, color: colors.text.tertiary, fontWeight: '600' },
+  refreshBtn:      { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg.elevated, borderWidth: 1, borderColor: colors.border.default },
   sortDropBtn:    { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#F0F0F5', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, maxWidth: 140 },
   sortDropLabel:  { fontSize: 12, fontWeight: '600', color: '#555', flexShrink: 1 },
   sortMenuOverlay: { flex: 1, backgroundColor: 'transparent' },

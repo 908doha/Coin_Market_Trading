@@ -9,6 +9,11 @@
  * 접근: indicators 를 전면 mock — 합성 candle 로 원하는 출력 유도하기 어려우므로
  *       indicatorsPatch 로 순수 strategy 로직만 검증 (indicators 기능은 별도 모듈
  *       책임, 본 Phase 1 스코프 밖).
+ *
+ * v3 Hard Gate 대응:
+ *   - 기본 mock 은 Gate 1 (HTF MSS), Gate 2 (PDH sweep), Gate 3 (MTF MSS aligned)
+ *     를 모두 통과시켜 LTF entry trigger 검증 (ICT-01) 에 집중.
+ *   - swingHighs 의 상단을 103 으로 잡아 nearest TP R:R ≥ 1.0 floor 통과.
  */
 
 const test = require('node:test');
@@ -36,8 +41,9 @@ function makeIndicatorsMock({
         { index: 30, price: 60, timestamp: 0 },   // HH (둘 다 price 대비 훨씬 아래)
       ]
     : [
-        { index: 10, price: 99.5,  timestamp: 0 },
-        { index: 30, price: 100.5, timestamp: 0 }, // HH
+        { index: 10, price: 99.5, timestamp: 0 },
+        // v3: nearest TP R:R floor 1.0 통과 위해 상단을 103 으로 (price ~100, risk ~2 → R:R ~1.5).
+        { index: 30, price: 103,  timestamp: 0 },
       ];
   const swingLows = swingsFarFromPrice
     ? [
@@ -53,8 +59,12 @@ function makeIndicatorsMock({
     getActiveSession:   () => session,
     findSwingHighs:     () => swingHighs,
     findSwingLows:      () => swingLows,
-    calculatePDHL:      () => null,
-    detectMarketStructureShift: () => null,  // null → HH+HL branch 로 direction=bullish
+    // v3 Gate 2: PDH Sweep 으로 HTF backing 충족 (Active POI 부재 시 Sweep 폴백 경로).
+    calculatePDHL:      () => ({ pdh: 105, pdl: 95, pdhSweep: true, pdlSweep: false }),
+    // v3 Gate 1/3: bullish CHoCH 반환 → HTF direction=bullish + MTF MSS aligned 충족.
+    detectMarketStructureShift: () => ({
+      direction: 'bullish', kind: 'CHoCH', label: 'CHoCH bullish', breakIndex: 50,
+    }),
     findOrderBlocks:    () => ({ bullish: [], bearish: [] }),
     findFairValueGaps:  () => ({ bullish: fvg ? [fvg] : [], bearish: [] }),
     detectLiquiditySweep: () => [],
@@ -156,7 +166,7 @@ test('공통 계약: _calculateSLTP 가 sl=null 반환 시 analyze() 가 signal=
 
   assert.equal(result.signal, null,
     `sl=null 이면 signal 반드시 null. 받은 값: signal=${result.signal}, reason=${result.reason}`);
-  // reason 은 self-documenting tpSource 전달. RISK-01 경로는 'risk-cap-violation'.
-  assert.equal(result.reason, 'risk-cap-violation',
-    `RISK-01 경로는 reason='risk-cap-violation' 이어야 함. 받은 reason: ${result.reason}`);
+  // v3: reason 은 '[Gate 5] <tpSource>' 포맷. RISK-01 경로는 'risk-cap-violation'.
+  assert.equal(result.reason, '[Gate 5] risk-cap-violation',
+    `RISK-01 경로는 reason='[Gate 5] risk-cap-violation' 이어야 함. 받은 reason: ${result.reason}`);
 });

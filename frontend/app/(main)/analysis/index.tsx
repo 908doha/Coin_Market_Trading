@@ -13,7 +13,7 @@ import Animated, {
   useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS, LinearTransition,
 } from 'react-native-reanimated';
 import Svg, { Path, Polygon, Rect, Text as SvgText, Circle } from 'react-native-svg';
-import { Text, FadeTabView, AnimatedNumber, Skeleton, PressableScale, Toggle } from '@/design-system';
+import { Text, FadeTabView, AnimatedNumber, Skeleton, PressableScale } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType, ExchangeAccount } from '@/store/accounts';
 import { tradesService } from '@/services';
@@ -261,16 +261,19 @@ function formatVol(usd: number): string {
 
 // ─── 종목 행 (포지션 현황과 동일한 디자인) ─────────────────────────────────────
 
-function TickerRow({
-  ticker, idx, onPress, isLast, ictScore, ictDirection, risky,
+// React.memo 로 감싸 폴링/state 변화 시 prop 미변경 row 의 불필요한 재렌더를 차단.
+// onAnalyze/contract 분리해 부모 매 렌더마다 새 arrow 가 만들어지지 않도록 함 (memo 효과 유지).
+const TickerRow = React.memo(function TickerRowImpl({
+  ticker, idx, onAnalyze, isLast, ictScore, ictDirection, risky,
 }: {
   ticker: Ticker; idx: number;
-  onPress: () => void;
+  onAnalyze: (contract: string) => void;
   isLast: boolean;
   ictScore?:     number | null;
   ictDirection?: 'LONG' | 'SHORT' | null;
   risky?:        boolean;
 }) {
+  const onPress = React.useCallback(() => onAnalyze(ticker.contract), [onAnalyze, ticker.contract]);
   const changeColor = ticker.change24h > 0
     ? colors.market.rise
     : ticker.change24h < 0
@@ -337,7 +340,7 @@ function TickerRow({
       </View>
     </PressableScale>
   );
-}
+});
 
 const tr = StyleSheet.create({
   row:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14 },
@@ -380,7 +383,6 @@ export default function Analysis() {
     riskReasons: string[];
   } | null>>({});
   const [ictScanProgress, setIctScanProgress] = useState<{ done: number; total: number } | null>(null);
-  const [hideRisky, setHideRisky] = useState(false);
 
   const { accounts, balances, totalBalance } = useAccounts();
 
@@ -461,16 +463,12 @@ export default function Analysis() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toUpperCase();
-    const searched = !q ? tickers : tickers.filter(
+    const base = !q ? tickers : tickers.filter(
       (t) => t.coin.includes(q) || t.symbol.includes(q) || (t.name?.toUpperCase().includes(q) ?? false),
     );
-    // 위험 종목 숨기기 — 알려진 위험 케이스만 제외 (미조회/실패는 모르는 것으로 간주해 표시)
-    const safe = hideRisky
-      ? searched.filter((t) => !ictScores[t.contract]?.risky)
-      : searched;
-    if (sortBy !== 'ict') return safe;
+    if (sortBy !== 'ict') return base;
     // ICT 점수 desc 정렬. 미조회/실패 항목은 하단으로.
-    return [...safe].sort((a, b) => {
+    return [...base].sort((a, b) => {
       const sa = ictScores[a.contract];
       const sb = ictScores[b.contract];
       const va = sa?.score ?? -1;
@@ -478,7 +476,7 @@ export default function Analysis() {
       if (vb !== va) return vb - va;
       return b.volume24hUsd - a.volume24hUsd;  // tie-breaker
     });
-  }, [tickers, search, sortBy, ictScores, hideRisky]);
+  }, [tickers, search, sortBy, ictScores]);
 
   // ICT 점수 일괄 스캔 — sortBy='ict' 진입 시 top N 티커에 대해 병렬 배치 실행.
   // 사용자 API 키 1개로 Gate.io 를 거치므로 동시 요청 수 제한.
@@ -686,14 +684,9 @@ export default function Analysis() {
                 </Svg>
               </Pressable>
 
-              {/* 우측 컨트롤: 위험 숨기기 토글 + 정렬 드롭다운 */}
+              {/* 우측 컨트롤: 정렬 드롭다운 */}
               {scanExpanded && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  {/* 위험 종목 숨기기 — MTF MSS 부재 / SL 이 미메움 FVG 안쪽 등 */}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={st.hideRiskyLabel}>위험 숨기기</Text>
-                    <Toggle value={hideRisky} onValueChange={setHideRisky} />
-                  </View>
                   {ictScanProgress && sortBy === 'ict' && (
                     <Text style={st.sortBtnProgress}>
                       {ictScanProgress.done}/{ictScanProgress.total}
@@ -768,7 +761,7 @@ export default function Analysis() {
                         <TickerRow
                           ticker={ticker}
                           idx={idx}
-                          onPress={() => analyze(ticker.contract)}
+                          onAnalyze={analyze}
                           isLast={idx === filtered.length - 1}
                           ictScore={sortBy === 'ict' ? (entry === undefined ? null : entry?.score ?? null) : undefined}
                           ictDirection={sortBy === 'ict' ? (entry?.direction ?? null) : undefined}
@@ -865,7 +858,6 @@ const st = StyleSheet.create({
   scanTitle:    { fontSize: 17, fontWeight: '700', color: '#191919' },
 
   sortBtnProgress: { fontSize: 11, color: colors.text.tertiary, fontWeight: '600' },
-  hideRiskyLabel:  { fontSize: 12, fontWeight: '600', color: '#555' },
   sortDropBtn:    { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#F0F0F5', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, maxWidth: 140 },
   sortDropLabel:  { fontSize: 12, fontWeight: '600', color: '#555', flexShrink: 1 },
   sortMenuOverlay: { flex: 1, backgroundColor: 'transparent' },

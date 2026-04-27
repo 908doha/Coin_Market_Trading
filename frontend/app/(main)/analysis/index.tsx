@@ -10,10 +10,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Animated, {
-  useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS,
+  useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS, LinearTransition,
 } from 'react-native-reanimated';
 import Svg, { Path, Polygon, Rect, Text as SvgText, Circle } from 'react-native-svg';
-import { Text, FadeTabView, AnimatedNumber, Skeleton, PressableScale, CurrencyToggle } from '@/design-system';
+import { Text, FadeTabView, AnimatedNumber, Skeleton, PressableScale } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType, ExchangeAccount } from '@/store/accounts';
 import { tradesService } from '@/services';
@@ -364,6 +364,10 @@ export default function Analysis() {
   const [tickersLoading, setTickersLoading] = useState(true);
   const [search,  setSearch]    = useState('');
   const [sortBy,  setSortBy]    = useState<'volume' | 'ict'>('ict');
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
+  const sortBtnRef = React.useRef<View>(null);
+  const [sortMenuPos, setSortMenuPos] = useState({ top: 0, right: 0 });
+  useBlurOnOpen(sortMenuOpen);
   // contract → { score, direction }. undefined = 미조회, null = 실패
   const [ictScores, setIctScores] = useState<Record<string, { score: number; direction: 'LONG' | 'SHORT' | null } | null>>({});
   const [ictScanProgress, setIctScanProgress] = useState<{ done: number; total: number } | null>(null);
@@ -436,11 +440,13 @@ export default function Analysis() {
 
   useEffect(() => { reloadTickers(); }, [reloadTickers]);
 
-  // 새로고침: 티커 + ICT 점수 캐시 모두 초기화 → useEffect 가 자동 재스캔
-  const refreshScan = useCallback(() => {
-    setIctScores({});
-    setIctScanProgress(null);
-    reloadTickers(Date.now());
+  // ICT 종목 스캔 카드 자동 갱신 — 5초마다 ticker 가격/거래량 재조회.
+  // ICT 점수는 비싸므로 캐시 유지 (변동될 만한 신호 발생 시에만 재계산).
+  // ticker 변동에 따라 거래량 정렬은 즉시 재배치, ICT 정렬도 새 ticker 가
+  // 들어오면 useEffect 가 미평가 종목만 분석.
+  useEffect(() => {
+    const id = setInterval(() => { reloadTickers(Date.now()); }, 5000);
+    return () => clearInterval(id);
   }, [reloadTickers]);
 
   const filtered = useMemo(() => {
@@ -628,7 +634,7 @@ export default function Analysis() {
                 </Svg>
               </Pressable>
 
-              {/* 정렬 토글 + 새로고침 — CurrencyToggle 을 재사용해 UI 통일 */}
+              {/* 정렬 드롭다운 — 홈의 계좌 선택 드롭다운(accDropBtn)과 동일 패턴 */}
               {scanExpanded && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   {ictScanProgress && sortBy === 'ict' && (
@@ -636,27 +642,21 @@ export default function Analysis() {
                       {ictScanProgress.done}/{ictScanProgress.total}
                     </Text>
                   )}
-                  <CurrencyToggle
-                    showUsd={sortBy === 'ict'}
-                    onToggle={() => setSortBy((s) => (s === 'volume' ? 'ict' : 'volume'))}
-                    leftLabel="거래량"
-                    rightLabel="ICT"
-                    pillWidth={54}
-                  />
                   <Pressable
-                    onPress={refreshScan}
-                    hitSlop={8}
-                    style={st.refreshBtn}
-                    disabled={!!ictScanProgress || tickersLoading}
+                    ref={sortBtnRef}
+                    style={st.sortDropBtn}
+                    onPress={() => {
+                      sortBtnRef.current?.measureInWindow((x, y, w, h) => {
+                        setSortMenuPos({ top: y + h + 8, right: 20 });
+                        setSortMenuOpen(true);
+                      });
+                    }}
                   >
-                    <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                      <Path
-                        d="M21 12a9 9 0 1 1-3.5-7.1M21 4v5h-5"
-                        stroke={(ictScanProgress || tickersLoading) ? '#C7C7CC' : '#246CF9'}
-                        strokeWidth="2.2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
+                    <Text style={st.sortDropLabel} numberOfLines={1}>
+                      {sortBy === 'ict' ? 'ICT 점수 순' : '거래량 순'}
+                    </Text>
+                    <Svg width={12} height={12} viewBox="0 0 24 24" fill="none">
+                      <Path d="M6 9l6 6 6-6" stroke="#AEAEB2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                     </Svg>
                   </Pressable>
                 </View>
@@ -700,15 +700,19 @@ export default function Analysis() {
                   {filtered.map((ticker, idx) => {
                     const entry = sortBy === 'ict' ? ictScores[ticker.contract] : undefined;
                     return (
-                      <TickerRow
-                        key={ticker.contract}
-                        ticker={ticker}
-                        idx={idx}
-                        onPress={() => analyze(ticker.contract)}
-                        isLast={idx === filtered.length - 1}
-                        ictScore={sortBy === 'ict' ? (entry === undefined ? null : entry?.score ?? null) : undefined}
-                        ictDirection={sortBy === 'ict' ? (entry?.direction ?? null) : undefined}
-                      />
+                      // LinearTransition: 순위 변동 시 위/아래로 부드럽게 이동.
+                      // key 는 안정적인 contract 값이라 React 가 동일 노드를 재사용하므로
+                      // Reanimated 가 layout 이동을 감지해 spring 으로 보간한다.
+                      <Animated.View key={ticker.contract} layout={LinearTransition.springify().damping(20).stiffness(180)}>
+                        <TickerRow
+                          ticker={ticker}
+                          idx={idx}
+                          onPress={() => analyze(ticker.contract)}
+                          isLast={idx === filtered.length - 1}
+                          ictScore={sortBy === 'ict' ? (entry === undefined ? null : entry?.score ?? null) : undefined}
+                          ictDirection={sortBy === 'ict' ? (entry?.direction ?? null) : undefined}
+                        />
+                      </Animated.View>
                     );
                   })}
                 </>
@@ -729,6 +733,47 @@ export default function Analysis() {
           balances={balances}
           totalBalance={totalBalance}
         />
+
+        {/* 정렬 드롭다운 메뉴 — 홈 계좌 picker 와 동일 구조 */}
+        <Modal
+          visible={sortMenuOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setSortMenuOpen(false)}
+        >
+          <Pressable style={st.sortMenuOverlay} onPress={() => setSortMenuOpen(false)}>
+            <View style={[st.sortMenuSheet, { position: 'absolute', top: sortMenuPos.top, right: sortMenuPos.right }]}>
+              {([
+                { key: 'ict' as const,    label: 'ICT 점수 순' },
+                { key: 'volume' as const, label: '거래량 순' },
+              ]).map((opt, idx, arr) => {
+                const isSel = sortBy === opt.key;
+                return (
+                  <Pressable
+                    key={opt.key}
+                    style={({ pressed }) => [
+                      st.sortMenuItem,
+                      idx < arr.length - 1 && st.sortMenuDivider,
+                      pressed && { backgroundColor: '#F8F8F8' },
+                    ]}
+                    onPress={() => { setSortBy(opt.key); setSortMenuOpen(false); }}
+                  >
+                    <View style={st.sortMenuCheck}>
+                      {isSel && (
+                        <Svg width={16} height={16} viewBox="0 0 24 24">
+                          <Path d="M5 13l4 4L19 7" stroke="#246CF9" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                        </Svg>
+                      )}
+                    </View>
+                    <Text style={[st.sortMenuLabel, isSel && { color: '#246CF9', fontWeight: '700' }]}>
+                      {opt.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </Pressable>
+        </Modal>
       </SafeAreaView>
     </FadeTabView>
   );
@@ -758,7 +803,14 @@ const st = StyleSheet.create({
   scanTitle:    { fontSize: 17, fontWeight: '700', color: '#191919' },
 
   sortBtnProgress: { fontSize: 11, color: colors.text.tertiary, fontWeight: '600' },
-  refreshBtn:   { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg.elevated, borderWidth: 1, borderColor: colors.border.default },
+  sortDropBtn:    { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#F0F0F5', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, maxWidth: 140 },
+  sortDropLabel:  { fontSize: 12, fontWeight: '600', color: '#555', flexShrink: 1 },
+  sortMenuOverlay: { flex: 1, backgroundColor: 'transparent' },
+  sortMenuSheet:   { minWidth: 160, backgroundColor: '#FFF', borderRadius: 14, paddingVertical: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.14, shadowRadius: 20, elevation: 12 },
+  sortMenuItem:    { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12, gap: 10 },
+  sortMenuDivider: { borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
+  sortMenuCheck:   { width: 16, alignItems: 'center', justifyContent: 'center' },
+  sortMenuLabel:   { fontSize: 14, color: '#191919' },
 
   searchWrap:  { marginHorizontal: 20, marginBottom: 8 },
   searchInput: {

@@ -10,7 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Animated, {
-  useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS, LinearTransition,
+  useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS, LinearTransition, Easing,
 } from 'react-native-reanimated';
 import Svg, { Path, Polygon, Rect, Text as SvgText, Circle } from 'react-native-svg';
 import { Text, FadeTabView, AnimatedNumber, Skeleton, PressableScale } from '@/design-system';
@@ -402,7 +402,8 @@ export default function Analysis() {
 
   // 시장 스캔 종목 로드 (서버: Gate.io tickers 전량 → fallback: CoinGecko top 50)
   // bust 가 증가하면 캐시 우회용 query string 추가해 강제 재조회.
-  const reloadTickers = useCallback(async (bust = 0) => {
+  // silent=true 일 때는 로딩 스켈레톤을 띄우지 않음 (5초 백그라운드 갱신용).
+  const reloadTickers = useCallback(async (bust = 0, silent = false) => {
     const COINGECKO =
       'https://api.coingecko.com/api/v3/coins/markets' +
       '?vs_currency=usd&order=market_cap_desc&per_page=50&page=1' +
@@ -420,7 +421,7 @@ export default function Analysis() {
         fundingRate:  0,
       }));
 
-    setTickersLoading(true);
+    if (!silent) setTickersLoading(true);
     try {
       const url = bust > 0 ? `${API_BASE}/api/market-scan?_=${bust}` : `${API_BASE}/api/market-scan`;
       const r = await fetch(url, bust > 0 ? { cache: 'no-store' } : undefined);
@@ -434,18 +435,17 @@ export default function Analysis() {
         if (Array.isArray(coins)) setTickers(mapCoins(coins));
       } catch { /* 무시 */ }
     } finally {
-      setTickersLoading(false);
+      if (!silent) setTickersLoading(false);
     }
   }, []);
 
   useEffect(() => { reloadTickers(); }, [reloadTickers]);
 
   // ICT 종목 스캔 카드 자동 갱신 — 5초마다 ticker 가격/거래량 재조회.
-  // ICT 점수는 비싸므로 캐시 유지 (변동될 만한 신호 발생 시에만 재계산).
-  // ticker 변동에 따라 거래량 정렬은 즉시 재배치, ICT 정렬도 새 ticker 가
-  // 들어오면 useEffect 가 미평가 종목만 분석.
+  // silent=true 로 호출해 스켈레톤 깜빡임 없이 데이터만 갱신 → 부드러운 순위 애니메이션.
+  // ICT 점수는 비싸므로 캐시 유지 (신규 ticker 만 미평가 분석).
   useEffect(() => {
-    const id = setInterval(() => { reloadTickers(Date.now()); }, 5000);
+    const id = setInterval(() => { reloadTickers(Date.now(), true); }, 5000);
     return () => clearInterval(id);
   }, [reloadTickers]);
 
@@ -701,9 +701,12 @@ export default function Analysis() {
                     const entry = sortBy === 'ict' ? ictScores[ticker.contract] : undefined;
                     return (
                       // LinearTransition: 순위 변동 시 위/아래로 부드럽게 이동.
-                      // key 는 안정적인 contract 값이라 React 가 동일 노드를 재사용하므로
-                      // Reanimated 가 layout 이동을 감지해 spring 으로 보간한다.
-                      <Animated.View key={ticker.contract} layout={LinearTransition.springify().damping(20).stiffness(180)}>
+                      // 시간 기반 + ease-out cubic (스코어보드 느낌의 길고 부드러운 보간).
+                      // 스프링은 빠르고 튀는 느낌이라 timing 으로 변경.
+                      <Animated.View
+                        key={ticker.contract}
+                        layout={LinearTransition.duration(700).easing(Easing.bezier(0.25, 0.1, 0.25, 1))}
+                      >
                         <TickerRow
                           ticker={ticker}
                           idx={idx}

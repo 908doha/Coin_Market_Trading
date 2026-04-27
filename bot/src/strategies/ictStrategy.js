@@ -141,7 +141,18 @@ class IctStrategy {
     }
 
     // ========== Setup Score (Hard Gate 통과 후, 로깅 전용) ==========
-    const setupScore = this._calculateSetupScore(confluence, rr, { hasHtfPoi });
+    // 구조적 ctx (regex 매칭 회피 — confluence 문자열 포맷 변경 내성)
+    const scoreCtx = {
+      hasHtfPoi,
+      hasHtfSweep,
+      hasPdSweep,
+      hasHtfMtfOverlap: !!mtfStructure.htfMtfOverlap,
+      hasMtfSweep: !!mtfStructure.mtfActiveSweep,
+      hasIofedEntry: ltfEntry.entryType === 'IOFED',
+      hasLtfMssAligned: !!ltfEntry.ltfMssAligned,
+      hasRangeSweep: !!ltfEntry.rangeSweep,
+    };
+    const setupScore = this._calculateSetupScore(rr, scoreCtx);
     logger.info(`[ICT v3] ${signal.toUpperCase()} | R:R ${rr.toFixed(2)} | ${setupScore.score} ${setupScore.label} | ${confluence.length}개 컨플루언스`);
 
     return {
@@ -408,14 +419,21 @@ class IctStrategy {
     }
 
     // HTF POI와 겹침 검사 (ICT 탑다운 컨플루언스) — 역순 iteration (최신 쌍 우선)
+    let htfMtfOverlap = false;
     if (htfBias && htfBias.orderBlocks && htfBias.orderBlocks.length > 0 && relevantOBs.length > 0) {
       const ov = this._findFirstOverlap(relevantOBs, htfBias.orderBlocks, 'low', 'high');
-      if (ov) confluence.push(`★ HTF+MTF OB 겹침 [${ov.lo.toFixed(2)}-${ov.hi.toFixed(2)}]`);
+      if (ov) {
+        confluence.push(`★ HTF+MTF OB 겹침 [${ov.lo.toFixed(2)}-${ov.hi.toFixed(2)}]`);
+        htfMtfOverlap = true;
+      }
     }
 
     if (htfBias && htfBias.fvgs && htfBias.fvgs.length > 0 && unfilled.length > 0) {
       const ov = this._findFirstOverlap(unfilled, htfBias.fvgs, 'bottom', 'top');
-      if (ov) confluence.push(`★ HTF+MTF FVG 겹침 [${ov.lo.toFixed(2)}-${ov.hi.toFixed(2)}]`);
+      if (ov) {
+        confluence.push(`★ HTF+MTF FVG 겹침 [${ov.lo.toFixed(2)}-${ov.hi.toFixed(2)}]`);
+        htfMtfOverlap = true;
+      }
     }
 
     // MTF Liquidity Sweep (BSL/SSL) — HTF 방향과 일치하는 스윕만 가점
@@ -464,6 +482,7 @@ class IctStrategy {
       swingHighs,
       swingLows,
       mtfActiveSweep,
+      htfMtfOverlap,
     };
   }
 
@@ -486,10 +505,12 @@ class IctStrategy {
 
     // Session Range 확인
     const sessionRanges = indicators.calculateSessionRanges(candles);
+    let rangeSweep = false;
     if (sessionRanges[session.session]) {
       const sr = sessionRanges[session.session];
       if (sr.highSweep || sr.lowSweep) {
         confluence.push(`${sr.name} Range Sweep`);
+        rangeSweep = true;
       }
     }
 
@@ -582,6 +603,8 @@ class IctStrategy {
       reason: entryConfirmed ? `${entryType} 진입` : 'FVG CE/Fill/IOFED 미충족',
       confluence,
       entryType,
+      ltfMssAligned: !!ltfMssAligned,
+      rangeSweep,
       swingHighs,
       swingLows,
       sessionRanges,
@@ -831,15 +854,18 @@ class IctStrategy {
    * 컨플루언스 점수 (v3 — Hard Gate 통과 후 사후 분석/로깅 전용)
    *
    * ICT 정통: Hard Gate 5 통과 = 정통 셋업 자격 (베이스 100). 가점/감점은 셋업 품질 보정.
-   * 본 score 는 entry decision 에 영향 없음 (analyze() 가 호출 시점엔 이미 진입 확정).
+   * 본 score 는 entry decision 에 영향 없음.
    *
-   * @param confluence   컨플루언스 문자열 배열 (Gate 통과 후 누적된 항목)
-   * @param rr           Risk:Reward 비율 (raw)
-   * @param ctx          { hasHtfPoi } — Active POI 부재 시 감점 판정용
+   * 가점/감점 판정은 모두 **구조적 boolean ctx** 기반 (regex/문자열 매칭 미사용).
+   * confluence 포맷이 향후 변경되어도 score 가 영향받지 않음.
+   *
+   * @param rr   Risk:Reward 비율 (raw)
+   * @param ctx  analyze() 가 산출한 구조적 플래그
+   *   { hasHtfPoi, hasHtfSweep, hasPdSweep, hasHtfMtfOverlap,
+   *     hasMtfSweep, hasIofedEntry, hasLtfMssAligned, hasRangeSweep }
    * @returns {{ score, grade, label, breakdown }}
    */
-  _calculateSetupScore(confluence, rr, { hasHtfPoi } = {}) {
-    const joined = confluence.join(' || ');
+  _calculateSetupScore(rr, ctx = {}) {
     const breakdown = [{ text: 'Hard Gate 5개 통과 (베이스)', points: 100 }];
     let score = 100;
 
@@ -849,23 +875,20 @@ class IctStrategy {
       breakdown.push({ text, points });
     };
 
-    // ===== 가점 =====
-    add(/★ HTF\+MTF.+겹침/.test(joined), 10, 'HTF+MTF POI Overlap');
+    // ===== 가점 (셋업 품질 강화) =====
+    add(ctx.hasHtfMtfOverlap, 10, 'HTF+MTF POI Overlap');
+    // POI + Sweep 동시 = ICT 탑다운 + liquidity 양립 (가장 강한 컨플루언스).
+    //   Active POI 부재 시 자동 0 (구조적 ctx 기반 — 문자열 의존 제거).
+    add(ctx.hasHtfPoi && (ctx.hasHtfSweep || ctx.hasPdSweep), 10, 'HTF POI + Sweep 동시');
+    add(ctx.hasPdSweep, 8, 'PDH/PDL Sweep');
+    add(ctx.hasIofedEntry, 7, 'IOFED Entry');
+    add(ctx.hasLtfMssAligned, 5, 'LTF MSS Aligned');
+    add(ctx.hasMtfSweep, 5, 'MTF Sweep');
+    add(ctx.hasRangeSweep, 3, 'Session Range Sweep');
 
-    const hasActivePoiTxt = /★ HTF (OB|FVG) 진입/.test(joined);
-    const hasHtfSweepTxt = /★ HTF (BSL|SSL)/.test(joined);
-    const hasPdSweepTxt = /PD[HL] Sweep/.test(joined);
-    add(hasActivePoiTxt && (hasHtfSweepTxt || hasPdSweepTxt), 10, 'HTF POI + Sweep 동시');
-    add(hasPdSweepTxt, 8, 'PDH/PDL Sweep');
-    add(/IOFED/.test(joined), 7, 'IOFED Entry');
-    add(/LTF (BOS|CHoCH)/.test(joined), 5, 'LTF MSS Aligned');
-    add(/★ MTF (BSL|SSL)/.test(joined), 5, 'MTF Sweep');
-    add(/Range Sweep/.test(joined), 3, 'Session Range Sweep');
-
-    // ===== 감점 =====
-    // Gate 2 를 Sweep 로만 통과한 경우 (Active POI 부재) — 셋업 약점.
-    //   문자열 의존 대신 ctx.hasHtfPoi (analyze() 가 직접 산출한 boolean) 사용.
-    add(hasHtfPoi === false, -10, 'HTF Active POI 부재 (Sweep 으로만 통과)');
+    // ===== 감점 (셋업 약점) =====
+    // Gate 2 를 Sweep 로만 통과 = HTF 정밀 진입 zone 부재.
+    add(ctx.hasHtfPoi === false, -10, 'HTF Active POI 부재 (Sweep 으로만 통과)');
     add(rr < 1.5, -5, `R:R ${rr.toFixed(2)} 낮음 (구조적 TP 가까움)`);
 
     // ===== R:R 보너스 (강한 구조적 R:R) =====
@@ -873,7 +896,13 @@ class IctStrategy {
     else if (rr >= 3.0) add(true, 5, `R:R ${rr.toFixed(2)} 양호`);
     else if (rr >= 2.0) add(true, 3, `R:R ${rr.toFixed(2)} 적정`);
 
+    // cap 130 = 베이스 100 + 핵심 가점 누적 상한. raw 가 130 초과해도 ELITE 동일 표시.
+    //   Active POI 부재(-10) 와 R:R 낮음(-5) 만으로 하한 0 도달 가능 (이론적 최저).
+    const rawScore = score;
     score = Math.max(0, Math.min(score, 130));
+    if (rawScore > 130) {
+      breakdown.push({ text: `Cap 130 적용 (raw ${rawScore} → 130)`, points: 0 });
+    }
 
     let grade, label;
     if (score >= 120)      { grade = 'S';  label = 'ELITE'; }

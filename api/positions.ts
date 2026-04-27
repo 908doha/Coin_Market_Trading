@@ -235,9 +235,14 @@ function binanceSign(query: string, apiSecret: string): string {
   return crypto.createHmac('sha256', apiSecret).update(query).digest('hex');
 }
 
-async function binanceFapiGet(apiKey: string, apiSecret: string, path: string): Promise<any> {
-  const ts  = Date.now();
-  const qs  = `timestamp=${ts}&recvWindow=10000`;
+async function binanceFapiGet(
+  apiKey: string, apiSecret: string, path: string, params?: Record<string, string>,
+): Promise<any> {
+  const ts = Date.now();
+  const extra = params
+    ? Object.entries(params).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&') + '&'
+    : '';
+  const qs  = `${extra}timestamp=${ts}&recvWindow=10000`;
   const sig = binanceSign(qs, apiSecret);
   const url = `https://fapi.binance.com${path}?${qs}&signature=${sig}`;
   const res = await fetch(url, { headers: { 'X-MBX-APIKEY': apiKey, Accept: 'application/json' } });
@@ -257,33 +262,54 @@ async function fetchBinancePositions(apiKey: string, apiSecret: string): Promise
     usdtKrw = t.trade_price;
   } catch {}
 
-  // 포지션 + 모든 열린 주문 병렬 조회
-  // /fapi/v1/openOrders 는 심볼 미지정 시 모든 심볼 한 번에 반환 (rate weight 40).
-  // 주문 조회 권한이 없거나 실패해도 포지션 조회는 계속 진행 (TP/SL 만 비워서 표시).
+  // 포지션 + 모든 열린 주문 병렬 조회.
+  // /fapi/v1/openOrders 는 심볼 미지정 시 모든 심볼 반환 (weight 40).
+  // 일부 계정에서 심볼 미지정 호출이 빈 배열을 주는 케이스가 보고됨 →
+  // 비어 있고 포지션은 있을 때 심볼별 호출로 fallback (weight 1 × N).
   let openOrdersErr: string | null = null;
-  const [posAll, openOrders] = await Promise.all([
+  const [posAll, ordersFirst] = await Promise.all([
     binanceFapiGet(apiKey, apiSecret, '/fapi/v2/positionRisk') as Promise<any[]>,
     binanceFapiGet(apiKey, apiSecret, '/fapi/v1/openOrders').catch((e) => {
       openOrdersErr = e?.message ?? String(e);
-      console.error('[binance:fapi/openOrders]', openOrdersErr);
+      console.error('[binance:fapi/openOrders all]', openOrdersErr);
       return [] as any[];
     }) as Promise<any[]>,
   ]);
   const open = (Array.isArray(posAll) ? posAll : []).filter((p) => parseFloat(p.positionAmt ?? '0') !== 0);
   if (!open.length) return [];
 
+  let openOrders: any[] = Array.isArray(ordersFirst) ? ordersFirst : [];
+  let usedFallback = false;
+
+  // Fallback: 첫 호출이 빈 배열인데 포지션은 있다 → 심볼별 호출 시도.
+  if (openOrders.length === 0) {
+    usedFallback = true;
+    const symbols = Array.from(new Set(open.map((p) => String(p.symbol))));
+    const perSymbol = await Promise.all(
+      symbols.map((s) =>
+        binanceFapiGet(apiKey, apiSecret, '/fapi/v1/openOrders', { symbol: s })
+          .catch((e) => {
+            openOrdersErr = e?.message ?? String(e);
+            console.error(`[binance:fapi/openOrders ${s}]`, openOrdersErr);
+            return [] as any[];
+          }),
+      ),
+    );
+    openOrders = perSymbol.flat();
+  }
+
   // 디버그: 받아온 주문 type 분포 (TP/SL 안 잡힐 때 원인 파악용)
   const typeSummary: Record<string, number> = {};
-  for (const o of (Array.isArray(openOrders) ? openOrders : [])) {
+  for (const o of openOrders) {
     const t = String(o.type ?? '_NONE');
     typeSummary[t] = (typeSummary[t] ?? 0) + 1;
   }
-  const ordersCount = Array.isArray(openOrders) ? openOrders.length : 0;
-  console.log('[binance:openOrders]', ordersCount, typeSummary, openOrdersErr ? `(err: ${openOrdersErr.slice(0, 100)})` : '');
+  console.log('[binance:openOrders]', openOrders.length, typeSummary, usedFallback ? '(fallback)' : '', openOrdersErr ? `(err: ${openOrdersErr.slice(0, 100)})` : '');
   __binanceLastDebug = JSON.stringify({
     positions: open.length,
-    orders:    ordersCount,
+    orders:    openOrders.length,
     types:     typeSummary,
+    fallback:  usedFallback || undefined,
     err:       openOrdersErr ? openOrdersErr.slice(0, 200) : undefined,
   });
 

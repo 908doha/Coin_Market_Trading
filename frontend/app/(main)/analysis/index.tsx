@@ -13,7 +13,7 @@ import Animated, {
   useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS, LinearTransition, Easing,
 } from 'react-native-reanimated';
 import Svg, { Path, Polygon, Rect, Text as SvgText, Circle } from 'react-native-svg';
-import { Text, FadeTabView, AnimatedNumber, Skeleton, PressableScale } from '@/design-system';
+import { Text, FadeTabView, AnimatedNumber, Skeleton, PressableScale, Toggle } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType, ExchangeAccount } from '@/store/accounts';
 import { tradesService } from '@/services';
@@ -368,9 +368,16 @@ export default function Analysis() {
   const sortBtnRef = React.useRef<View>(null);
   const [sortMenuPos, setSortMenuPos] = useState({ top: 0, right: 0 });
   useBlurOnOpen(sortMenuOpen);
-  // contract → { score, direction }. undefined = 미조회, null = 실패
-  const [ictScores, setIctScores] = useState<Record<string, { score: number; direction: 'LONG' | 'SHORT' | null } | null>>({});
+  // contract → { score, direction, signal, risky }. undefined = 미조회, null = 실패
+  const [ictScores, setIctScores] = useState<Record<string, {
+    score:       number;
+    direction:   'LONG' | 'SHORT' | null;   // htf 추세 (호환)
+    signal:      'long' | 'short' | null;   // 종합 신호
+    risky:       boolean;
+    riskReasons: string[];
+  } | null>>({});
   const [ictScanProgress, setIctScanProgress] = useState<{ done: number; total: number } | null>(null);
+  const [hideRisky, setHideRisky] = useState(false);
 
   const { accounts, balances, totalBalance } = useAccounts();
 
@@ -451,12 +458,16 @@ export default function Analysis() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toUpperCase();
-    const base = !q ? tickers : tickers.filter(
+    const searched = !q ? tickers : tickers.filter(
       (t) => t.coin.includes(q) || t.symbol.includes(q) || (t.name?.toUpperCase().includes(q) ?? false),
     );
-    if (sortBy !== 'ict') return base;
+    // 위험 종목 숨기기 — 알려진 위험 케이스만 제외 (미조회/실패는 모르는 것으로 간주해 표시)
+    const safe = hideRisky
+      ? searched.filter((t) => !ictScores[t.contract]?.risky)
+      : searched;
+    if (sortBy !== 'ict') return safe;
     // ICT 점수 desc 정렬. 미조회/실패 항목은 하단으로.
-    return [...base].sort((a, b) => {
+    return [...safe].sort((a, b) => {
       const sa = ictScores[a.contract];
       const sb = ictScores[b.contract];
       const va = sa?.score ?? -1;
@@ -464,7 +475,7 @@ export default function Analysis() {
       if (vb !== va) return vb - va;
       return b.volume24hUsd - a.volume24hUsd;  // tie-breaker
     });
-  }, [tickers, search, sortBy, ictScores]);
+  }, [tickers, search, sortBy, ictScores, hideRisky]);
 
   // ICT 점수 일괄 스캔 — sortBy='ict' 진입 시 top N 티커에 대해 병렬 배치 실행.
   // 사용자 API 키 1개로 Gate.io 를 거치므로 동시 요청 수 제한.
@@ -484,6 +495,29 @@ export default function Analysis() {
     let done      = 0;
     setIctScanProgress({ done: 0, total: targets.length });
 
+    // ICT 정통 시퀀스 위반 / SL 위치 위태로움 등 위험 신호 판정.
+    // 신호 자체가 없으면 '위험' 으로 분류하지 않음 (점수 정렬에서만 의미).
+    const isRisky = (d: any): { risky: boolean; reasons: string[] } => {
+      const reasons: string[] = [];
+      const sig    = d?.summary?.signal;        // 'long' | 'short' | null
+      const sl     = d?.summary?.sl as number | null;
+      const entry  = d?.summary?.entry as number | null;
+      if (!sig || !entry || !sl) return { risky: false, reasons };
+
+      // 1) MTF MSS 부재 — HTF POI → MTF MSS → LTF Confirmation 시퀀스 결함
+      if (d?.mtf?.mss?.found === false) reasons.push('no_mtf_mss');
+
+      // 2) SL 이 동일 방향 미메움(<70%) MTF FVG CE 의 잘못된 쪽
+      //    SHORT: SL < lastBear.ce — 가격이 FVG 메우러 가는 wick 에 SL 잡힘
+      //    LONG : SL > lastBull.ce
+      const lastBear = d?.mtf?.fvg?.lastBear;   // { ce, fillPct }
+      const lastBull = d?.mtf?.fvg?.lastBull;
+      if (sig === 'short' && lastBear && lastBear.fillPct < 70 && sl < lastBear.ce) reasons.push('sl_inside_mtf_fvg');
+      if (sig === 'long'  && lastBull && lastBull.fillPct < 70 && sl > lastBull.ce) reasons.push('sl_inside_mtf_fvg');
+
+      return { risky: reasons.length > 0, reasons };
+    };
+
     const runOne = async (contract: string) => {
       try {
         const res = await fetch(`${API_BASE}/api/ict-analyze`, {
@@ -499,11 +533,16 @@ export default function Analysis() {
           return;
         }
         const dir = data?.htf?.direction;
+        const sig = data?.summary?.signal;
+        const { risky, reasons } = isRisky(data);
         setIctScores((prev) => ({
           ...prev,
           [contract]: {
-            score:     data.score,
-            direction: dir === 'LONG' || dir === 'SHORT' ? dir : null,
+            score:       data.score,
+            direction:   dir === 'LONG' || dir === 'SHORT' ? dir : null,
+            signal:      sig === 'long' || sig === 'short' ? sig : null,
+            risky,
+            riskReasons: reasons,
           },
         }));
       } catch {
@@ -634,9 +673,14 @@ export default function Analysis() {
                 </Svg>
               </Pressable>
 
-              {/* 정렬 드롭다운 — 홈의 계좌 선택 드롭다운(accDropBtn)과 동일 패턴 */}
+              {/* 우측 컨트롤: 위험 숨기기 토글 + 정렬 드롭다운 */}
               {scanExpanded && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  {/* 위험 종목 숨기기 — MTF MSS 부재 / SL 이 미메움 FVG 안쪽 등 */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={st.hideRiskyLabel}>위험 숨기기</Text>
+                    <Toggle value={hideRisky} onValueChange={setHideRisky} />
+                  </View>
                   {ictScanProgress && sortBy === 'ict' && (
                     <Text style={st.sortBtnProgress}>
                       {ictScanProgress.done}/{ictScanProgress.total}
@@ -806,6 +850,7 @@ const st = StyleSheet.create({
   scanTitle:    { fontSize: 17, fontWeight: '700', color: '#191919' },
 
   sortBtnProgress: { fontSize: 11, color: colors.text.tertiary, fontWeight: '600' },
+  hideRiskyLabel:  { fontSize: 12, fontWeight: '600', color: '#555' },
   sortDropBtn:    { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#F0F0F5', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, maxWidth: 140 },
   sortDropLabel:  { fontSize: 12, fontWeight: '600', color: '#555', flexShrink: 1 },
   sortMenuOverlay: { flex: 1, backgroundColor: 'transparent' },

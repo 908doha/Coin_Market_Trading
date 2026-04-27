@@ -152,12 +152,13 @@ function IctLtfSection({ ltf }: { ltf: IctAnalysis['ltf'] }) {
 }
 
 // ─── 점수 카드 ───────────────────────────────────────────────────────────────
-function ScoreCard({ score, grade }: { score: number; grade: string }) {
+function ScoreCard({ score, grade, signal }: { score: number; grade: string; signal?: string | null }) {
   const gradeColors: Record<string, string> = {
     S: '#8B5CF6', A: '#3B82F6', 'B+': '#10B981', B: '#06B6D4', C: '#F59E0B', D: '#F97316', F: '#EF4444',
   };
   const barColor = score >= 75 ? '#10B981' : score >= 55 ? '#F59E0B' : '#EF4444';
   const gc = gradeColors[grade] ?? '#8B5CF6';
+  const sig = signal === 'long' || signal === 'short' ? signal : null;
   return (
     <View style={sc.wrap}>
       <View style={{ flex: 1, marginRight: 16 }}>
@@ -166,6 +167,18 @@ function ScoreCard({ score, grade }: { score: number; grade: string }) {
           <View style={[sc.barFill, { width: `${score}%` as any, backgroundColor: barColor }]} />
         </View>
       </View>
+      {sig && (
+        <View style={[sc.dirBadge, sig === 'long'
+          ? { backgroundColor: '#E8F5EE', borderColor: '#1AC24E' }
+          : { backgroundColor: '#FFF0F0', borderColor: '#FF4747' }]}>
+          <Text style={[sc.dirArrow, { color: sig === 'long' ? '#1AC24E' : '#FF4747' }]}>
+            {sig === 'long' ? '▲' : '▼'}
+          </Text>
+          <Text style={[sc.dirText,  { color: sig === 'long' ? '#1AC24E' : '#FF4747' }]}>
+            {sig === 'long' ? 'LONG' : 'SHORT'}
+          </Text>
+        </View>
+      )}
       <View style={[sc.gradeBadge, { backgroundColor: gc + '22', borderColor: gc }]}>
         <Text style={[sc.gradeText, { color: gc }]}>{grade}</Text>
         <Text style={[sc.scoreNum, { color: gc }]}>{score}</Text>
@@ -209,7 +222,7 @@ export default function IctAnalysisCard({
       ) : !ictAnalysis ? null : (
         <>
           {ictAnalysis.score != null && ictAnalysis.grade && (
-            <ScoreCard score={ictAnalysis.score} grade={ictAnalysis.grade} />
+            <ScoreCard score={ictAnalysis.score} grade={ictAnalysis.grade} signal={ictAnalysis.summary?.signal} />
           )}
 
           <View style={ict.priceRow}>
@@ -366,4 +379,7 @@ const sc = StyleSheet.create({
   gradeBadge: { width: 56, height: 56, borderRadius: 14, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   gradeText:  { fontSize: 18, fontWeight: '800', lineHeight: 22 },
   scoreNum:   { fontSize: 11, fontWeight: '700' },
+  dirBadge:   { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, height: 56, borderRadius: 14, borderWidth: 2, marginRight: 8 },
+  dirArrow:   { fontSize: 13, fontWeight: '800' },
+  dirText:    { fontSize: 12, fontWeight: '800', letterSpacing: 0.3 },
 });

@@ -3,27 +3,33 @@ const config = require('../config');
 const logger = require('../utils/logger');
 
 /**
- * ICT (Inner Circle Trading) 전략 v2
+ * ICT (Inner Circle Trading) 전략 v3 — Hard Gate + Targets-driven R:R
  *
- * 변경사항:
- *  - 타임프레임: 4h → 15m → 5m
- *  - 진입 근거: FVG CE, FVG Fill, IOFED
- *  - 세션: Asian / London / NY (점심시간 제외, 주말 제외)
- *  - PDH/PDL 유동성
- *  - Session Range 유동성
+ * v2 → v3 변경:
+ *  - Hard Gate 5 단계: 모두 통과해야 entry. 컨플루언스 강도별 R:R 차등 폐기.
+ *  - TP 는 가장 가까운 구조적 타겟(NEAREST). fallback TP (risk×2.5) 폐기.
+ *  - R:R floor 1.0 단일 게이트. cap 5.0 유지.
+ *  - Setup Score 는 entry decision 영향 없음 (로깅/사후분석 전용).
  *
  * 3단계 분석:
- *  HTF (4h)  - 방향 판단 + PDH/PDL 유동성 레벨
- *  MTF (15m) - 구조 확인 (MSS + OB/FVG)
- *  LTF (5m)  - 정밀 진입 (FVG CE / FVG Fill / IOFED)
+ *  HTF (4h)  - 방향 판단 + PDH/PDL + Active POI / Sweep
+ *  MTF (15m) - 구조 확인 (MSS aligned 필수, swing pattern 은 가점)
+ *  LTF (5m)  - 정밀 진입 (FVG CE / FVG Fill / IOFED / Sweep+MSS)
+ *
+ * Hard Gate:
+ *   1. HTF Bias 확정 (direction 결정)
+ *   2. HTF Backing — Active POI OR HTF/PDH-PDL Sweep (LTF Range Sweep 제외)
+ *   3. MTF MSS aligned + MTF POI 존재
+ *   4. LTF entry trigger (FVG CE / Fill / IOFED / Sweep+MSS)
+ *   5. 구조적 TP 존재 + nearest R:R ≥ 1.0
  */
 class IctStrategy {
   constructor() {
-    this.name = 'ICT Strategy v2';
+    this.name = 'ICT Strategy v3';
   }
 
   /**
-   * 멀티 타임프레임 분석
+   * 멀티 타임프레임 분석 — Hard Gate 1~5
    */
   analyze(candleData) {
     const { htf, mtf, ltf } = candleData;
@@ -48,10 +54,11 @@ class IctStrategy {
     }
     confluence.push(`세션: ${session.name}`);
 
-    // ========== STEP 1: HTF (4h) 방향 + PDH/PDL ==========
+    // ========== Gate 1: HTF Bias 확정 ==========
     const htfBias = this._analyzeHTF(htf);
     if (!htfBias.direction) {
-      return { signal: null, reason: `HTF 방향 불명확: ${htfBias.reason}` };
+      logger.info(`[ICT v3] Gate 1 실패: HTF 방향 불명확 (${htfBias.reason})`);
+      return { signal: null, reason: `[Gate 1] HTF 방향 불명확: ${htfBias.reason}`, confluence };
     }
     confluence.push(`HTF(${config.timeframes.htf}) ${htfBias.direction.toUpperCase()}`);
     // HTF MSS 가 direction 근거일 때 별도 confluence (MTF/LTF MSS 와 대칭적 가점).
@@ -60,13 +67,13 @@ class IctStrategy {
       confluence.push(`HTF ${htfBias.reason.replace(/^HTF /, '')}`);
     }
 
-    // PDH/PDL
+    // PDH/PDL Sweep — Gate 2 backing 후보
     if (htfBias.pdhl) {
       if (htfBias.pdhl.pdhSweep) confluence.push(`PDH Sweep (${htfBias.pdhl.pdh.toFixed(2)})`);
       if (htfBias.pdhl.pdlSweep) confluence.push(`PDL Sweep (${htfBias.pdhl.pdl.toFixed(2)})`);
     }
 
-    // HTF POI — 현재가가 HTF OB/FVG 내부 또는 ±0.3% 근접 시 가점
+    // HTF Active POI — 현재가가 HTF OB/FVG 내부 또는 ±htfPoiTolerance 근접
     const hasHtfPoi = (htfBias.activeOBs && htfBias.activeOBs.length > 0)
                    || (htfBias.activeFVGs && htfBias.activeFVGs.length > 0);
     if (htfBias.activeOBs && htfBias.activeOBs.length > 0) {
@@ -84,21 +91,37 @@ class IctStrategy {
       confluence.push(`★ HTF ${sw.label} @ ${sw.level.toFixed(2)}`);
     }
 
-    // ========== STEP 2: MTF (15m) 구조 확인 ==========
+    // ========== Gate 2: HTF Backing (Active POI OR HTF/PD Sweep) ==========
+    // ICT 정통: HTF 레이어에 entry 명분 (POI 또는 daily/HTF liquidity sweep) 이 있어야 함.
+    // LTF Range Sweep 은 backing 으로 인정 안 됨 — daily liquidity 풀이 아님.
+    const hasHtfSweep = !!htfBias.htfActiveSweep;
+    const hasPdSweep = !!(htfBias.pdhl && (htfBias.pdhl.pdhSweep || htfBias.pdhl.pdlSweep));
+    if (!hasHtfPoi && !hasHtfSweep && !hasPdSweep) {
+      logger.info(`[ICT v3] Gate 2 실패: HTF backing 부재 (${htfBias.direction.toUpperCase()})`);
+      return {
+        signal: null,
+        reason: '[Gate 2] HTF backing 부재 (Active POI 없음 + HTF/PDH-PDL Sweep 없음)',
+        confluence,
+      };
+    }
+
+    // ========== Gate 3: MTF MSS Aligned + POI 필수 ==========
     const mtfStructure = this._analyzeMTF(mtf, htfBias.direction, htfBias);
     if (!mtfStructure.confirmed) {
-      return { signal: null, reason: `MTF 구조 미확인: ${mtfStructure.reason}`, confluence };
+      logger.info(`[ICT v3] Gate 3 실패: ${mtfStructure.reason}`);
+      return { signal: null, reason: `[Gate 3] ${mtfStructure.reason}`, confluence };
     }
     confluence.push(...mtfStructure.confluence);
 
-    // ========== STEP 3: LTF (5m) 정밀 진입 ==========
+    // ========== Gate 4: LTF Entry Trigger 필수 ==========
     const ltfEntry = this._analyzeLTF(ltf, htfBias.direction, currentPrice, session);
     if (!ltfEntry.ready) {
-      return { signal: null, reason: `LTF 진입 미충족: ${ltfEntry.reason}`, confluence };
+      logger.info(`[ICT v3] Gate 4 실패: ${ltfEntry.reason}`);
+      return { signal: null, reason: `[Gate 4] LTF 진입 미충족: ${ltfEntry.reason}`, confluence };
     }
     confluence.push(...ltfEntry.confluence);
 
-    // ========== 최종 신호 ==========
+    // ========== Gate 5: SL 유효 + 구조적 TP + R:R ≥ 1.0 ==========
     const direction = htfBias.direction;
     const signal = direction === 'bullish' ? 'long' : 'short';
 
@@ -106,52 +129,24 @@ class IctStrategy {
       currentPrice, direction, mtfStructure, ltfEntry, htfBias
     );
 
-    // SL 계산 실패 (risk-cap-violation, risk-zero) 시 entry 차단.
-    // tpSource 가 self-documenting reason 으로 전달됨.
     if (sl == null) {
-      return { signal: null, reason: tpSource || 'SL calculation failed', confluence };
-    }
-
-    // ========== Weak setup + fallback TP skip ==========
-    // ICT: "구조적 liquidity draw 없으면 매매 skip". weak setup (hasHtfPoi 없고
-    // confluence < 5) 과 fallback TP (구조적 타겟 전부 탈락) 의 이중 약점 조합은
-    // minRR 필터의 경계 (2.5) 를 정확히 통과해도 entry 금지.
-    const isFallbackTp = /^fallback/.test(tpSource || '');
-    if (!hasHtfPoi && confluence.length < 5 && isFallbackTp) {
-      logger.info(`[ICT v2] ${signal.toUpperCase()} weak setup + fallback TP → skip`);
+      // tpSource 가 self-documenting reason: 'risk-cap-violation' | 'risk-zero'
+      //   | 'no-structural-target' | 'rr-below-floor'
+      logger.info(`[ICT v3] Gate 5 실패: ${tpSource}`);
       return {
         signal: null,
-        reason: 'weak setup + 구조적 TP 없음 (fallback)',
+        reason: `[Gate 5] ${tpSource || 'SL/TP calculation failed'}`,
         confluence,
       };
     }
 
-    // ========== R:R 필터 (7-B: 컨플루언스 강도별 최소 R:R) ==========
-    let minRR;
-    if (hasHtfPoi && confluence.length >= 6) {
-      minRR = 1.5; // Strong setup
-    } else if (hasHtfPoi || confluence.length >= 5) {
-      minRR = 2.0; // Medium setup
-    } else {
-      minRR = 2.5; // Weak setup
-    }
-
-    if (rr < minRR) {
-      logger.info(`[ICT v2] ${signal.toUpperCase()} R:R ${rr.toFixed(2)} < 최소 ${minRR} (컨플루언스 ${confluence.length}개) → 스킵`);
-      return {
-        signal: null,
-        reason: `R:R ${rr.toFixed(2)} 부족 (최소 ${minRR}, 컨플루언스 ${confluence.length}개)`,
-        confluence,
-      };
-    }
-
-    // ========== Setup Score ==========
-    const setupScore = this._calculateSetupScore(confluence, rr);
-    logger.info(`[ICT v2] ${signal.toUpperCase()} | R:R ${rr.toFixed(2)} | ${setupScore.score}/100 ${setupScore.label} | ${confluence.length}개 컨플루언스`);
+    // ========== Setup Score (Hard Gate 통과 후, 로깅 전용) ==========
+    const setupScore = this._calculateSetupScore(confluence, rr, { hasHtfPoi });
+    logger.info(`[ICT v3] ${signal.toUpperCase()} | R:R ${rr.toFixed(2)} | ${setupScore.score} ${setupScore.label} | ${confluence.length}개 컨플루언스`);
 
     return {
       signal,
-      reason: `ICT v2 ${signal.toUpperCase()} - R:R ${rr.toFixed(2)} | ${setupScore.score}/100 ${setupScore.label}`,
+      reason: `ICT v3 ${signal.toUpperCase()} - R:R ${rr.toFixed(2)} | ${setupScore.score} ${setupScore.label}`,
       entry: currentPrice,
       sl: parseFloat(sl.toFixed(2)),
       tp: parseFloat(tp.toFixed(2)),
@@ -159,7 +154,8 @@ class IctStrategy {
       confluence,
       setupScore,
       hasHtfPoi,
-      hasHtfSweep: !!htfBias.htfActiveSweep,
+      // hasHtfSweep: orderManager poiBoost 호환 — HTF/PD sweep 둘 다 포함
+      hasHtfSweep: hasHtfSweep || hasPdSweep,
     };
   }
 
@@ -432,8 +428,9 @@ class IctStrategy {
       confluence.push(`★ MTF ${mtfActiveSweep.label} @ ${mtfActiveSweep.level.toFixed(2)}`);
     }
 
-    // hasStructure: ICT 정통 "MSS 또는 swing 패턴 (HH/HL/LH/LL)" 으로 구조 확인.
-    // OB 존재만으로는 구조 증거 부족 (OB 는 potential reaction zone, structural break 아님).
+    // v3 Gate 3: MTF MSS aligned 필수. swing pattern (HH/HL/LH/LL) 단독은
+    //   structural break 가 아니므로 entry 자격 부여 안 됨. 정렬된 swing pattern 은
+    //   confluence 가점으로만 표시 (mssAligned 일 때는 MSS confluence 가 이미 있어 중복 제외).
     let swingPattern = false;
     if (swingHighs.length >= 2 && swingLows.length >= 2) {
       const lastHigh = swingHighs[swingHighs.length - 1].price;
@@ -444,12 +441,22 @@ class IctStrategy {
         (htfDirection === 'bullish' && lastHigh > prevHigh && lastLow > prevLow) ||
         (htfDirection === 'bearish' && lastHigh < prevHigh && lastLow < prevLow);
     }
-    const hasStructure = mssAligned || swingPattern;
+    if (swingPattern && !mssAligned) {
+      const pat = htfDirection === 'bullish' ? 'HH/HL' : 'LH/LL';
+      confluence.push(`MTF Swing Pattern (${pat})`);
+    }
+
     const hasPOI = relevantOBs.length > 0 || unfilled.length > 0;
 
+    let reason;
+    if (!mssAligned && !hasPOI) reason = 'MTF MSS aligned 없음 + POI 부족';
+    else if (!mssAligned) reason = 'MTF MSS aligned 없음';
+    else if (!hasPOI) reason = 'MTF POI (OB/FVG) 부족';
+    else reason = '구조 확인됨';
+
     return {
-      confirmed: hasStructure && hasPOI,
-      reason: hasStructure && hasPOI ? '구조 확인됨' : 'MSS/swing 패턴 또는 POI 부족 (위치 검증 후)',
+      confirmed: mssAligned && hasPOI,
+      reason,
       confluence,
       orderBlocks: relevantOBs,
       opposingOBs,
@@ -583,17 +590,6 @@ class IctStrategy {
   }
 
   /**
-   * TP 후보 중 minRR 이상의 R:R 을 만족하는 첫 원소 반환.
-   *   tpCandidates 는 수집 단계에서 이미 direction 쪽만 포함하므로 Math.abs 로
-   *   Bullish/Bearish 부호 차이 흡수.
-   *
-   * Pass 3-C2: Bullish/Bearish TP 블록의 R:R filter 공통 로직 추출 (나머지 거울 유지).
-   */
-  _findTpAtRR(tpCandidates, price, risk, minRR) {
-    return tpCandidates.find((t) => Math.abs(t.price - price) / risk >= minRR) || null;
-  }
-
-  /**
    * SL candidate 를 safety margin 적용 + maxRiskPct 가드 후 반환.
    *   - basePrice: structural reference (OB.low / OB.high, swing.price, PDL/PDH 등)
    *   - direction === 'bullish' 시 candidate = basePrice * (1 - 0.001) (price 아래로 0.1% 띄움)
@@ -613,22 +609,22 @@ class IctStrategy {
   }
 
   /**
-   * SL/TP 계산 (ICT 구조적 R:R)
+   * SL/TP 계산 (ICT 구조적 R:R) — v3 Targets-driven
    *
-   * SL: 구조 기반 (HTF OB → MTF OB → LTF Swing → PDH/PDL → 고정 %)
-   * TP: 구조적 타겟 (opposing liquidity → opposing OB → PDH/PDL → risk × 2.5)
+   * SL: 구조 기반 체인 (HTF OB → MTF OB → IOFED → LTF Swing → PDH/PDL → 고정 %)
+   *     변경 없음. risk-cap-violation / risk-zero 가드 동일.
+   * TP: 가장 가까운 구조적 타겟 (NEAREST). fallback (risk × 2.5) 폐기.
+   *     - 후보 비어있으면 sl=null, tpSource='no-structural-target' (entry 차단)
+   *     - nearest R:R < 1.0 이면 sl=null, tpSource='rr-below-floor'  (entry 차단)
+   *     - nearest R:R > maxRR(5.0) 이면 risk × maxRR 로 캡
    *
-   * R:R 가드레일:
-   *   - max R:R 5.0 (타겟 너무 멀면 캡)
-   *   - min R:R은 컨플루언스 강도별 차등 (analyze()에서 필터)
-   *
-   * @param confluenceCount  컨플루언스 개수 (R:R 산출 후 반환용)
+   * R:R 검증 단일화: minRR 차등 폐기, floor 1.0 만 단일 게이트.
    */
   _calculateSLTP(price, direction, mtfStructure, ltfEntry, htfBias) {
     const slPct = config.stopLossPercent / 100;
     const maxRiskPct = config.ict.maxRiskPct;
     const maxRR = 5.0;
-    const fallbackRR = 2.5;
+    const minRR = 1.0;
 
     // ===== SL 계산 (기존 구조 기반 — 변경 없음) =====
     let sl;
@@ -737,186 +733,154 @@ class IctStrategy {
       return { sl: null, tp: null, rr: 0, tpSource: 'risk-zero' };
     }
 
-    // ===== TP 계산 (구조적 타겟 — ICT Liquidity Draw) =====
-    // 가격은 다음 유동성 풀로 끌린다. TP = 가장 가까운 구조적 타겟.
-    // 후보를 모두 모은 뒤 가까운 순으로 정렬, R:R ≥ 1.5인 첫 후보 채택.
-    let tp;
-    let tpSource = 'fallback';
+    // ===== TP 계산 (NEAREST 구조적 타겟 — v3) =====
+    // ICT: 가격은 다음 유동성 풀로 끌린다. TP = 가장 가까운 구조적 타겟.
+    //   fallback TP 폐기. 후보 비어있거나 nearest R:R < 1.0 이면 entry 차단.
     const tpCandidates = []; // { price, source }
 
     if (direction === 'bullish') {
       // Long: 위쪽 타겟 수집
-      // 1. HTF swing high (opposing BSL) — 진입가 위의 모든 swing high 수집
       if (htfBias.swingHighs) {
         for (const sh of htfBias.swingHighs) {
           if (sh.price > price) tpCandidates.push({ price: sh.price, source: 'HTF swing high' });
         }
       }
-      // 2. PDH
       if (htfBias.pdhl && htfBias.pdhl.pdh > price) {
         tpCandidates.push({ price: htfBias.pdhl.pdh, source: 'PDH' });
       }
-      // 3. MTF opposing OB (bearish OB 하단 = 저항)
       if (mtfStructure.opposingOBs) {
         for (const ob of mtfStructure.opposingOBs) {
           if (ob.low > price) tpCandidates.push({ price: ob.low, source: 'MTF opposing OB' });
         }
       }
-      // 4. HTF opposing OB
       if (htfBias.opposingOBs) {
         for (const ob of htfBias.opposingOBs) {
           if (ob.low > price) tpCandidates.push({ price: ob.low, source: 'HTF opposing OB' });
         }
       }
-      // 5. HTF opposing FVG (반대 방향 미메움 FVG)
       if (htfBias.opposingFVGs) {
         for (const f of htfBias.opposingFVGs) {
           if (f.bottom > price) tpCandidates.push({ price: f.bottom, source: 'HTF opposing FVG' });
         }
       }
-
       // 가까운 순 정렬 (오름차순)
       tpCandidates.sort((a, b) => a.price - b.price);
-
-      // R:R ≥ 1.5 인 첫 후보 채택
-      const match = this._findTpAtRR(tpCandidates, price, risk, 1.5);
-      if (match) {
-        const rr = (match.price - price) / risk;
-        tp = rr > maxRR ? price + risk * maxRR : match.price;
-        tpSource = rr > maxRR ? `${match.source} (캡 ${maxRR})` : match.source;
-      } else {
-        tp = price + risk * fallbackRR;
-        tpSource = `fallback (risk×${fallbackRR})`;
-      }
     } else {
       // Short: 아래쪽 타겟 수집
-      // 1. HTF swing low (opposing SSL)
       if (htfBias.swingLows) {
-        for (const sl of htfBias.swingLows) {
-          if (sl.price < price) tpCandidates.push({ price: sl.price, source: 'HTF swing low' });
+        for (const slCandidate of htfBias.swingLows) {
+          if (slCandidate.price < price) tpCandidates.push({ price: slCandidate.price, source: 'HTF swing low' });
         }
       }
-      // 2. PDL
       if (htfBias.pdhl && htfBias.pdhl.pdl < price) {
         tpCandidates.push({ price: htfBias.pdhl.pdl, source: 'PDL' });
       }
-      // 3. MTF opposing OB (bullish OB 상단 = 지지)
       if (mtfStructure.opposingOBs) {
         for (const ob of mtfStructure.opposingOBs) {
           if (ob.high < price) tpCandidates.push({ price: ob.high, source: 'MTF opposing OB' });
         }
       }
-      // 4. HTF opposing OB
       if (htfBias.opposingOBs) {
         for (const ob of htfBias.opposingOBs) {
           if (ob.high < price) tpCandidates.push({ price: ob.high, source: 'HTF opposing OB' });
         }
       }
-      // 5. HTF opposing FVG
       if (htfBias.opposingFVGs) {
         for (const f of htfBias.opposingFVGs) {
           if (f.top < price) tpCandidates.push({ price: f.top, source: 'HTF opposing FVG' });
         }
       }
-
       // 가까운 순 정렬 (내림차순 = 가격에서 가장 가까운 아래쪽부터)
       tpCandidates.sort((a, b) => b.price - a.price);
+    }
 
-      const match = this._findTpAtRR(tpCandidates, price, risk, 1.5);
-      if (match) {
-        const rr = (price - match.price) / risk;
-        tp = rr > maxRR ? price - risk * maxRR : match.price;
-        tpSource = rr > maxRR ? `${match.source} (캡 ${maxRR})` : match.source;
-      } else {
-        tp = price - risk * fallbackRR;
-        tpSource = `fallback (risk×${fallbackRR})`;
-      }
+    // ===== Gate 5-A: 구조적 TP 후보 부재 → entry 차단 =====
+    if (tpCandidates.length === 0) {
+      logger.warn(`[SL/TP] 구조적 TP 후보 없음 (liquidity draw 부재) → entry 차단`);
+      return { sl: null, tp: null, rr: 0, tpSource: 'no-structural-target' };
+    }
+
+    // ===== NEAREST 채택 + R:R floor/cap 검증 =====
+    const nearest = tpCandidates[0];
+    const nearestRR = Math.abs(nearest.price - price) / risk;
+
+    // ===== Gate 5-B: nearest R:R < 1.0 → entry 차단 =====
+    if (nearestRR < minRR) {
+      logger.warn(`[SL/TP] 구조적 TP 너무 가까움 (R:R ${nearestRR.toFixed(2)} < ${minRR}) → entry 차단`);
+      return { sl: null, tp: null, rr: 0, tpSource: `rr-below-floor (R:R ${nearestRR.toFixed(2)})` };
+    }
+
+    // ===== R:R cap 5.0 =====
+    let tp;
+    let tpSource;
+    if (nearestRR > maxRR) {
+      tp = direction === 'bullish' ? price + risk * maxRR : price - risk * maxRR;
+      tpSource = `${nearest.source} (캡 ${maxRR})`;
+    } else {
+      tp = nearest.price;
+      tpSource = nearest.source;
     }
 
     const actualRR = Math.abs(tp - price) / risk;
-    logger.info(`[SL/TP] SL=${sl.toFixed(2)} | TP=${tp.toFixed(2)} (${tpSource}) | R:R 1:${actualRR.toFixed(2)} | 후보 ${tpCandidates.length}개`);
+    logger.info(`[SL/TP] SL=${sl.toFixed(2)} | TP=${tp.toFixed(2)} (${tpSource}) | R:R 1:${actualRR.toFixed(2)} | 후보 ${tpCandidates.length}개 (nearest 채택)`);
 
-    // rr 은 raw 값 반환 — 소비처에서 display 시점에만 toFixed 적용.
-    // 반올림된 값을 비교에 쓰면 경계 0.005 이내 정밀도 손실 발생.
     return { sl, tp, rr: actualRR, tpSource };
   }
 
   /**
-   * 컨플루언스 점수 계산 (ICT 중요도 기반, 100점 만점)
+   * 컨플루언스 점수 (v3 — Hard Gate 통과 후 사후 분석/로깅 전용)
    *
-   * 각 컨플루언스 항목에 ICT 중요도에 따른 점수를 부여하고,
-   * R:R 보너스를 더해 총점(최대 100)을 산출한다.
+   * ICT 정통: Hard Gate 5 통과 = 정통 셋업 자격 (베이스 100). 가점/감점은 셋업 품질 보정.
+   * 본 score 는 entry decision 에 영향 없음 (analyze() 가 호출 시점엔 이미 진입 확정).
    *
-   * @param confluence  컨플루언스 문자열 배열
-   * @param rr          Risk:Reward 비율
+   * @param confluence   컨플루언스 문자열 배열 (Gate 통과 후 누적된 항목)
+   * @param rr           Risk:Reward 비율 (raw)
+   * @param ctx          { hasHtfPoi } — Active POI 부재 시 감점 판정용
    * @returns {{ score, grade, label, breakdown }}
    */
-  _calculateSetupScore(confluence, rr) {
-    const rules = [
-      { pattern: /세션:/,                              points: 5,  label: 'Session' },
-      { pattern: /HTF\(.+\)\s+(BULLISH|BEARISH)/,      points: 10, label: 'HTF Direction' },
-      // HTF MSS (BOS/CHoCH) — MTF/LTF MSS 와 대칭, HTF 레이어 우선으로 10점
-      { pattern: /HTF (BOS|CHoCH)/,                    points: 10, label: 'HTF MSS' },
-      { pattern: /★ HTF OB 진입/,                      points: 15, label: 'HTF OB Entry' },
-      { pattern: /★ HTF FVG 진입/,                     points: 12, label: 'HTF FVG Entry' },
-      // HTF Sweep ↔ PDH/PDL 가중치 swap — ICT daily liquidity 우선 (1-B-2 NY midnight 업그레이드 반영)
-      { pattern: /★ HTF (BSL|SSL) sweep/,              points: 8,  label: 'HTF Sweep' },
-      { pattern: /PD[HL] Sweep/,                        points: 10, label: 'PDH/PDL Sweep' },
-      { pattern: /★ HTF\+MTF.+겹침/,                   points: 12, label: 'HTF+MTF Overlap' },
-      { pattern: /MTF\(.+\)\s+(BOS|CHoCH)/,            points: 8,  label: 'MTF MSS' },
-      { pattern: /MTF OB/,                              points: 7,  label: 'MTF OB' },
-      { pattern: /MTF FVG/,                             points: 5,  label: 'MTF FVG' },
-      { pattern: /★ MTF (BSL|SSL) sweep/,              points: 7,  label: 'MTF Sweep' },
-      { pattern: /LTF FVG CE/,                          points: 8,  label: 'LTF FVG CE' },
-      { pattern: /LTF FVG Fill/,                        points: 6,  label: 'LTF FVG Fill' },
-      { pattern: /IOFED/,                               points: 7,  label: 'IOFED' },
-      { pattern: /LTF (BSL|SSL) sweep/,                points: 6,  label: 'LTF Sweep' },
-      { pattern: /LTF (BOS|CHoCH)/,                    points: 4,  label: 'LTF MSS' },
-      { pattern: /Range Sweep/,                          points: 5,  label: 'Session Range' },
-    ];
+  _calculateSetupScore(confluence, rr, { hasHtfPoi } = {}) {
+    const joined = confluence.join(' || ');
+    const breakdown = [{ text: 'Hard Gate 5개 통과 (베이스)', points: 100 }];
+    let score = 100;
 
-    const breakdown = [];
-    let total = 0;
+    const add = (cond, points, text) => {
+      if (!cond) return;
+      score += points;
+      breakdown.push({ text, points });
+    };
 
-    for (const c of confluence) {
-      let matched = false;
-      for (const rule of rules) {
-        if (rule.pattern.test(c)) {
-          total += rule.points;
-          breakdown.push({ text: c, points: rule.points });
-          matched = true;
-          break; // 한 컨플루언스에 하나의 룰만 매칭
-        }
-      }
-      // 매치 실패 confluence 는 silent 로 누락되지 않고 breakdown 에 표시 + 경고.
-      // 향후 confluence 포맷 변경 시 regex 호환성 깨져도 조기 탐지 가능.
-      if (!matched) {
-        logger.warn(`[setupScore] 미매칭 confluence: "${c}"`);
-        breakdown.push({ text: c, points: 0, unmatched: true });
-      }
-    }
+    // ===== 가점 =====
+    add(/★ HTF\+MTF.+겹침/.test(joined), 10, 'HTF+MTF POI Overlap');
 
-    // R:R 보너스
-    let rrBonus = 0;
-    if (rr >= 4.0) rrBonus = 8;
-    else if (rr >= 3.0) rrBonus = 5;
-    else if (rr >= 2.5) rrBonus = 3;
-    if (rrBonus > 0) {
-      total += rrBonus;
-      breakdown.push({ text: `R:R ${rr.toFixed(2)} bonus`, points: rrBonus });
-    }
+    const hasActivePoiTxt = /★ HTF (OB|FVG) 진입/.test(joined);
+    const hasHtfSweepTxt = /★ HTF (BSL|SSL)/.test(joined);
+    const hasPdSweepTxt = /PD[HL] Sweep/.test(joined);
+    add(hasActivePoiTxt && (hasHtfSweepTxt || hasPdSweepTxt), 10, 'HTF POI + Sweep 동시');
+    add(hasPdSweepTxt, 8, 'PDH/PDL Sweep');
+    add(/IOFED/.test(joined), 7, 'IOFED Entry');
+    add(/LTF (BOS|CHoCH)/.test(joined), 5, 'LTF MSS Aligned');
+    add(/★ MTF (BSL|SSL)/.test(joined), 5, 'MTF Sweep');
+    add(/Range Sweep/.test(joined), 3, 'Session Range Sweep');
 
-    const score = Math.min(total, 100);
+    // ===== 감점 =====
+    // Gate 2 를 Sweep 로만 통과한 경우 (Active POI 부재) — 셋업 약점.
+    //   문자열 의존 대신 ctx.hasHtfPoi (analyze() 가 직접 산출한 boolean) 사용.
+    add(hasHtfPoi === false, -10, 'HTF Active POI 부재 (Sweep 으로만 통과)');
+    add(rr < 1.5, -5, `R:R ${rr.toFixed(2)} 낮음 (구조적 TP 가까움)`);
 
-    // 등급 결정
+    // ===== R:R 보너스 (강한 구조적 R:R) =====
+    if (rr >= 4.0) add(true, 8, `R:R ${rr.toFixed(2)} 우수`);
+    else if (rr >= 3.0) add(true, 5, `R:R ${rr.toFixed(2)} 양호`);
+    else if (rr >= 2.0) add(true, 3, `R:R ${rr.toFixed(2)} 적정`);
+
+    score = Math.max(0, Math.min(score, 130));
+
     let grade, label;
-    if (score >= 90) { grade = 'S'; label = 'ELITE'; }
-    else if (score >= 80) { grade = 'A'; label = 'PREMIUM'; }
-    else if (score >= 70) { grade = 'B+'; label = 'STRONG'; }
-    else if (score >= 60) { grade = 'B'; label = 'SOLID'; }
-    else if (score >= 50) { grade = 'C'; label = 'MODERATE'; }
-    else if (score >= 40) { grade = 'D'; label = 'WEAK'; }
-    else { grade = 'F'; label = 'FRAGILE'; }
+    if (score >= 120)      { grade = 'S';  label = 'ELITE'; }
+    else if (score >= 110) { grade = 'A';  label = 'PREMIUM'; }
+    else if (score >= 100) { grade = 'B+'; label = 'STRONG'; }
+    else if (score >= 90)  { grade = 'B';  label = 'SOLID'; }
+    else                   { grade = 'C';  label = 'MODERATE'; }
 
     return { score, grade, label, breakdown };
   }

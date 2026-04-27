@@ -66,16 +66,22 @@ test('RISK-01 (b): 구조 후보 탈락했지만 폴백 risk ≤ maxRiskPct → 
     config: { stopLossPercent: 2, ict: { maxRiskPct: 0.03 } },
   });
 
+  // v3: TP 도 NEAREST 구조적 후보 + R:R floor 1.0 검증.
+  //   SL 폴백 (98) → risk=2. swing high 103 = nearest TP, R:R=(103-100)/2=1.5 ≥ 1.0 통과.
+  const htfBias = emptyHtfBias();
+  htfBias.swingHighs = [{ price: 103 }];
+
   const result = strategy._calculateSLTP(
     100, 'bullish',
     emptyMtfStructure(),
     emptyLtfEntry(),
-    emptyHtfBias(),
+    htfBias,
   );
 
   assert.ok(result.sl !== null, 'sl 은 유효해야 함');
   assert.ok(Math.abs(result.sl - 98) < 0.01, `sl ≈ 98 이어야 함, got ${result.sl}`);
   assert.ok(result.tp !== null && result.tp > 100, 'tp 는 price 위');
+  assert.ok(Math.abs(result.tp - 103) < 0.01, `nearest TP=103, got ${result.tp}`);
   assert.ok(result.rr > 0);
 });
 

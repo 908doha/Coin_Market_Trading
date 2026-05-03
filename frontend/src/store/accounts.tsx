@@ -153,20 +153,24 @@ const AccountsContext = createContext<AccountsContextValue | null>(null);
 function sumBalances(bals: (Balance | null)[]): Balance | null {
   const valid = bals.filter((b): b is Balance => b !== null);
   if (!valid.length) return null;
-  return valid.reduce<Balance>(
+  const summed = valid.reduce(
     (acc, b) => ({
-      total:           acc.total           + b.total,
-      invested:        acc.invested        + b.invested,
-      available:       acc.available       + b.available,
-      profitTotal:     acc.profitTotal     + b.profitTotal,
-      profitRate:      acc.profitRate      + b.profitRate,
-      profitToday:     acc.profitToday     + b.profitToday,
-      profitTodayRate: acc.profitTodayRate + b.profitTodayRate,
-      totalUsd:        (acc.totalUsd ?? 0) + (b.totalUsd ?? 0),
-      usdtKrw:         b.usdtKrw ?? acc.usdtKrw,
+      total:       acc.total       + b.total,
+      invested:    acc.invested    + b.invested,
+      available:   acc.available   + b.available,
+      profitTotal: acc.profitTotal + b.profitTotal,
+      profitToday: acc.profitToday + b.profitToday,
+      totalUsd:    (acc.totalUsd ?? 0) + (b.totalUsd ?? 0),
+      usdtKrw:     b.usdtKrw ?? acc.usdtKrw,
     }),
-    { total: 0, invested: 0, available: 0, profitTotal: 0, profitRate: 0, profitToday: 0, profitTodayRate: 0 },
+    { total: 0, invested: 0, available: 0, profitTotal: 0, profitToday: 0, totalUsd: 0, usdtKrw: undefined as number | undefined },
   );
+  const totalInvested = summed.invested || 1;
+  return {
+    ...summed,
+    profitRate:      (summed.profitTotal / totalInvested) * 100,
+    profitTodayRate: (summed.profitToday / totalInvested) * 100,
+  } as Balance;
 }
 
 // KST 형식 "2025.01.19 (일) 18:07" → UTC Unix 초
@@ -225,7 +229,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
           setHistoryVersion((v) => v + 1);
           console.log('[balance-history] remote sync 완료 — 홈 차트 갱신');
         }
-      }).catch(() => {});
+      }).catch((e) => console.error('[balance-history] sync error:', e));
     }
   }, []);
 
@@ -233,21 +237,17 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     syncFromBackend();
   }, []);
 
-  // 로그인 후 토큰이 생기면 재동기화 (토큰 없이 마운트된 경우 대비)
+  // 로그인 후 토큰이 생기면 재동기화 (다른 탭에서 로그인한 경우)
   useEffect(() => {
     if (Platform.OS !== 'web') return;
-    let lastToken = localStorage.getItem(TOKEN_KEY);
-
-    const interval = setInterval(() => {
-      const current = localStorage.getItem(TOKEN_KEY);
-      if (current && current !== lastToken) {
-        lastToken = current;
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === TOKEN_KEY && e.newValue && e.newValue !== e.oldValue) {
         console.log('[accounts] 토큰 감지 → 백엔드 재동기화');
         syncFromBackend();
       }
-    }, 1000);
-
-    return () => clearInterval(interval);
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, [syncFromBackend]);
 
   // 잔고 자동 fetch — 첫 로드만 로딩 표시, 이후 5초 폴링은 silent
@@ -295,7 +295,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
       Promise.all([
         pushBalanceHistory(),
         ...accIds.map((id) => pushBalanceHistory(id)),
-      ]).catch(() => {});
+      ]).catch((e) => console.error('[balance-history] push error:', e));
     }
   }, []);
 
@@ -377,7 +377,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
                 }
               });
           })
-          .catch(() => {});
+          .catch((e) => console.error('[ict] capture error:', e));
       }
     } catch (e) {
       console.error('[positions] refresh error:', e);
@@ -418,7 +418,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     const next = [...accountsRef.current, account];
     await localSave(next);
     setAccounts(next);
-    backendSave(next);   // background
+    backendSave(next).catch((e) => console.error('[accounts] backendSave failed:', e));
 
     // orphan balance_history 흡수 (exchange_accounts 초기화 후 재등록 케이스).
     // 활성 account_id 전체를 keep 목록으로 보내 기존 계좌 이력은 건드리지 않음.
@@ -427,7 +427,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
       .then((n) => {
         if (n > 0) console.log(`[accounts] orphan balance_history ${n}개를 신규 계좌로 흡수`);
       })
-      .catch(() => {});
+      .catch((e) => console.error('[accounts] claimOrphan failed:', e));
 
     return account;
   }, []);
@@ -439,7 +439,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     const next = accountsRef.current.map((a) => a.id === id ? { ...a, ...updates } : a);
     await localSave(next);
     setAccounts(next);
-    backendSave(next);   // background
+    backendSave(next).catch((e) => console.error('[accounts] backendSave failed:', e));
   }, []);
 
   const removeAccount = useCallback(async (id: string): Promise<void> => {
@@ -447,7 +447,7 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
     await localSave(next);
     setAccounts(next);
     setBalances((prev) => { const n = { ...prev }; delete n[id]; return n; });
-    backendSave(next);   // background
+    backendSave(next).catch((e) => console.error('[accounts] backendSave failed:', e));
   }, []);
 
   return (

@@ -62,7 +62,7 @@ export class ApiError extends Error {
 // ─── Internal fetch with retry ───────────────────────────────────────────────
 
 let isRefreshing = false;
-let refreshQueue: Array<(token: string) => void> = [];
+let refreshQueue: Array<{ resolve: (token: string) => void; reject: (err: unknown) => void }> = [];
 
 async function refreshAccessToken(): Promise<string> {
   const refreshToken = await tokenStorage.getRefresh();
@@ -100,15 +100,21 @@ async function request<T>(
   // 401 → refresh → retry once
   if (res.status === 401 && retry) {
     if (isRefreshing) {
-      const newToken = await new Promise<string>((resolve) => refreshQueue.push(resolve));
+      const newToken = await new Promise<string>((resolve, reject) => {
+        refreshQueue.push({ resolve, reject });
+      });
       return request<T>(path, options, false);
     }
     isRefreshing = true;
     try {
       const newToken = await refreshAccessToken();
-      refreshQueue.forEach((cb) => cb(newToken));
+      refreshQueue.forEach((cb) => cb.resolve(newToken));
       refreshQueue = [];
       return request<T>(path, options, false);
+    } catch (err) {
+      refreshQueue.forEach((cb) => cb.reject(err));
+      refreshQueue = [];
+      throw err;
     } finally {
       isRefreshing = false;
     }

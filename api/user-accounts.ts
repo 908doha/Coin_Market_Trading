@@ -12,59 +12,9 @@
  *   SUPABASE_SERVICE_ROLE_KEY — service_role 키 (Settings > API)
  */
 
-import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
-
-// ── JWT payload decode (검증 없이 userId 추출) ────────────────────────────────
-function decodeJwtPayload(token: string): { user_id?: number; id?: number; sub?: string } | null {
-  try {
-    const parts = token.split('.');
-    if (parts.length < 2) return null;
-    const pad     = (s: string) => s + '='.repeat((4 - s.length % 4) % 4);
-    const decoded = Buffer.from(pad(parts[1]), 'base64url').toString('utf8');
-    return JSON.parse(decoded);
-  } catch {
-    return null;
-  }
-}
-
-function getUserId(req: any): string | null {
-  const auth = req.headers?.authorization ?? req.headers?.Authorization ?? '';
-  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-  if (!token) return null;
-  const payload = decodeJwtPayload(token);
-  if (!payload) return null;
-  const id = payload.user_id ?? payload.id ?? payload.sub;
-  return id != null ? String(id) : null;
-}
-
-// ── AES-256-GCM 암호화 ────────────────────────────────────────────────────────
-function getKey(): Buffer {
-  const secret = process.env.ACCOUNTS_ENCRYPTION_KEY ?? 'default_dev_key_change_in_prod!!';
-  return crypto.scryptSync(secret, 'accounts_salt_v1', 32);
-}
-
-function encrypt(plain: string): string {
-  const key = getKey();
-  const iv  = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-  const enc = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return [iv.toString('hex'), enc.toString('hex'), tag.toString('hex')].join(':');
-}
-
-function decrypt(encoded: string): string {
-  const parts = encoded.split(':');
-  if (parts.length !== 3) throw new Error('Invalid encrypted data format');
-  const [ivHex, encHex, tagHex] = parts;
-  const key     = getKey();
-  const iv      = Buffer.from(ivHex,  'hex');
-  const enc     = Buffer.from(encHex, 'hex');
-  const tag     = Buffer.from(tagHex, 'hex');
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-  decipher.setAuthTag(tag);
-  return decipher.update(enc).toString('utf8') + decipher.final('utf8');
-}
+import { getUserId, setCors } from './_auth';
+import { encrypt, decrypt } from './_encryption';
 
 // ── Supabase 클라이언트 (service_role — RLS 무시, 서버 전용) ─────────────────
 function getSupabase() {
@@ -95,16 +45,9 @@ async function dbUpsert(userId: string, enc: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
-// ── CORS 헤더 ─────────────────────────────────────────────────────────────────
-function setCors(res: any) {
-  res.setHeader('Access-Control-Allow-Origin',  '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Authorization,Content-Type');
-}
-
 // ── Handler ───────────────────────────────────────────────────────────────────
 export default async function handler(req: any, res: any) {
-  setCors(res);
+  setCors(res, 'GET,POST,OPTIONS');
   if (req.method === 'OPTIONS') { res.status(200).end(); return; }
 
   const userId = getUserId(req);

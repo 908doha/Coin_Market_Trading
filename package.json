@@ -9,9 +9,11 @@
   ],
   "dependencies": {
     "@supabase/supabase-js": "^2.103.0",
+    "jsonwebtoken": "^9.0.3",
     "pg": "^8.13.3"
   },
   "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/pg": "^8.11.10"
   },
   "scripts": {

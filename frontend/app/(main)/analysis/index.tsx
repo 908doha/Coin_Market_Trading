@@ -10,10 +10,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Animated, {
-  useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS,
+  useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS, LinearTransition,
 } from 'react-native-reanimated';
 import Svg, { Path, Polygon, Rect, Text as SvgText, Circle } from 'react-native-svg';
-import { Text, FadeTabView, AnimatedNumber, Skeleton, PressableScale, CurrencyToggle } from '@/design-system';
+import { Text, FadeTabView, AnimatedNumber, Skeleton, PressableScale } from '@/design-system';
 import { colors } from '@/design-system/tokens';
 import { useAccounts, EXCHANGE_LABELS, EXCHANGE_COLORS, ExchangeType, ExchangeAccount } from '@/store/accounts';
 import { tradesService } from '@/services';
@@ -261,15 +261,19 @@ function formatVol(usd: number): string {
 
 // ─── 종목 행 (포지션 현황과 동일한 디자인) ─────────────────────────────────────
 
-function TickerRow({
-  ticker, idx, onPress, isLast, ictScore, ictDirection,
+// React.memo 로 감싸 폴링/state 변화 시 prop 미변경 row 의 불필요한 재렌더를 차단.
+// onAnalyze/contract 분리해 부모 매 렌더마다 새 arrow 가 만들어지지 않도록 함 (memo 효과 유지).
+const TickerRow = React.memo(function TickerRowImpl({
+  ticker, idx, onAnalyze, isLast, ictScore, ictDirection, pillars,
 }: {
   ticker: Ticker; idx: number;
-  onPress: () => void;
+  onAnalyze: (contract: string) => void;
   isLast: boolean;
   ictScore?:     number | null;
   ictDirection?: 'LONG' | 'SHORT' | null;
+  pillars?:      { bias: boolean; poi: boolean; sweep: boolean; mss: boolean; rr: boolean } | null;
 }) {
+  const onPress = React.useCallback(() => onAnalyze(ticker.contract), [onAnalyze, ticker.contract]);
   const changeColor = ticker.change24h > 0
     ? colors.market.rise
     : ticker.change24h < 0
@@ -298,6 +302,13 @@ function TickerRow({
       <View style={{ flex: 1 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <Text style={tr.coin}>{ticker.coin}</Text>
+          {pillars && (
+            <View style={tr.pillars}>
+              {(['bias', 'poi', 'sweep', 'mss', 'rr'] as const).map((p) => (
+                <View key={p} style={[tr.pillarDot, pillars[p] ? tr.pillarOn : tr.pillarOff]} />
+              ))}
+            </View>
+          )}
           {ticker.name && <Text style={tr.name} numberOfLines={1}>{ticker.name}</Text>}
         </View>
         <Text style={tr.price}>
@@ -335,7 +346,7 @@ function TickerRow({
       </View>
     </PressableScale>
   );
-}
+});
 
 const tr = StyleSheet.create({
   row:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14 },
@@ -350,6 +361,10 @@ const tr = StyleSheet.create({
   change:     { fontSize: 14, fontWeight: '600' },
   chip:       { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, minWidth: 28, alignItems: 'center' },
   chipText:   { fontSize: 12, fontWeight: '700' },
+  pillars:    { flexDirection: 'row', gap: 3, alignItems: 'center' },
+  pillarDot:  { width: 6, height: 6, borderRadius: 3 },
+  pillarOn:   { backgroundColor: '#1AC24E' },   // 통과 = 녹색
+  pillarOff:  { backgroundColor: '#E5E5EA' },   // 미통과 = 옅은 회색
 });
 
 // ─── 메인 ─────────────────────────────────────────────────────────────────────
@@ -363,9 +378,23 @@ export default function Analysis() {
   const [tickers, setTickers]   = useState<Ticker[]>([]);
   const [tickersLoading, setTickersLoading] = useState(true);
   const [search,  setSearch]    = useState('');
-  const [sortBy,  setSortBy]    = useState<'volume' | 'ict'>('volume');
-  // contract → { score, direction }. undefined = 미조회, null = 실패
-  const [ictScores, setIctScores] = useState<Record<string, { score: number; direction: 'LONG' | 'SHORT' | null } | null>>({});
+  const [sortBy,  setSortBy]    = useState<'volume' | 'ict'>('ict');
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
+  const sortBtnRef = React.useRef<View>(null);
+  const [sortMenuPos, setSortMenuPos] = useState({ top: 0, right: 0 });
+  useBlurOnOpen(sortMenuOpen);
+  // contract → { score, direction, signal, pillars, passCount }. undefined = 미조회, null = 실패
+  // ICT 5-Pillar 게이트 — 안정적 진입을 위해 모두 충족하는 것이 이상.
+  // bias: HTF 방향 명확 / poi: HTF POI 진입 중 / sweep: 유동성 sweep 발생
+  // mss : MTF 구조 전환 / rr : R:R ≥ 2 + SL 미메움 FVG 밖
+  type Pillars = { bias: boolean; poi: boolean; sweep: boolean; mss: boolean; rr: boolean };
+  const [ictScores, setIctScores] = useState<Record<string, {
+    score:     number;
+    direction: 'LONG' | 'SHORT' | null;   // htf 추세 (호환)
+    signal:    'long' | 'short' | null;   // 종합 신호
+    pillars:   Pillars;
+    passCount: number;                    // 0..5
+  } | null>>({});
   const [ictScanProgress, setIctScanProgress] = useState<{ done: number; total: number } | null>(null);
 
   const { accounts, balances, totalBalance } = useAccounts();
@@ -397,7 +426,8 @@ export default function Analysis() {
   const kelly = useMemo(() => computeKelly(trades), [trades]);
 
   // 시장 스캔 종목 로드 (서버: Gate.io tickers 전량 → fallback: CoinGecko top 50)
-  useEffect(() => {
+  // bust 가 증가하면 캐시 우회용 query string 추가해 강제 재조회.
+  const reloadTickers = useCallback(async (bust = 0) => {
     const COINGECKO =
       'https://api.coingecko.com/api/v3/coins/markets' +
       '?vs_currency=usd&order=market_cap_desc&per_page=50&page=1' +
@@ -415,24 +445,33 @@ export default function Analysis() {
         fundingRate:  0,
       }));
 
-    // 서버 프록시 먼저, 실패 시 CoinGecko 직접 호출
-    fetch(`${API_BASE}/api/market-scan`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (Array.isArray(data) && data.length) {
-          setTickers(data);
-        } else {
-          throw new Error('empty');
-        }
-      })
-      .catch(() =>
-        fetch(COINGECKO)
-          .then((r) => r.json())
-          .then((coins: any[]) => Array.isArray(coins) && setTickers(mapCoins(coins)))
-          .catch(() => {}),
-      )
-      .finally(() => setTickersLoading(false));
+    setTickersLoading(true);
+    try {
+      const url = bust > 0 ? `${API_BASE}/api/market-scan?_=${bust}` : `${API_BASE}/api/market-scan`;
+      const r = await fetch(url, bust > 0 ? { cache: 'no-store' } : undefined);
+      const data = await r.json();
+      if (Array.isArray(data) && data.length) { setTickers(data); return; }
+      throw new Error('empty');
+    } catch {
+      try {
+        const r = await fetch(COINGECKO);
+        const coins = await r.json();
+        if (Array.isArray(coins)) setTickers(mapCoins(coins));
+      } catch { /* 무시 */ }
+    } finally {
+      setTickersLoading(false);
+    }
   }, []);
+
+  useEffect(() => { reloadTickers(); }, [reloadTickers]);
+
+  // 새로고침 — ICT 점수 캐시 + 진행률 초기화 후 ticker 재조회.
+  // useEffect (sortBy='ict') 가 자동으로 미평가 종목 재스캔.
+  const refreshScan = useCallback(() => {
+    setIctScores({});
+    setIctScanProgress(null);
+    reloadTickers(Date.now());
+  }, [reloadTickers]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toUpperCase();
@@ -469,6 +508,48 @@ export default function Analysis() {
     let done      = 0;
     setIctScanProgress({ done: 0, total: targets.length });
 
+    // ICT 정통 5-Pillar 평가. 안정적 진입을 위해 충족해야 하는 5가지 게이트.
+    // 각 항목 boolean → 5개 점으로 시각화. 0~5 통과 카운트로 등급 표시.
+    const evaluatePillars = (d: any): { pillars: Pillars; passCount: number } => {
+      const sig  = d?.summary?.signal as string | null;     // 'long' | 'short' | null
+      const dir  = d?.htf?.direction  as string | null;     // 'BULLISH' | 'BEARISH' | null
+      const sl   = d?.summary?.sl     as number | null;
+      const rr   = parseFloat(d?.summary?.rr ?? '0') || 0;
+
+      // 1) HTF Bias 확정 — 방향 우위(edge)
+      const bias = dir === 'BULLISH' || dir === 'BEARISH';
+
+      // 2) POI 진입 중 — 현재가가 HTF Order Block / FVG 안
+      const poi = d?.htf?.inPOI === true;
+
+      // 3) Liquidity Sweep — bias 방향과 정합되는 sweep 또는 임의 session sweep
+      //    BULLISH 진입은 PDL/세션 low sweep 후 반등이 정통, BEARISH 는 PDH sweep
+      const pdhSweep = d?.htf?.pdhSweep === true;
+      const pdlSweep = d?.htf?.pdlSweep === true;
+      const anySessionSweep = Array.isArray(d?.sessions) && d.sessions.some((s: any) => s?.sweep);
+      const directionalSweep =
+        (dir === 'BEARISH' && pdhSweep) ||
+        (dir === 'BULLISH' && pdlSweep);
+      const sweep = directionalSweep || anySessionSweep;
+
+      // 4) MTF MSS — 구조 전환 확인 (sweep 후 진짜 반전인지 검증)
+      const mss = d?.mtf?.mss?.found === true;
+
+      // 5) R:R + SL 안전 — R:R ≥ 2 AND SL 이 동일 방향 미메움(<70%) MTF FVG 밖
+      let slSafe = true;
+      if (sig && sl != null) {
+        const lastBear = d?.mtf?.fvg?.lastBear;
+        const lastBull = d?.mtf?.fvg?.lastBull;
+        if (sig === 'short' && lastBear && lastBear.fillPct < 70 && sl < lastBear.ce) slSafe = false;
+        if (sig === 'long'  && lastBull && lastBull.fillPct < 70 && sl > lastBull.ce) slSafe = false;
+      }
+      const rrPass = rr >= 2.0 && slSafe;
+
+      const pillars: Pillars = { bias, poi, sweep, mss, rr: rrPass };
+      const passCount = Number(bias) + Number(poi) + Number(sweep) + Number(mss) + Number(rrPass);
+      return { pillars, passCount };
+    };
+
     const runOne = async (contract: string) => {
       try {
         const res = await fetch(`${API_BASE}/api/ict-analyze`, {
@@ -484,11 +565,16 @@ export default function Analysis() {
           return;
         }
         const dir = data?.htf?.direction;
+        const sig = data?.summary?.signal;
+        const { pillars, passCount } = evaluatePillars(data);
         setIctScores((prev) => ({
           ...prev,
           [contract]: {
             score:     data.score,
             direction: dir === 'LONG' || dir === 'SHORT' ? dir : null,
+            signal:    sig === 'long' || sig === 'short' ? sig : null,
+            pillars,
+            passCount,
           },
         }));
       } catch {
@@ -619,7 +705,7 @@ export default function Analysis() {
                 </Svg>
               </Pressable>
 
-              {/* 정렬 토글 — CurrencyToggle 을 재사용해 UI 통일 */}
+              {/* 우측 컨트롤: 정렬 드롭다운 + 새로고침 */}
               {scanExpanded && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   {ictScanProgress && sortBy === 'ict' && (
@@ -627,13 +713,39 @@ export default function Analysis() {
                       {ictScanProgress.done}/{ictScanProgress.total}
                     </Text>
                   )}
-                  <CurrencyToggle
-                    showUsd={sortBy === 'ict'}
-                    onToggle={() => setSortBy((s) => (s === 'volume' ? 'ict' : 'volume'))}
-                    leftLabel="거래량"
-                    rightLabel="ICT"
-                    pillWidth={54}
-                  />
+                  <Pressable
+                    ref={sortBtnRef}
+                    style={st.sortDropBtn}
+                    onPress={() => {
+                      sortBtnRef.current?.measureInWindow((x, y, w, h) => {
+                        setSortMenuPos({ top: y + h + 8, right: 20 });
+                        setSortMenuOpen(true);
+                      });
+                    }}
+                  >
+                    <Text style={st.sortDropLabel} numberOfLines={1}>
+                      {sortBy === 'ict' ? 'ICT 점수 순' : '거래량 순'}
+                    </Text>
+                    <Svg width={12} height={12} viewBox="0 0 24 24" fill="none">
+                      <Path d="M6 9l6 6 6-6" stroke="#AEAEB2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </Svg>
+                  </Pressable>
+                  <Pressable
+                    onPress={refreshScan}
+                    hitSlop={8}
+                    style={st.refreshBtn}
+                    disabled={!!ictScanProgress || tickersLoading}
+                  >
+                    <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                      <Path
+                        d="M21 12a9 9 0 1 1-3.5-7.1M21 4v5h-5"
+                        stroke={(ictScanProgress || tickersLoading) ? '#C7C7CC' : '#246CF9'}
+                        strokeWidth="2.2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </Svg>
+                  </Pressable>
                 </View>
               )}
             </View>
@@ -673,17 +785,26 @@ export default function Analysis() {
                   </View>
 
                   {filtered.map((ticker, idx) => {
-                    const entry = sortBy === 'ict' ? ictScores[ticker.contract] : undefined;
+                    const cached = ictScores[ticker.contract];
+                    const entry  = sortBy === 'ict' ? cached : undefined;
                     return (
-                      <TickerRow
+                      // LinearTransition: 순위 변동 시 위/아래로 부드럽게 이동.
+                      // 웹 호환을 위해 spring 사용 (Easing.bezier 는 RN Web 미지원으로 경고 발생).
+                      // damping 32 + stiffness 60 + mass 1 → 거의 critically damped, 길고 부드러운 glide.
+                      <Animated.View
                         key={ticker.contract}
-                        ticker={ticker}
-                        idx={idx}
-                        onPress={() => analyze(ticker.contract)}
-                        isLast={idx === filtered.length - 1}
-                        ictScore={sortBy === 'ict' ? (entry === undefined ? null : entry?.score ?? null) : undefined}
-                        ictDirection={sortBy === 'ict' ? (entry?.direction ?? null) : undefined}
-                      />
+                        layout={LinearTransition.springify().damping(32).stiffness(60).mass(1)}
+                      >
+                        <TickerRow
+                          ticker={ticker}
+                          idx={idx}
+                          onAnalyze={analyze}
+                          isLast={idx === filtered.length - 1}
+                          ictScore={sortBy === 'ict' ? (entry === undefined ? null : entry?.score ?? null) : undefined}
+                          ictDirection={sortBy === 'ict' ? (entry?.direction ?? null) : undefined}
+                          pillars={cached?.pillars ?? null}
+                        />
+                      </Animated.View>
                     );
                   })}
                 </>
@@ -704,6 +825,47 @@ export default function Analysis() {
           balances={balances}
           totalBalance={totalBalance}
         />
+
+        {/* 정렬 드롭다운 메뉴 — 홈 계좌 picker 와 동일 구조 */}
+        <Modal
+          visible={sortMenuOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setSortMenuOpen(false)}
+        >
+          <Pressable style={st.sortMenuOverlay} onPress={() => setSortMenuOpen(false)}>
+            <View style={[st.sortMenuSheet, { position: 'absolute', top: sortMenuPos.top, right: sortMenuPos.right }]}>
+              {([
+                { key: 'ict' as const,    label: 'ICT 점수 순' },
+                { key: 'volume' as const, label: '거래량 순' },
+              ]).map((opt, idx, arr) => {
+                const isSel = sortBy === opt.key;
+                return (
+                  <Pressable
+                    key={opt.key}
+                    style={({ pressed }) => [
+                      st.sortMenuItem,
+                      idx < arr.length - 1 && st.sortMenuDivider,
+                      pressed && { backgroundColor: '#F8F8F8' },
+                    ]}
+                    onPress={() => { setSortBy(opt.key); setSortMenuOpen(false); }}
+                  >
+                    <View style={st.sortMenuCheck}>
+                      {isSel && (
+                        <Svg width={16} height={16} viewBox="0 0 24 24">
+                          <Path d="M5 13l4 4L19 7" stroke="#246CF9" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                        </Svg>
+                      )}
+                    </View>
+                    <Text style={[st.sortMenuLabel, isSel && { color: '#246CF9', fontWeight: '700' }]}>
+                      {opt.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </Pressable>
+        </Modal>
       </SafeAreaView>
     </FadeTabView>
   );
@@ -733,6 +895,15 @@ const st = StyleSheet.create({
   scanTitle:    { fontSize: 17, fontWeight: '700', color: '#191919' },
 
   sortBtnProgress: { fontSize: 11, color: colors.text.tertiary, fontWeight: '600' },
+  refreshBtn:      { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg.elevated, borderWidth: 1, borderColor: colors.border.default },
+  sortDropBtn:    { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#F0F0F5', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, maxWidth: 140 },
+  sortDropLabel:  { fontSize: 12, fontWeight: '600', color: '#555', flexShrink: 1 },
+  sortMenuOverlay: { flex: 1, backgroundColor: 'transparent' },
+  sortMenuSheet:   { minWidth: 160, backgroundColor: '#FFF', borderRadius: 14, paddingVertical: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.14, shadowRadius: 20, elevation: 12 },
+  sortMenuItem:    { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12, gap: 10 },
+  sortMenuDivider: { borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
+  sortMenuCheck:   { width: 16, alignItems: 'center', justifyContent: 'center' },
+  sortMenuLabel:   { fontSize: 14, color: '#191919' },
 
   searchWrap:  { marginHorizontal: 20, marginBottom: 8 },
   searchInput: {
